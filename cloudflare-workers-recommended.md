@@ -168,6 +168,7 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: deploy
+          wranglerVersion: "4"
 ```
 
 > [!NOTE] How this differs from the Pages-era draft (`cloudflare.md`, Approach B)
