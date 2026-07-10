@@ -1,0 +1,8 @@
+{
+  "name": "meteosynth-docs",
+  "compatibility_date": "2026-07-01",
+  "assets": {
+    "directory": "./docs/build/html",
+    "not_found_handling": "404-page"
+  }
+}
