@@ -28,7 +28,7 @@ dependencies = [
 [project.urls]
 Homepage = "https://github.com/npapnet/meteosynth"
 Repository = "https://github.com/npapnet/meteosynth.git"
-Documentation = "meteosynth-docs.npapnet-cloudflare.workers.dev"
+Documentation = "https://meteosynth-docs.npapnet-cloudflare.workers.dev"
 # Documentation = "https://meteosynth.pages.dev"
 
 [project.optional-dependencies]
