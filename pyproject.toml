@@ -28,7 +28,8 @@ dependencies = [
 [project.urls]
 Homepage = "https://github.com/npapnet/meteosynth"
 Repository = "https://github.com/npapnet/meteosynth.git"
-Documentation = "https://meteosynth.pages.dev"
+Documentation = "meteosynth-docs.npapnet-cloudflare.workers.dev"
+# Documentation = "https://meteosynth.pages.dev"
 
 [project.optional-dependencies]
 # Extra statistical-plotting helpers used by ``meteosynth.sup_plot_lib`` only.
