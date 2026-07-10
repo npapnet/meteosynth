@@ -7,6 +7,13 @@ authors = [
     { name = "N.Papadakis (hmuQ)", email = "npap@hmu.gr" }
 ]
 requires-python = ">=3.10"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Topic :: Scientific/Engineering :: Atmospheric Science",
+]
+
 dependencies = [
     "numpy>=1.22.0",
     "pandas>=1.4.0",
@@ -17,6 +24,11 @@ dependencies = [
     # (plotting helpers are first-class methods), so it is a hard dependency.
     "matplotlib>=3.5.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/npapnet/meteosynth"
+Repository = "https://github.com/npapnet/meteosynth.git"
+Documentation = "https://meteosynth.pages.dev"
 
 [project.optional-dependencies]
 # Extra statistical-plotting helpers used by ``meteosynth.sup_plot_lib`` only.
