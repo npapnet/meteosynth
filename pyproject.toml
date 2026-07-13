@@ -23,6 +23,7 @@ dependencies = [
     # matplotlib is imported unconditionally by the core simulator modules
     # (plotting helpers are first-class methods), so it is a hard dependency.
     "matplotlib>=3.5.0",
+    "seaborn>=0.11.0",
 ]
 
 [project.urls]
@@ -30,13 +31,6 @@ Homepage = "https://github.com/npapnet/meteosynth"
 Repository = "https://github.com/npapnet/meteosynth.git"
 Documentation = "https://meteosynth-docs.npapnet-cloudflare.workers.dev"
 # Documentation = "https://meteosynth.pages.dev"
-
-[project.optional-dependencies]
-# Extra statistical-plotting helpers used by ``meteosynth.sup_plot_lib`` only.
-plot = [
-    "seaborn>=0.11.0",
-    "plotnine>=0.10.0",
-]
 
 [build-system]
 requires = ["hatchling"]

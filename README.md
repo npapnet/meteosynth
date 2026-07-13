@@ -25,14 +25,11 @@ Its primary target is **Monte-Carlo simulation of energy-project output and requ
 This package is managed using the `uv` tool. To install the package and its dependencies:
 
 ```bash
-# Sync core dependencies (numpy, pandas, scipy, pvlib, matplotlib) + dev group
+# Sync core dependencies (numpy, pandas, scipy, pvlib, matplotlib, seaborn) + dev group
 uv sync
-
-# Add the extra statistical-plotting helpers (seaborn, plotnine)
-uv sync --extra plot
 ```
 
-`matplotlib` is a core dependency (the simulators expose plotting helpers directly).
+`matplotlib` and `seaborn` are core dependencies (the simulators and plotting helpers expose plotting methods directly).
 The `dev` dependency group — installed by default with `uv sync` — provides the
 documentation toolchain (Sphinx, furo, Mermaid, MyST) and an interactive
 workflow (`jupyter`, `notebook`, `ipykernel`) for VS Code / JupyterLab.

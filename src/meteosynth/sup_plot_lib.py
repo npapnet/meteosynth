@@ -1,6 +1,5 @@
 import pandas as pd
 
-import plotnine as p9
 import seaborn as sns
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
@@ -10,32 +9,46 @@ from .met_data_processor import MetDataProcessor
 
 _f_month_name = lambda x: pd.to_datetime(f'2023-{x}-01').strftime('%B')
 
-def p9_month_by_year(mdp:MetDataProcessor, month_ind:int=5, value_col:str='poa_direct'):
+def plot_month_by_year_sns(mdp:MetDataProcessor, month_ind:int=5, value_col:str='poa_direct'):
     """
-    Create a plot of the monthly data for each year.
+    Create a faceted plot of the monthly data for each year using Seaborn.
     
     Parameters:
-    - month_data: DataFrame containing the data to plot.
+    - mdp: MetDataProcessor instance.
     - month_ind: Month index (1-12) to filter the data.
     - value_col: Column name for the value to plot.
     
     Returns:
-    - Plot object.
+    - FacetGrid object.
     """
     # Filter the data for the specified month
-    month_data = mdp.get_month_subset(month_ind)
-    # month_data["date_id"] = month_data["year"].astype(str) + "-" + month_data["month"].astype(str) + "-" + month_data["day"].astype(str)    
+    month_data = mdp.get_month_subset(month_ind).copy()
     
-    # Create the plot
-    p = (p9.ggplot(month_data) 
-         + p9.aes(x='hour', y=value_col, group='date_id', color='factor(year)') 
-         + p9.geom_line(alpha=0.2)
-         + p9.facet_grid('year ~ month',  scales='free_y')
-         + p9.theme(figure_size=(6, 20))
-         + p9.labs(title=f"PVGIS Hourly Data for {_f_month_name(month_ind)}", x="Hour of Day", y=value_col)
-        )
+    # Create the plot using FacetGrid
+    g = sns.FacetGrid(
+        month_data, 
+        row='year', 
+        col='month', 
+        hue='year', 
+        sharey=False, 
+        height=4, 
+        aspect=1.5
+    )
     
-    return p
+    g.map_dataframe(
+        sns.lineplot, 
+        x='hour', 
+        y=value_col, 
+        units='date_id', 
+        estimator=None, 
+        alpha=0.2
+    )
+    
+    g.set_axis_labels("Hour of Day", value_col)
+    g.fig.suptitle(f"PVGIS Hourly Data for {_f_month_name(month_ind)}", y=1.02)
+    plt.tight_layout()
+    
+    return g
 
 
 def plot_2d_kde_sns(month_data, value_str:str='poa_direct', 

@@ -15,7 +15,7 @@ uv run python examples/example_markov_generation.py
 visualisation side: fetch hourly data, wrap it in `MetDataProcessor`, subset a
 month, reshape to daily-wide format, and produce diagnostic plots via
 `sup_plot_lib` (2D KDE contours, hourly boxplots, mean ± error bars, and a
-plotnine faceted line plot).
+Seaborn faceted line plot).
 
 ```python
 from meteosynth import MetDataProcessor

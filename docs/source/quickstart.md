@@ -8,11 +8,8 @@ few minutes.
 `meteosynth` is managed with [uv](https://docs.astral.sh/uv/).
 
 ```bash
-# Core install (numpy, pandas, scipy, pvlib, matplotlib)
+# Install core dependencies (numpy, pandas, scipy, pvlib, matplotlib, seaborn)
 uv sync
-
-# Add the extra statistical-plotting helpers (seaborn, plotnine)
-uv sync --extra plot
 ```
 
 This installs `meteosynth` in editable mode, so edits under `src/meteosynth/`
