@@ -56,21 +56,29 @@ class MetDataProcessor():
         Note this is a *climatological* window, not a chronological one -- a Jan 2 2011
         target pools December 2011 as a proxy for "late-December climate".
 
-        Parameters:
-        month (int): Month of the target day (1-12).
-        day (int): Day of the target month.
-        n_days (int): Half-width of the window in days. Defaults to 15, giving a 31-day
-            window (~62 days pooled over 2 years, matching a month subset's sample size).
-            ``n_days=0`` selects the target day alone; any ``n_days >= 183`` selects the
-            whole year.
+        Parameters
+        ----------
+        month : int
+            Month of the target day (1-12).
+        day : int
+            Day of the target month.
+        n_days : int, optional
+            Half-width of the window in days. Defaults to 15, giving a 31-day window
+            (~62 days pooled over 2 years, matching a month subset's sample size).
+            ``n_days=0`` selects the target day alone; any ``n_days >= 183`` selects
+            the whole year.
 
-        Returns:
-        pd.DataFrame: Subset of the meteorological data for the window, with the same
-            ``date_id`` column that :meth:`get_month_subset` adds, plus the ``day_slot``
-            of each record.
+        Returns
+        -------
+        pd.DataFrame
+            Subset of the meteorological data for the window, with the same ``date_id``
+            column that :meth:`get_month_subset` adds, plus the ``day_slot`` of each
+            record.
 
-        Raises:
-        ValueError: If ``(month, day)`` is not a valid date, or ``n_days`` is negative.
+        Raises
+        ------
+        ValueError
+            If ``(month, day)`` is not a valid date, or ``n_days`` is negative.
         """
         n_days = int(n_days)
         if n_days < 0:

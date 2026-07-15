@@ -26,6 +26,14 @@ dependencies = [
     "seaborn>=0.11.0",
 ]
 
+[project.optional-dependencies]
+# Extras used only by the scripts under examples/, not by the package itself.
+# Install with:  uv sync --extra examples   (or  pip install meteosynth[examples])
+examples = [
+    # Progress bars for the long-running generation loops.
+    "tqdm>=4.66.0",
+]
+
 [project.urls]
 Homepage = "https://github.com/npapnet/meteosynth"
 Repository = "https://github.com/npapnet/meteosynth.git"

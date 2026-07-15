@@ -1,12 +1,14 @@
 # Examples
 
-Two runnable scripts live under `examples/`. Both fetch data from PVGIS on
+Four runnable scripts live under `examples/`. All fetch data from PVGIS on
 first run and cache it to `data/pvgis_hourly_data.xlsx`, so subsequent runs are
 offline and fast.
 
 ```bash
 uv run python examples/example_exploratory_analysis.py
 uv run python examples/example_markov_generation.py
+uv run python examples/example_rolling_window.py
+uv run python examples/example_synthetic_year.py     # ~80 s
 ```
 
 ## 1. Exploratory analysis
@@ -53,7 +55,78 @@ generator = EnvSeriesGenerator(may, attr_str="poa_direct")
 profiles = [generator.gen_day_sequence(start_value=0.0) for _ in range(10)]
 ```
 
-## 3. A Monte-Carlo sketch for energy output
+## 3. Rolling day windows
+
+`examples/example_rolling_window.py` contrasts the two training strategies. A
+month subset is *off-centre* — a May 1 model trained on all of May inherits May
+16's climate — and it *jumps*, since May 31 and June 1 share no training data at
+all. A rolling window is centred on its target and slides smoothly.
+
+The script demonstrates the year-boundary wrap, shows that Feb 29 needs no
+special handling, and generates profiles for the same target day from each
+strategy so the centring bias is visible.
+
+```python
+from meteosynth import MetDataProcessor, DayWindowGenerator
+
+mdp = MetDataProcessor(df)
+
+# Both pool ~62 days from the 2-year record, around different centres.
+may_month = mdp.get_month_subset(5)                          # all of May
+may_window = mdp.get_day_window_subset(5, 1, n_days=15)      # Apr 16 - May 16
+
+# The window wraps across New Year with no special-casing.
+new_year = mdp.get_day_window_subset(1, 2, n_days=4)         # Dec 29 - Jan 6
+
+# Feb 29 is an ordinary target.
+leap = DayWindowGenerator(mdp, attr_str="poa_direct").gen_day_sequence(2, 29)
+```
+
+```{note}
+With only two years of data both strategies pool ~62 days, so the window buys
+*centring* and *smoothness*, not sample size. See `docs/design/rolling-day-window.md`.
+```
+
+## 4. A full synthetic year
+
+`examples/example_synthetic_year.py` walks a 365-day non-leap calendar and draws
+one synthetic day per date for both `poa_direct` and `wind_speed`, writing an
+8760-hour series to `data/synthetic_year.csv`.
+
+Walking a real non-leap year means Feb 29 is simply never requested — there is no
+filtering or exclusion list. `DayWindowGenerator` fits each day on demand behind
+a small LRU cache, so the year holds a few hundred KB rather than the ~126 MB all
+366 fitted generators would cost.
+
+```python
+import pandas as pd
+from meteosynth import MetDataProcessor, DayWindowGenerator
+
+mdp = MetDataProcessor(df)
+generator = DayWindowGenerator(mdp, attr_str="wind_speed", n_days=15, cache_size=4)
+
+calendar = pd.date_range("2023-01-01", "2023-12-31", freq="D")   # 365 days
+previous = 3.9                                                   # hour-0 seed
+for date in calendar:
+    profile = generator.for_day(date.month, date.day).gen_day_sequence(
+        start_value=previous)
+    previous = profile[-1]        # chain: tomorrow's 00:00 follows tonight's 23:00
+```
+
+```{note}
+Each day is chained from the previous day's 23:00 value rather than started at a
+fixed `0.0`. Zero is right for irradiance at midnight, but it is a value wind
+*never* takes — it sits outside the hour-0 model's domain, forcing it to
+extrapolate. Chaining reduces to `0.0` automatically for irradiance.
+```
+
+The script checks itself against the data it learned from. On the shipped
+2011–2012 Paris record the seasonal shape tracks closely (correlation 0.95 for
+`poa_direct`, peak month May in both), while absolute irradiance overshoots by
+~13% — a known property of the KDE sampler at `bandwidth=0.1`, not of the
+window.
+
+## 5. A Monte-Carlo sketch for energy output
 
 Putting it together for the target use case — turning synthetic irradiance days
 into a distribution of daily energy yield:

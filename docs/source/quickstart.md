@@ -10,6 +10,9 @@ few minutes.
 ```bash
 # Install core dependencies (numpy, pandas, scipy, pvlib, matplotlib, seaborn)
 uv sync
+
+# Add the extras used by the example scripts (tqdm progress bars)
+uv sync --extra examples
 ```
 
 This installs `meteosynth` in editable mode, so edits under `src/meteosynth/`
@@ -50,7 +53,7 @@ an ensemble of days for Monte-Carlo analysis.
 
 ```{mermaid}
 flowchart LR
-    A[PVGIS hourly data] --> B[MetDataProcessor<br/>month subset]
+    A[PVGIS hourly data] --> B[MetDataProcessor<br/>month subset or<br/>rolling day window]
     B --> C[EnvSeriesGenerator<br/>24 hourly simulators]
     C --> D[generate_ensemble<br/>n_days &times; 24]
     D --> E[Energy Monte-Carlo]
@@ -78,6 +81,39 @@ day = gen.gen_day_sequence(start_value=0.0, seed=1)
 ensemble = gen.generate_ensemble(n_days=500, start_value=0.0, seed=1)
 daily_energy = ensemble.sum(axis=1)          # crude Wh/m2 per day proxy
 print(daily_energy.mean(), daily_energy.std())
+```
+
+## Choosing a training subset: month or rolling window
+
+`get_month_subset` is not the only option, and usually not the best one. A model
+for May 1 trained on *all of May* inherits May 16's climate, and May 31 shares no
+training data at all with June 1. A **rolling day window** is centred on its
+target and slides smoothly across month boundaries.
+
+```python
+from meteosynth import MetDataProcessor, DayWindowGenerator
+
+mdp = MetDataProcessor(df)
+
+# Both pool ~62 days from a 2-year record, around different centres:
+may_month = mdp.get_month_subset(5)                       # all of May
+may_window = mdp.get_day_window_subset(5, 1, n_days=15)   # Apr 16 - May 16
+
+# The window wraps across New Year, and Feb 29 is an ordinary target:
+new_year = mdp.get_day_window_subset(1, 2, n_days=4)      # Dec 29 - Jan 6
+leap = mdp.get_day_window_subset(2, 29)                   # centred on Feb 29
+
+# Either subset drops into EnvSeriesGenerator unchanged. For a whole calendar,
+# DayWindowGenerator fits each day on demand behind a small LRU cache, so you
+# never hold all 366 at once (~126 MB per attribute if you did).
+dwg = DayWindowGenerator(mdp, attr_str="poa_direct", n_days=15)
+feb29_day = dwg.gen_day_sequence(2, 29, seed=1)
+```
+
+```{note}
+With only two years of data both strategies pool ~62 days, so the window buys
+*centring* and *smoothness*, not sample size. See {doc}`theory` for the
+`all_leap` calendar that makes the wrap and the leap day fall out for free.
 ```
 
 ## Fetching real data from PVGIS
