@@ -160,10 +160,10 @@ def plot_comparison(mdp: MetDataProcessor, n_profiles: int = 25):
     print(f"   rolling window     :   {window_days.sum(axis=1).mean()/1000:5.2f}          "
           f"{_observed_daily_total(mdp.get_day_window_subset(5, 1, n_days=15)):5.2f}   kWh/m2")
     print("\n   The month model generates more sun, tracking the sunnier late-May climate")
-    print("   it was trained on. Both generators overshoot their own training data -- that")
-    print("   is a pre-existing property of the KDE sampler at bandwidth=0.1, unrelated to")
-    print("   the choice of window, and it is why these numbers are for comparing the two")
-    print("   strategies rather than for calibrated absolute yield.")
+    print("   it was trained on. Note both generators overshoot their own training data by")
+    print("   a similar margin: that is a known open issue (see TODOs.md), unrelated to the")
+    print("   choice of window. So these numbers are for comparing the two strategies, not")
+    print("   for calibrated absolute yield.")
     return fig
 
 

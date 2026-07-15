@@ -123,8 +123,17 @@ extrapolate. Chaining reduces to `0.0` automatically for irradiance.
 The script checks itself against the data it learned from. On the shipped
 2011–2012 Paris record the seasonal shape tracks closely (correlation 0.95 for
 `poa_direct`, peak month May in both), while absolute irradiance overshoots by
-~13% — a known property of the KDE sampler at `bandwidth=0.1`, not of the
-window.
+~13%.
+
+```{note}
+That overshoot is a known open issue (see `TODOs.md`), and it is not the rolling
+window — a month-based generator overshoots by the same margin. Nor is it simply
+the bandwidth: the bias survives every bandwidth, including Scott's rule.
+Irradiance piles against a hard floor at zero, and a symmetric kernel
+renormalised onto a `[0, max]` domain pushes mass upward. Treat absolute
+magnitudes as uncalibrated for zero-floored variables; the seasonal shape is
+sound.
+```
 
 ## 5. A Monte-Carlo sketch for energy output
 

@@ -229,10 +229,18 @@ chronological "±n days by timestamp" design would fail outright, since January 
   diurnal and seasonal statistics are consistent — a calendar month, or better,
   a rolling day window centred on the target.
 - **Kernel bandwidth matters.** Too small overfits the sample; too large washes
-  out real structure. Tune `bandwidth` per variable. The shipped default of
-  `0.1` reproduces seasonal *shape* well but overshoots absolute irradiance by
-  roughly 13% on the 2011–2012 Paris record, so treat magnitudes as uncalibrated
-  until you have tuned it for your site and variable.
+  out real structure. Tune `bandwidth` per variable — for `wind_speed` it is
+  decisive, where Scott's rule reproduces the observed mean exactly and `0.1`
+  overshoots by ~9%.
+- **Bounded variables are biased upward.** Generated irradiance overshoots by
+  ~13% on the 2011–2012 Paris record while reproducing the seasonal *shape*
+  faithfully (correlation 0.95). This is **not** fixable by tuning `bandwidth`:
+  the bias survives every bandwidth including Scott's rule. Irradiance piles
+  against a hard floor at zero, and a symmetric Gaussian kernel renormalised onto
+  a `[0, max]` domain pushes mass upward — the classic KDE boundary problem —
+  and the error then compounds along the 24-step walk (+6% for one step from
+  true values, +18% by midday). Treat absolute magnitudes as uncalibrated for
+  zero-floored variables. See `TODOs.md`.
 - **Thin samples in short records.** Sample size scales as
   $(2n + 1) \times n_\text{years}$ for a window, or $\sim 30 \times
   n_\text{years}$ for a month. Two years gives ~61 pairs per hourly KDE — thin

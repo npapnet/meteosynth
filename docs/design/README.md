@@ -44,5 +44,6 @@ dataset (`data/pvgis_hourly_data.xlsx`) over estimates, and say which is which.
 
 | document | status | what it is |
 |---|---|---|
+| [variable-specs-and-initialisation.md](variable-specs-and-initialisation.md) | **proposed** | Give each quantity an explicit physical support; replace `start_value` with a fitted initial distribution π(x₀) plus a real cross-midnight transition; truncate sampling to the support. Fixes negative irradiance, out-of-domain crashes, and the hour-0 quirk. Breaking — targets 0.2.0. |
 | [rolling-day-window.md](rolling-day-window.md) | implemented | A rolling ±n-day training window as an alternative to the month split, incl. the `all_leap` calendar, Feb 29 handling, and why generators are built lazily rather than persisted. |
 | [transition-pair-alignment.md](transition-pair-alignment.md) | explainer | Plain-language account of why `previous`/`current` pairs must be matched by date rather than row position, and how an innocent `sort_values` silently corrupts 26,808 training pairs. |
