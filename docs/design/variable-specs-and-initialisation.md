@@ -200,7 +200,7 @@ than hoped for.
 
 > **Note**
 >
-> This fixes the *negatives*, not the *+13% overshoot* (TODOs.md item 1). Truncation stops
+> This fixes the *negatives*, not the *+13% overshoot* (TODOs.md item 2). Truncation stops
 > mass escaping below the bound; it does not undo the upward push of a symmetric kernel
 > renormalised against that bound. Transform-fit-invert and kernel reflection were
 > considered and are the candidates for that separate fix. Keeping them separate is
@@ -343,7 +343,7 @@ Deliberately out of scope here; noted so the spec design does not foreclose it.
 - **Bandwidth per spec?** `wind_speed` wants Scott's rule (0% bias) while the shipped
   default of `0.1` overshoots it by ~9%. A `default_bandwidth` field on `VariableSpec`
   is tempting, but it mixes a *physical* description with a *fitting* hyper-parameter.
-  Deferred pending the bias work (TODOs.md item 1).
+  Deferred pending the bias work (TODOs.md item 2).
 - **Does `generate_series` need the window at all?** Chaining across midnight within a
   climatological window means day *d*'s model and day *d+1*'s model are different fits.
   That is intended, but the interaction with cross-midnight pairs deserves a test.

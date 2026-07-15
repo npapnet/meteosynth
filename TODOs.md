@@ -5,7 +5,94 @@ to re-derive it. Design rationale lives in [`docs/design/`](docs/design/README.m
 
 ---
 
-## 1. Generated irradiance is systematically ~13% too high
+## 1. Leap years and the end of February — verify and lock in
+
+**Status:** HIGH PRIORITY · behaviour appears **correct**, but is untested and
+undemonstrable · **Impact:** confidence, not (as far as measured) correctness
+
+The shipped record is 2 years (2011–2012) with exactly one leap day, so **no test and no
+example exercises the cases that actually matter**: a multi-year record with several leap
+years, or a record with none at all. The behaviour cannot currently be seen working, which
+is reason enough to distrust it.
+
+### The two questions
+
+**Q1 — With a 10-year record containing leap years, does a Feb 28 window pick up Feb 29
+from the leap years *and* Mar 1 from all years?**
+
+Measured on a synthetic 2011–2020 record (leap: 2012, 2016, 2020),
+`get_day_window_subset(2, 28, n_days=2)`:
+
+| calendar day | years contributing |
+|---|---|
+| 02-26 | 10 |
+| 02-27 | 10 |
+| 02-28 | 10 |
+| **02-29** | **3** — the leap years only |
+| 03-01 | 10 |
+
+**Yes — this is correct.** Feb 29 observations are pooled from the years that have them;
+Mar 1 from all ten.
+
+**Q2 — With a record containing *no* leap years, can Feb 29 still be generated from late
+February and early March?**
+
+Measured on a synthetic 2021–2023 record (no leap years),
+`get_day_window_subset(2, 29, n_days=15)` returns **90 days spanning Feb 14 – Mar 15**,
+containing no real Feb 29, and `wind_speed` / `temp_air` generate cleanly from it.
+
+**Yes — this is correct too.** Slot 60 simply contributes nothing, and the target is
+synthesised from its neighbours.
+
+### What is genuinely worth knowing
+
+- **Non-leap years contribute one day fewer** to *any* window spanning slot 60. On the
+  10-year record every target from Feb 27 to Mar 2 pools **303** days rather than the
+  310 an unaffected target (e.g. Jun 15) pools. This is faithful to the calendar — those
+  days do not exist — but it should be stated, not discovered.
+- **A Feb 29 generator is mostly interpolation.** Even with leap years present, only
+  3 of 10 years contribute a real Feb 29, so the Feb-29 model is overwhelmingly built from
+  its neighbours. With no leap years it is *entirely* so. That is the intended design, but
+  a user reading "synthetic Feb 29" deserves to know it is not built from observed Feb 29s.
+
+### Work required
+
+1. **Tests** (`tests/test_leap_year_windows.py`) over a synthetic **multi-year** fixture
+   (e.g. 2011–2020, leap: 2012/2016/2020) and a **leap-free** fixture (2021–2023):
+   - Q1 as exact year-count assertions per calendar day (the table above).
+   - Q2: a Feb 29 window on leap-free data is non-empty, spans Feb 14 – Mar 15, contains
+     no real Feb 29, and `DayWindowGenerator.for_day(2, 29)` builds and generates.
+   - Feb 29 data appears in every window whose slot range covers 60, and in none that
+     does not (check the boundary: n_days too small to reach it).
+   - The 303-vs-310 deficit is exactly `n_non_leap_years` per affected target.
+   - Symmetry: targets Feb 27 … Mar 2 all pool 31 distinct slots.
+2. **A manual example** (`examples/example_leap_year_windows.py`) printing the tables
+   above against a synthetic 10-year and a leap-free record, so the behaviour can be
+   *seen* rather than inferred. It should not need PVGIS — the shipped 2-year record
+   cannot demonstrate any of this.
+3. **Document it** in `docs/source/theory.md` (the `all_leap` section) and
+   `docs/design/rolling-day-window.md` (Caveat B), stating the deficit and the
+   interpolation point explicitly.
+
+> **Note on a false alarm — which turned out to be a real bug.** While investigating,
+> `poa_direct` produced a NaN for a Feb 29 target on a synthetic leap-free fixture. It is
+> **not** a leap defect: a control run showed the same NaN for ordinary targets (Sep 10,
+> Jan 2), and the real record is clean at every target including Feb 29.
+>
+> The cause is **not** the fixture being unrealistic. It is that `sin(pi)` is
+> `1.2246e-16`, not `0`, so the fixture's night values were ~`1e-14` rather than exactly
+> zero — which is enough to defeat the exact `std == 0` degeneracy test and route a
+> constant-zero hour into the 2D KDE path. See item 7: that brittleness is a genuine
+> library bug, not a fixture defect, and this fixture merely tripped over it.
+>
+> A fixture for these tests should still use a realistic diurnal profile (zero at night,
+> peak near noon) so the degeneracy paths are exercised the way real data exercises them.
+> But it should not need *exact* zeros to avoid NaN — and once item 7 is fixed, it will
+> not.
+
+---
+
+## 2. Generated irradiance is systematically ~13% too high
 
 **Status:** open · **Impact:** absolute yield figures are not calibrated
 
@@ -71,7 +158,7 @@ seen from the other side. The two should be solved together.
 
 ---
 
-## 2. Physical support, `start_value`, and hour-0 — all planned together
+## 3. Physical support, `start_value`, and hour-0 — all planned together
 
 **Status:** designed, not yet implemented →
 [`docs/design/variable-specs-and-initialisation.md`](docs/design/variable-specs-and-initialisation.md)
@@ -100,7 +187,7 @@ The fix: a `VariableSpec` registry declaring each quantity's support, sampling t
 to it, and `start_value` replaced by a fitted initial distribution π(x₀) plus a genuine
 23:00(d−1) → 00:00(d) transition.
 
-Note this fixes the *negatives* but not item 1's *+13% overshoot* — truncation stops mass
+Note this fixes the *negatives* but not item 2's *+13% overshoot* — truncation stops mass
 escaping below the bound without undoing the upward push against it. Deliberately kept
 separate so the bias work starts from a clean baseline.
 
@@ -152,7 +239,7 @@ Support other providers (Open-Meteo, etc.) via a thin **adapter layer** that nor
 each source into the canonical schema the core consumes (`year, month, day, hour` plus the
 modelled columns), so the Markov code never learns a provider's quirks.
 
-The `VariableSpec` registry from item 2 is the natural seam: an adapter maps provider
+The `VariableSpec` registry from item 3 is the natural seam: an adapter maps provider
 columns to registered spec names, converts units into each spec's declared `units`, and
 validates against each spec's `support` — turning silent ingestion bugs (kW/m² read as
 W/m², °F as °C) into an error at the boundary. See
@@ -160,7 +247,56 @@ W/m², °F as °C) into an error at the boundary. See
 
 ---
 
-## 7. Smaller items
+## 7. Degeneracy detection uses an exact float comparison, and is brittle
+
+**Status:** open · **Impact:** silent NaN output on any data with floating-point residue ·
+**Blocks:** item 6 (other sources)
+
+`_cat_singularity` (`markov_chain_simulator_kde2d.py`) decides whether a slice is
+degenerate with an **exact** comparison:
+
+```python
+std_prev = np.std(self.previous_values)
+std_curr = np.std(self.current_values)
+if std_prev == 0 and std_curr == 0:      # CC
+elif std_prev == 0 and std_curr > 0:     # CN
+elif std_prev > 0 and std_curr == 0:     # NC
+else:                                    # NN  <- everything else lands here
+```
+
+This works **only because PVGIS supplies exact zeros at night** (`unique values = [0.]`,
+`std` exactly `0.0`). It is luck, not robustness.
+
+Any value that is physically zero but numerically `1e-16` — from interpolation,
+resampling, unit conversion, or a provider that stores near-zero noise — lands in the `NN`
+branch. A 2D KDE is then fitted where `current` spans ~`1e-13` while `previous` spans
+~50. The covariance is catastrophically ill-conditioned, the density evaluates to ~0
+across the whole grid, and `conditional_density = joint_density / np.sum(joint_density)`
+becomes `0/0` → **NaN**, which then propagates into the next hour.
+
+Reproduced: a fixture built with `np.clip(np.sin((hour - 6)/12*np.pi), 0, None)` has
+`sin(pi) == 1.2246e-16`, giving hour-18 values of ~`1e-14`, `std = 1.6e-14 > 0` → `NN` →
+NaN. Note the failure is **silent** — a `RuntimeWarning: invalid value encountered in
+divide` and then a NaN in the output, not an exception.
+
+**This directly threatens item 6.** Ingesting Open-Meteo (or any resampled/unit-converted
+source) is exactly the scenario that produces near-zero-but-not-zero nights.
+
+### Fix
+
+Replace the exact test with a scale-aware tolerance — e.g. compare the range or standard
+deviation against the data's own scale (`np.isclose`, or `ptp < atol + rtol * scale`)
+rather than against literal `0`. Land it with the `Kind` rename in item 3, which already
+rewrites this function. Add a test with deliberately residue-laden input (night values of
+`1e-16` rather than `0.0`) asserting the hour is still treated as constant and the output
+is finite.
+
+Guard separately against the underlying `0/0`: if `np.sum(joint_density)` is ~0, that is
+unrecoverable and should raise with a clear message rather than return NaN.
+
+---
+
+## 8. Smaller items
 
 - **Four copies of the same data.** `MarkovChainSimulator2dKDE` holds `self.data`,
   `self.previous_values`, `self.current_values`, *and* `joint_kde.dataset` — ~15× overhead
