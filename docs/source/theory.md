@@ -190,9 +190,44 @@ Two consequences fall out for free, with no special-casing:
   December 30 window reaches Jan 1–3.
 - **February 29 is an ordinary day.** Its observations are pooled into any
   nearby window rather than discarded, *and* it can be requested as a generation
-  target like any other slot. Only leap years contribute a slot-60 day, so a
-  Feb 29 window pools one day fewer per non-leap year — faithful to the
-  calendar, since those days genuinely do not exist.
+  target like any other slot.
+
+### What this means around the end of February
+
+Two properties follow, and both are easier to trust once seen —
+`examples/example_leap_year_windows.py` demonstrates them on synthetic records
+with and without leap years, since the shipped 2011–2012 record has only one
+leap day and cannot.
+
+**Leap-day observations come only from leap years.** On a ten-year record
+(2011–2020, three leap years), asking for February 28 with $n=2$ pools:
+
+| day | slot | years contributing |
+|---|---|---|
+| 02-26 | 57 | all ten |
+| 02-27 | 58 | all ten |
+| 02-28 | 59 | all ten |
+| **02-29** | **60** | **three** — the leap years only |
+| 03-01 | 61 | all ten |
+
+March 1 is reached simply because it is the next slot. Nothing special happens
+at the month boundary.
+
+**Non-leap years contribute one day fewer** to any window spanning slot 60. That
+same ten-year record pools 310 days for an unaffected target such as June 15,
+but 303 for anything spanning the leap slot — a deficit of exactly seven, the
+number of non-leap years. This is faithful to the calendar rather than a defect:
+those days genuinely do not exist.
+
+```{note}
+**A synthetic February 29 is overwhelmingly interpolation.** Even with three
+leap years in a ten-year record, only 3 of the 303 pooled days — about 1% — are
+real February 29 observations; the rest is late February and early March. If the
+record contains *no* leap year at all, the window pools slot 60 zero times and
+February 29 is generated entirely from its neighbours. That is the intended
+design, and it is what lets you generate a leap day from a record that has never
+seen one — but "synthetic Feb 29" does not mean "built from observed Feb 29s".
+```
 
 ```{mermaid}
 flowchart LR

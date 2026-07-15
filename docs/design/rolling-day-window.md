@@ -118,9 +118,35 @@ window covering late February or early March, exactly like any other day's rows.
 Feb 14 through Mar 15 — pooled across all years. Fitting and generating proceed
 identically to any other day.
 
-The only asymmetry: non-leap years contribute 14 days after Feb 28 rather than 15, since
-they have no slot 60 to give. This is physically faithful rather than a defect — those
-days genuinely do not exist.
+The only asymmetry: non-leap years contribute one day fewer to any window spanning slot
+60, since they have no slot 60 to give. This is physically faithful rather than a defect —
+those days genuinely do not exist.
+
+#### Verified on multi-year and leap-free records
+
+The shipped record (2011–2012) has a single leap day and cannot exercise the cases that
+matter. `tests/test_leap_year_windows.py` and `examples/example_leap_year_windows.py` use
+synthetic records instead — 2011–2020 (leap: 2012, 2016, 2020) and 2021–2023 (none):
+
+| behaviour | measured |
+|---|---|
+| Feb 28, $n=2$, ten-year record | Feb 26/27/28 + Mar 1 from all 10 years; **Feb 29 from exactly the 3 leap years** |
+| Feb 29 target, ten-year record | 303 days pooled vs 310 for an unaffected target — deficit **7 = the non-leap count** |
+| Feb 29 target, leap-free record | **90 days**, spanning Feb 14 – Mar 15, containing no real leap day; generates cleanly |
+| slot coverage, leap record | 31 slots for every target Feb 27 … Mar 2 |
+| slot coverage, leap-free record | **30** slots — slot 60 is selected but never populated |
+
+A mutation check confirms the tests bite: swapping the `all_leap` index for pandas'
+year-dependent `dayofyear` leaks **Mar 2 in from the 7 non-leap years** while leap years
+contribute Feb 29 — the window silently drifts by a day depending on the year — and the
+exact-calendar-day assertion catches it.
+
+> **Note**
+>
+> Even with leap years present, only 3 of 303 pooled days (~1%) are real Feb 29
+> observations. A synthetic Feb 29 is overwhelmingly built from its neighbours, and
+> entirely so on a leap-free record. Intended — but not what "synthetic Feb 29" implies to
+> a reader.
 
 ## API
 

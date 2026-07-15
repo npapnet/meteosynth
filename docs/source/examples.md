@@ -1,14 +1,15 @@
 # Examples
 
-Four runnable scripts live under `examples/`. All fetch data from PVGIS on
-first run and cache it to `data/pvgis_hourly_data.xlsx`, so subsequent runs are
-offline and fast.
+Five runnable scripts live under `examples/`. All but the last fetch data from
+PVGIS on first run and cache it to `data/pvgis_hourly_data.xlsx`, so subsequent
+runs are offline and fast.
 
 ```bash
 uv run python examples/example_exploratory_analysis.py
 uv run python examples/example_markov_generation.py
 uv run python examples/example_rolling_window.py
-uv run python examples/example_synthetic_year.py     # ~80 s
+uv run --extra examples python examples/example_synthetic_year.py   # ~80 s
+uv run python examples/example_leap_year_windows.py                 # no PVGIS needed
 ```
 
 ## 1. Exploratory analysis
@@ -135,7 +136,41 @@ magnitudes as uncalibrated for zero-floored variables; the seasonal shape is
 sound.
 ```
 
-## 5. A Monte-Carlo sketch for energy output
+## 5. Leap years and the end of February
+
+`examples/example_leap_year_windows.py` answers two questions the shipped record
+cannot demonstrate, because it spans only 2011–2012 and holds one leap day. It
+builds synthetic records in memory instead — 2011–2020 (leap: 2012, 2016, 2020)
+and 2021–2023 (none) — so it needs no PVGIS fetch.
+
+**Does a Feb 28 window pick up Feb 29 from the leap years, and Mar 1 from all of
+them?** Yes:
+
+```text
+  day      slot  years   contributing years
+  02-26     57     10   all ten
+  02-27     58     10   all ten
+  02-28     59     10   all ten
+  02-29     60      3   2012, 2016, 2020  <-- leap years only
+  03-01     61     10   all ten
+```
+
+**With no leap year in the record at all, can Feb 29 still be generated?** Also
+yes — slot 60 contributes nothing, and the day is interpolated from Feb 14 –
+Mar 15:
+
+```text
+  get_day_window_subset(2, 29, n_days=15)
+    pooled days      : 90
+    calendar span    : 02-14 .. 03-15  (30 distinct days)
+    real Feb 29 in it: False   <-- the record has none to give
+```
+
+The script also prints exactly where the leap day enters and leaves a window as
+`n_days` grows, and the non-leap deficit. See {doc}`theory` for the `all_leap`
+calendar behind it.
+
+## 6. A Monte-Carlo sketch for energy output
 
 Putting it together for the target use case — turning synthetic irradiance days
 into a distribution of daily energy yield:

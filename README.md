@@ -145,6 +145,9 @@ uv run python examples/example_rolling_window.py
 # A full synthetic non-leap year of poa_direct + wind_speed -> data/synthetic_year.csv
 # (needs the `examples` extra for tqdm; ~80 s)
 uv run --extra examples python examples/example_synthetic_year.py
+
+# Leap years: how Feb 29 and the end of February are pooled (no PVGIS needed)
+uv run python examples/example_leap_year_windows.py
 ```
 
 See the **Examples** page in the documentation for a full walk-through.

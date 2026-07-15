@@ -7,13 +7,21 @@ to re-derive it. Design rationale lives in [`docs/design/`](docs/design/README.m
 
 ## 1. Leap years and the end of February — verify and lock in
 
-**Status:** HIGH PRIORITY · behaviour appears **correct**, but is untested and
-undemonstrable · **Impact:** confidence, not (as far as measured) correctness
+**Status:** ✅ **DONE** — behaviour confirmed **correct**, now tested and demonstrable
+· `tests/test_leap_year_windows.py` (30 tests) ·
+`examples/example_leap_year_windows.py` · documented in `docs/source/theory.md` and
+`docs/design/rolling-day-window.md`
 
 The shipped record is 2 years (2011–2012) with exactly one leap day, so **no test and no
-example exercises the cases that actually matter**: a multi-year record with several leap
-years, or a record with none at all. The behaviour cannot currently be seen working, which
-is reason enough to distrust it.
+example exercised the cases that actually mattered**: a multi-year record with several leap
+years, or a record with none at all. The behaviour could not be seen working, which was
+reason enough to distrust it. Both are now covered by synthetic records (2011–2020 with
+leap years 2012/2016/2020, and 2021–2023 with none).
+
+A mutation check confirms the tests bite: swapping the `all_leap` index for pandas'
+year-dependent `dayofyear` leaks **Mar 2 in from the 7 non-leap years** while leap years
+contribute Feb 29 — the window silently drifts by a day depending on the year — and
+`test_feb28_window_pools_leap_day_from_leap_years_only` catches it.
 
 ### The two questions
 
@@ -55,24 +63,22 @@ synthesised from its neighbours.
   its neighbours. With no leap years it is *entirely* so. That is the intended design, but
   a user reading "synthetic Feb 29" deserves to know it is not built from observed Feb 29s.
 
-### Work required
+### Delivered
 
-1. **Tests** (`tests/test_leap_year_windows.py`) over a synthetic **multi-year** fixture
-   (e.g. 2011–2020, leap: 2012/2016/2020) and a **leap-free** fixture (2021–2023):
-   - Q1 as exact year-count assertions per calendar day (the table above).
-   - Q2: a Feb 29 window on leap-free data is non-empty, spans Feb 14 – Mar 15, contains
-     no real Feb 29, and `DayWindowGenerator.for_day(2, 29)` builds and generates.
-   - Feb 29 data appears in every window whose slot range covers 60, and in none that
-     does not (check the boundary: n_days too small to reach it).
-   - The 303-vs-310 deficit is exactly `n_non_leap_years` per affected target.
-   - Symmetry: targets Feb 27 … Mar 2 all pool 31 distinct slots.
-2. **A manual example** (`examples/example_leap_year_windows.py`) printing the tables
-   above against a synthetic 10-year and a leap-free record, so the behaviour can be
-   *seen* rather than inferred. It should not need PVGIS — the shipped 2-year record
-   cannot demonstrate any of this.
-3. **Document it** in `docs/source/theory.md` (the `all_leap` section) and
-   `docs/design/rolling-day-window.md` (Caveat B), stating the deficit and the
-   interpolation point explicitly.
+1. **`tests/test_leap_year_windows.py`** — 30 tests over both fixtures: the Q1 table as
+   exact year-count assertions; Q2 span/emptiness/generation; the slot-60 boundary
+   parametrised over eight target/`n_days` combinations; the deficit; slot symmetry; and
+   a guard that the fixture's nights are *exactly* zero (see the note below).
+2. **`examples/example_leap_year_windows.py`** — prints the tables above plus where the
+   leap day enters and leaves a window, and plots which (year, slot) cells feed a
+   synthetic Feb 29. No PVGIS fetch.
+3. **Documented** in `docs/source/theory.md` (a "What this means around the end of
+   February" subsection) and `docs/design/rolling-day-window.md` (Caveat B), both stating
+   the deficit and the interpolation point explicitly.
+
+**One correction to the plan above:** slot symmetry is 31 slots only when leap years are
+present. On a leap-free record the Feb 29 window carries **30** populated slots — slot 60
+is selected but never populated, because nothing in the record occupies it.
 
 > **Note on a false alarm — which turned out to be a real bug.** While investigating,
 > `poa_direct` produced a NaN for a Feb 29 target on a synthetic leap-free fixture. It is
