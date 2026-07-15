@@ -35,6 +35,11 @@ Data Processing
    :undoc-members:
    :show-inheritance:
 
+.. automodule:: meteosynth.day_window
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 .. automodule:: meteosynth.metdata_pvgis
    :members:
    :undoc-members:
