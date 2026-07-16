@@ -6,6 +6,9 @@ from .day_window import circular_delta, day_slot, day_slots
 class MetDataProcessor():
     """
     Class to process meteorological data from PVGIS.
+    
+    TODO: consider exposing the _met_data_columns to the package for
+    maximum transparency for the user (frozen/immutable) 
     """
     __met_data_columns =['poa_direct', 'poa_sky_diffuse', 'poa_ground_diffuse',
        'solar_elevation', 'temp_air', 'wind_speed', 'Int', 'year', 'month',

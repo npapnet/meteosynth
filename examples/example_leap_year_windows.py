@@ -33,6 +33,7 @@ LEAP_RECORD = (2011, 2020)      # leap years: 2012, 2016, 2020
 LEAPFREE_RECORD = (2021, 2023)  # leap years: none
 N_DAYS = 15
 
+#%%
 
 def synthetic_record(start_year: int, end_year: int, seed: int = 0) -> MetDataProcessor:
     """An hourly record with a realistic diurnal cycle and exactly-zero nights.
@@ -205,23 +206,25 @@ def plot_window_membership(leap_mdp, free_mdp):
                  fontsize=11)
     fig.tight_layout()
     return fig
+#%%
 
 
-def main():
-    print("Building synthetic records in memory (no PVGIS fetch needed)...")
-    leap_mdp = synthetic_record(*LEAP_RECORD)
-    free_mdp = synthetic_record(*LEAPFREE_RECORD)
-    print(f"  {LEAP_RECORD[0]}-{LEAP_RECORD[1]}: {len(leap_mdp.met_data):6d} hourly rows")
-    print(f"  {LEAPFREE_RECORD[0]}-{LEAPFREE_RECORD[1]}: {len(free_mdp.met_data):6d} hourly rows")
+print("Building synthetic records in memory (no PVGIS fetch needed)...")
+leap_mdp = synthetic_record(*LEAP_RECORD)
+free_mdp = synthetic_record(*LEAPFREE_RECORD)
+#%%
+print(f"  {LEAP_RECORD[0]}-{LEAP_RECORD[1]}: {len(leap_mdp.met_data):6d} hourly rows")
+print(f"  {LEAPFREE_RECORD[0]}-{LEAPFREE_RECORD[1]}: {len(free_mdp.met_data):6d} hourly rows")
+#%%
+question_1(leap_mdp)
+#%%
+question_2(free_mdp)
+the_boundary(leap_mdp)
+the_deficit(leap_mdp, free_mdp)
 
-    question_1(leap_mdp)
-    question_2(free_mdp)
-    the_boundary(leap_mdp)
-    the_deficit(leap_mdp, free_mdp)
-
-    plot_window_membership(leap_mdp, free_mdp)
-    plt.show()
-    print("\nDone.")
+plot_window_membership(leap_mdp, free_mdp)
+plt.show()
+print("\nDone.")
 
 
 if __name__ == "__main__":

@@ -35,6 +35,7 @@ from .markov_chain_simulator_kde2d import MarkovChainSimulator2dKDE
 from .met_data_processor import MetDataProcessor, convert_to_daily_wide
 
 # Meteorological attributes available in a processed PVGIS hourly frame.
+# TODO: there is duplication in multiple levels for MET_DATA_COLS (try to remov it)
 MET_DATA_COLS = [
     "poa_direct",
     "poa_sky_diffuse",
