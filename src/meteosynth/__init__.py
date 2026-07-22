@@ -1,3 +1,4 @@
+from meteosynth.constants import INDEX_COLS, MODELLED_ATTRS, REQUIRED_COLS
 from meteosynth.markov_chain_simulator_kde2d import MarkovChainSimulator2dKDE
 from meteosynth.markov_implementations.markov_chain_simulator_continuous import ContinuousMarkovChainSimulator
 from meteosynth.markov_implementations.markov_chain_simulator_discrete import MarkovChainSimulatorDiscrete
@@ -18,6 +19,9 @@ from meteosynth.generators import (
 )
 
 __all__ = [
+    "MODELLED_ATTRS",
+    "INDEX_COLS",
+    "REQUIRED_COLS",
     "MarkovChainSimulator2dKDE",
     "ContinuousMarkovChainSimulator",
     "MarkovChainSimulatorDiscrete",

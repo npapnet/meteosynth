@@ -30,21 +30,15 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
+from .constants import MODELLED_ATTRS
 from .day_window import day_slot, slot_to_month_day
 from .markov_chain_simulator_kde2d import MarkovChainSimulator2dKDE
 from .met_data_processor import MetDataProcessor, convert_to_daily_wide
 
 # Meteorological attributes available in a processed PVGIS hourly frame.
-# TODO: there is duplication in multiple levels for MET_DATA_COLS (try to remov it)
-MET_DATA_COLS = [
-    "poa_direct",
-    "poa_sky_diffuse",
-    "poa_ground_diffuse",
-    "solar_elevation",
-    "temp_air",
-    "wind_speed",
-    "Int",
-]
+# Re-exported under the historical name; the canonical list lives in
+# meteosynth.constants, shared with MetDataProcessor's ingestion check.
+MET_DATA_COLS = MODELLED_ATTRS
 
 HOURS_PER_DAY = 24
 

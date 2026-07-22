@@ -2,8 +2,6 @@ import pandas as pd
 
 import seaborn as sns
 import matplotlib.pyplot as plt
-from mpl_toolkits.axes_grid1 import make_axes_locatable
-from scipy.interpolate import make_interp_spline, BSpline
 
 from .met_data_processor import MetDataProcessor
 

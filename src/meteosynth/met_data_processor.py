@@ -1,18 +1,16 @@
-import numpy as np
 import pandas as pd
 
+from .constants import REQUIRED_COLS
 from .day_window import circular_delta, day_slot, day_slots
 
 class MetDataProcessor():
     """
     Class to process meteorological data from PVGIS.
-    
-    TODO: consider exposing the _met_data_columns to the package for
-    maximum transparency for the user (frozen/immutable) 
+
+    Required columns are declared once, in :data:`meteosynth.constants.REQUIRED_COLS`,
+    and importable directly from there for full transparency on what a frame must
+    contain.
     """
-    __met_data_columns =['poa_direct', 'poa_sky_diffuse', 'poa_ground_diffuse',
-       'solar_elevation', 'temp_air', 'wind_speed', 'Int', 'year', 'month',
-       'day', 'hour']
     def __init__(self, met_data:pd.DataFrame):
         """
         Initialize the MetDataProcessor with meteorological data.
@@ -20,8 +18,7 @@ class MetDataProcessor():
         Parameters:
         met_data (pd.DataFrame): DataFrame containing meteorological data.
         """
-        # assert metdata contains all the columns  in self.__met_data_columns
-        assert all(col in met_data.columns for col in self.__met_data_columns), "Missing columns in met_data"
+        assert all(col in met_data.columns for col in REQUIRED_COLS), "Missing columns in met_data"
 
         self.met_data = met_data
         self.__slots_cache = None

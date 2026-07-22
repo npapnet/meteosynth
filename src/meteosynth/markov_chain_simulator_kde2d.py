@@ -20,20 +20,20 @@ import pandas as pd
 import numpy as np
 from scipy import stats
 from scipy import integrate
-from typing import List, Optional, Union, Tuple
+from typing import List, Optional, Tuple
 import matplotlib.pyplot as plt
 import logging
 from matplotlib.colors import LinearSegmentedColormap
 
 class MarkovChainSimulator2dKDE:
     """
-    A class to simulate continuous Markov chain processes using a 2D KDE for 
+    A class to simulate continuous Markov chain processes using a 2D KDE for
     joint probability distribution between previous and current values.
 
     Assumptions:
      -  the domain of the data (previous and current) is the common
     """
-    singularity_type: str = None  # type of singularity (CC, CN, NC, NN)
+    singularity_type: Optional[str] = None  # type of singularity (CC, CN, NC, NN)
 
     def __init__(self, data: pd.DataFrame, bandwidth: Optional[float] = None):
         """
