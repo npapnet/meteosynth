@@ -149,6 +149,18 @@ the signature of accumulation rather than a constant offset.
 
 ### Candidate fixes
 
+- **The `CN` dawn hour's ±10% padding is two-sided, and only one side has been looked at.**
+  `_calculate_1d_kde_distribution` pads its domain by 10% at *both* ends. The known
+  CRITICAL concerns the lower pad, which produces negative irradiance. The **upper** pad
+  inflates the domain maximum by 10% at the dawn hour — which for irradiance is the first
+  non-degenerate hour of the day, i.e. exactly where the compounding measured in (b) above
+  begins, twelve steps before noon. Removing the padding therefore moves the annual total
+  in **both directions at once**: dropping the lower pad restores mass that currently
+  escapes below zero (total up), dropping the upper pad removes headroom (total down). Net
+  sign is unmeasured. Measure the two sides *separately* — the truncation work planned in
+  `docs/design/variable-specs-and-initialisation.md` §3 changes both simultaneously, and a
+  single before/after number would confound them. This is the concrete form of the "same
+  boundary problem seen from the other side" note below.
 - Boundary correction for the bounded-below case: reflection at zero, a log/sqrt transform
   before fitting, or beta/gamma kernels near the bound.
 - Investigate whether `_calc_domain` taking `min`/`max` across *both* `previous` and
@@ -164,13 +176,13 @@ seen from the other side. The two should be solved together.
 
 ---
 
-## 3. Physical support, `start_value`, and hour-0 — all planned together
+## 3. Physical support, `start_value`, and hour-0 — all fixed together
 
-**Status:** designed, not yet implemented →
-[`docs/design/variable-specs-and-initialisation.md`](docs/design/variable-specs-and-initialisation.md)
+**Status:** ✅ **DONE** (2026-07-22) — implemented, tested, 219 tests passing ·
+design: [`docs/design/variable-specs-and-initialisation.md`](docs/design/variable-specs-and-initialisation.md)
 
-Four defects share one root cause — the package has no notion of what each quantity
-physically *is*. They are planned as one change, targeting 0.2.0 (breaking):
+Four defects shared one root cause — the package had no notion of what each quantity
+physically *is*. They were fixed as one change, 0.2.0 (breaking):
 
 - **Generated irradiance goes negative.** 1.29% of `poa_direct` values, all from the one
   `CN` dawn hour, where 30.25% of samples are below zero. `_calculate_1d_kde_distribution`
@@ -186,20 +198,44 @@ physically *is*. They are planned as one change, targeting 0.2.0 (breaking):
   all-zero KDE density → `0/0` → NaN → `ValueError: array must not contain infs or NaNs`
   on the following hour.
 - **Hour 0 learns noise.** `hour_prev = (hour - 1) % 24` pairs hour 0 with hour 23 of the
-  *same* day — a 23-hour backwards jump. Correlation +0.218 for wind and +0.552 for temp,
-  against **+0.989** and **+0.993** for the real cross-midnight step.
+  *same* day — a 23-hour backwards jump. Re-measured on the full record during
+  implementation: **wind 0.360 → 0.981**, **temp 0.890 → 0.998** for the real
+  cross-midnight step. (The design doc's original 0.218 / 0.552 figures for the
+  same-day pairs do not reproduce against the full 2011–2012 record; the direction and
+  size of the wind finding hold, but temperature's same-day correlation is high because
+  its seasonal component correlates *any* two hours of the same day.)
 
-The fix: a `VariableSpec` registry declaring each quantity's support, sampling truncated
-to it, and `start_value` replaced by a fitted initial distribution π(x₀) plus a genuine
-23:00(d−1) → 00:00(d) transition.
+### What landed
 
-Note this fixes the *negatives* but not item 2's *+13% overshoot* — truncation stops mass
-escaping below the bound without undoing the upward push against it. Deliberately kept
-separate so the bias work starts from a clean baseline.
+- `src/meteosynth/variables.py` — `VariableSpec` (constraints only, no `name`) and an
+  extensible registry. One shared `IRRADIANCE` spec serves all four POA component names.
+- Sampling truncated to the support in **both** paths; the ±10% padding removed.
+  Negatives go to **0.00%**, measured over ensembles and a full generated year.
+- `start_value` gone. π(x₀) fitted per window, reusing the existing 1D KDE machinery so
+  a degenerate π(x₀) returns the constant — irradiance starts at zero *from the data*.
+- Real 23:00(d−1) → 00:00(d) model, built from actual consecutive dates, plus
+  `DayWindowGenerator.generate_series(start, n_days)`.
+- Global `np.random.seed` replaced by threaded `np.random.Generator`.
+- `MODELLED_ATTRS` whitelist replaced by the registry; ingestion keeps `INDEX_COLS` +
+  registered columns and drops the rest **by rule**.
+- `src/meteosynth/adapters.py` — optional collection helper; `fetch_pvgis` defaults to
+  `poa_global` with `irradiance="direct"` as the override.
 
-The current hour-0 behaviour is pinned by
-`test_hour_zero_pairs_with_hour_23_of_the_same_day`, so it cannot change by accident
-before then.
+### Found during implementation
+
+**The out-of-domain crash was still reachable after truncation.** Truncation constrains
+the *sampling* domain but not the *conditioning value*. In a rolling series, day d's
+23:00 comes from day d's window fit while day d+1's cross-midnight model is fitted on a
+different (overlapping) sample, so the conditioning value can land outside the fitted
+range — all-zero density, `0/0` → NaN, next hour dies. Fixed by clamping the
+conditioning value into the fitted range in `get_conditional_density_gen`, with a
+marginal fallback behind it. Measured frequency: **0.27% (1/364)** of midnight steps
+over a generated year, pinned by `tests/test_window_boundary_continuity.py`.
+
+Note this fixed the *negatives* but not item 2's overshoot — and it moved that number
+the *wrong* way, 670 → **678 kWh/m²** (+13% → +14%) on the shipped record. Removing the
+lower pad restores mass that used to escape below zero, and that outweighed removing the
+upper pad. See item 2's two-sided padding note.
 
 ---
 

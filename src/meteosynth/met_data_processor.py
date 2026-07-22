@@ -1,15 +1,80 @@
 import pandas as pd
 
-from .constants import REQUIRED_COLS
+from .constants import INDEX_COLS
 from .day_window import circular_delta, day_slot, day_slots
+from .variables import registered
+
+
+def validate_columns(met_data: pd.DataFrame) -> None:
+    """
+    Check a frame carries the calendar index and at least one modellable column.
+
+    The rule is conditional -- *all* of :data:`~meteosynth.constants.INDEX_COLS`, and
+    *any* registered column -- which is why it is a function rather than the flat
+    ``REQUIRED_COLS`` tuple it replaces: a tuple of things that must all be present
+    cannot express "all of these and any of those".
+
+    Requiring only one registered column means a temperature-only source with no
+    irradiance at all ingests cleanly. "Is this frame usable for what you asked?" is a
+    different question, answered later by the generator's ``attr_str`` validation, which
+    can name the specific column that is missing.
+
+    Raises
+    ------
+    ValueError
+        If an index column is missing, or no registered column is present.
+    """
+    missing = [col for col in INDEX_COLS if col not in met_data.columns]
+    if missing:
+        raise ValueError(
+            f"met_data is missing required index columns: {missing}. "
+            f"Every record needs {INDEX_COLS}."
+        )
+
+    known = [col for col in met_data.columns if col in registered()]
+    if not known:
+        raise ValueError(
+            f"met_data has no modellable column. Registered variables are "
+            f"{registered()}; the frame has {list(met_data.columns)}. Use "
+            f"meteosynth.register() to declare a spec for one of them."
+        )
+
+
+def trim_columns(met_data: pd.DataFrame) -> pd.DataFrame:
+    """
+    Return a copy holding only the index columns and registered variables.
+
+    Unregistered columns are dropped rather than carried through, so nothing downstream
+    can come to depend on a provider-specific column -- which is exactly how a PVGIS
+    quality flag ended up being treated as a meteorological quantity.
+
+    ``solar_elevation`` and ``Int`` fall out **by this rule**, not by a hardcoded list:
+    neither is a stochastic environmental quantity, so neither has a spec. A user who
+    genuinely wants to model solar elevation registers a spec for it and it survives.
+    Declaring it is the deliberate act.
+
+    Note the caller's original frame is never mutated -- only this processed copy is
+    trimmed -- so a dropped column remains available to the caller.
+    """
+    keep = [
+        col
+        for col in met_data.columns
+        if col in INDEX_COLS or col in registered()
+    ]
+    return met_data.loc[:, keep].copy()
+
 
 class MetDataProcessor():
     """
-    Class to process meteorological data from PVGIS.
+    Slice a canonical meteorological frame by month or by rolling day window.
 
-    Required columns are declared once, in :data:`meteosynth.constants.REQUIRED_COLS`,
-    and importable directly from there for full transparency on what a frame must
-    contain.
+    Accepts any frame carrying :data:`~meteosynth.constants.INDEX_COLS` plus at least
+    one column with a registered :class:`~meteosynth.variables.VariableSpec`. The frame
+    may come from :mod:`meteosynth.adapters` or straight from the user -- adapters are
+    an optional collection helper, not a required layer.
+
+    On ingestion the frame is validated (:func:`validate_columns`) and trimmed to the
+    registered columns (:func:`trim_columns`).
     """
     def __init__(self, met_data:pd.DataFrame):
         """
@@ -18,9 +83,9 @@ class MetDataProcessor():
         Parameters:
         met_data (pd.DataFrame): DataFrame containing meteorological data.
         """
-        assert all(col in met_data.columns for col in REQUIRED_COLS), "Missing columns in met_data"
+        validate_columns(met_data)
 
-        self.met_data = met_data
+        self.met_data = trim_columns(met_data)
         self.__slots_cache = None
 
     def get_month_subset(self, month_ind:int):

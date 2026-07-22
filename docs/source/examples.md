@@ -42,7 +42,7 @@ flowchart LR
     L["load_or_fetch_data()"] --> M["MetDataProcessor"]
     M --> May["get_month_subset(5)"]
     May --> G["EnvSeriesGenerator(attr_str='poa_direct')"]
-    G --> P["gen_day_sequence() &times; 10"]
+    G --> P["gen_day() &times; 10"]
     P --> Plot["plot 24-hour profiles"]
 ```
 
@@ -53,7 +53,8 @@ mdp = MetDataProcessor(df)
 may = mdp.get_month_subset(5)
 
 generator = EnvSeriesGenerator(may, attr_str="poa_direct")
-profiles = [generator.gen_day_sequence(start_value=0.0) for _ in range(10)]
+rng = np.random.default_rng(42)
+profiles = [generator.gen_day(rng=rng) for _ in range(10)]
 ```
 
 ## 3. Rolling day windows
@@ -80,7 +81,7 @@ may_window = mdp.get_day_window_subset(5, 1, n_days=15)      # Apr 16 - May 16
 new_year = mdp.get_day_window_subset(1, 2, n_days=4)         # Dec 29 - Jan 6
 
 # Feb 29 is an ordinary target.
-leap = DayWindowGenerator(mdp, attr_str="poa_direct").gen_day_sequence(2, 29)
+leap = DayWindowGenerator(mdp, attr_str="poa_direct").gen_day(2, 29)
 ```
 
 ```{note}
@@ -106,25 +107,24 @@ from meteosynth import MetDataProcessor, DayWindowGenerator
 mdp = MetDataProcessor(df)
 generator = DayWindowGenerator(mdp, attr_str="wind_speed", n_days=15, cache_size=4)
 
-calendar = pd.date_range("2023-01-01", "2023-12-31", freq="D")   # 365 days
-previous = 3.9                                                   # hour-0 seed
-for date in calendar:
-    profile = generator.for_day(date.month, date.day).gen_day_sequence(
-        start_value=previous)
-    previous = profile[-1]        # chain: tomorrow's 00:00 follows tonight's 23:00
+# One call. Day 1 starts from pi(x0); every later midnight uses that day's own
+# cross-midnight model. include_feb29 defaults to False, giving a 365-day year.
+year = generator.generate_series(start=(1, 1), n_days=365, seed=42)   # (365, 24)
 ```
 
 ```{note}
-Each day is chained from the previous day's 23:00 value rather than started at a
-fixed `0.0`. Zero is right for irradiance at midnight, but it is a value wind
-*never* takes — it sits outside the hour-0 model's domain, forcing it to
-extrapolate. Chaining reduces to `0.0` automatically for irradiance.
+`generate_series` replaces what used to be a hand-rolled loop in this example:
+walk the calendar, pass the previous day's 23:00 as `start_value`, repeat. Day 1 now
+starts from the fitted initial distribution π(x₀) instead of a guessed seed, and each
+midnight uses that day's own cross-midnight model — fitted from real consecutive-day
+pairs, rather than the hour-0 transition that actually paired midnight with 23:00 of
+the *same* day.
 ```
 
 The script checks itself against the data it learned from. On the shipped
 2011–2012 Paris record the seasonal shape tracks closely (correlation 0.95 for
 `poa_direct`, peak month May in both), while absolute irradiance overshoots by
-~13%.
+~14%.
 
 ```{note}
 That overshoot is a known open issue (see `TODOs.md`), and it is not the rolling
@@ -185,7 +185,8 @@ june = mdp.get_month_subset(6)
 gen = EnvSeriesGenerator(june, attr_str="poa_direct", bandwidth=0.1)
 
 # 1000 synthetic June days -> (1000, 24) array of hourly irradiance
-ensemble = gen.generate_ensemble(n_days=1000, start_value=0.0, seed=42)
+rng = np.random.default_rng(42)
+ensemble = np.vstack([gen.gen_day(rng=rng) for _ in range(1000)])
 
 # Convert to a simple daily-energy proxy (W/m2 summed over hours -> Wh/m2)
 module_area_m2 = 1.6

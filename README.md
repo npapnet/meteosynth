@@ -7,12 +7,12 @@ Its primary target is **Monte-Carlo simulation of energy-project output and requ
 ## Features
 
 - **Markov Chain Simulators** (shared `get_next_state` / `generate_sequence` interface):
-  - `MarkovChainSimulator2dKDE`: Continuous state simulation using 2D Kernel Density Estimation with handling for various singularity cases (CC, CN, NC, NN).
+  - `MarkovChainSimulator2dKDE`: Continuous state simulation using 2D Kernel Density Estimation, with degenerate data handled via the `Kind` enum (`KDE_2D`, `KDE_1D`, `CONSTANT`) and sampling truncated to each variable's physical support.
   - `ContinuousMarkovChainSimulator`: Binned continuous state simulation using 1D Kernel Density Estimation.
   - `MarkovChainSimulatorDiscrete`: Discrete state transition modeling.
 - **Daily Series Generators** (`meteosynth.generators`):
-  - `EnvSeriesGenerator`: chains 24 hourly simulators into complete 24-hour profiles and draws Monte-Carlo ensembles via `generate_ensemble`.
-  - `DayWindowGenerator`: a generator per calendar day, trained on a rolling window and fitted lazily behind an LRU cache so a whole year never holds all 366 at once.
+  - `EnvSeriesGenerator`: one day's worth of model — a fitted initial distribution π(x₀) plus 23 hourly transitions — walked into a complete 24-hour profile by `gen_day()`.
+  - `DayWindowGenerator`: a generator per calendar day, trained on a rolling window and fitted lazily behind an LRU cache so a whole year never holds all 366 at once. `generate_series(start, n_days)` chains days across midnight.
 - **Meteorological Data Processing**:
   - Pivoting hourly data into daily wide formats.
   - Two selectable training strategies: by calendar month (`get_month_subset`) or by a **rolling ±n-day window** centred on a target day (`get_day_window_subset`).
@@ -75,6 +75,7 @@ Chain 24 hourly simulators into synthetic days and draw an ensemble for
 downstream energy analysis:
 
 ```python
+import numpy as np
 from meteosynth import MetDataProcessor, EnvSeriesGenerator
 
 # `df` is a processed PVGIS hourly frame (year, month, day, hour, poa_direct, ...)
@@ -83,8 +84,10 @@ may = mdp.get_month_subset(5)                     # train on one month
 
 gen = EnvSeriesGenerator(may, attr_str="poa_direct", bandwidth=0.1)
 
-# 500 independent synthetic days -> shape (500, 24)
-ensemble = gen.generate_ensemble(n_days=500, start_value=0.0, seed=1)
+# 500 independent synthetic days -> shape (500, 24). Hour 0 is drawn from the fitted
+# initial distribution pi(x0); there is no start value to supply.
+rng = np.random.default_rng(1)
+ensemble = np.vstack([gen.gen_day(rng=rng) for _ in range(500)])
 daily_energy = ensemble.sum(axis=1)               # per-day yield proxy
 print(daily_energy.mean(), daily_energy.std())
 ```
@@ -108,7 +111,10 @@ may_window = mdp.get_day_window_subset(5, 1, n_days=15)   # Apr 16 - May 16
 new_year = mdp.get_day_window_subset(1, 2, n_days=4)      # Dec 29 - Jan 6
 
 dwg = DayWindowGenerator(mdp, attr_str="poa_direct", n_days=15)
-feb29_day = dwg.gen_day_sequence(2, 29, seed=1)           # a synthetic Feb 29
+feb29_day = dwg.gen_day(2, 29, seed=1)                    # a synthetic Feb 29
+
+# A chained series needs a start date, and lives only on the window path:
+year = dwg.generate_series(start=(1, 1), n_days=365, seed=1)   # (365, 24)
 ```
 
 > **Note:** with only two years of data both strategies pool ~62 days, so the

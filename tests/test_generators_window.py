@@ -42,13 +42,13 @@ def test_for_day_returns_a_fitted_generator(mdp_fixture):
     dwg = DayWindowGenerator(mdp_fixture, attr_str="poa_direct", n_days=10)
     generator = dwg.for_day(6, 15)
     assert isinstance(generator, EnvSeriesGenerator)
-    assert len(generator.simulators) == 24
+    assert len(generator.simulators) == 23  # hours 1-23; hour 0 comes from pi(x0)
 
 
 # Requirement: it must be possible to generate data for Feb 29 on request.
 def test_feb29_generates_a_full_day(mdp_fixture):
     dwg = DayWindowGenerator(mdp_fixture, attr_str="poa_direct", n_days=15)
-    profile = dwg.gen_day_sequence(2, 29, start_value=0.0, seed=42)
+    profile = dwg.gen_day(2, 29, seed=42)
     assert profile.shape == (24,)
     assert np.isfinite(profile).all()
 
@@ -56,7 +56,7 @@ def test_feb29_generates_a_full_day(mdp_fixture):
 def test_windows_wrapping_new_year_generate(mdp_fixture):
     dwg = DayWindowGenerator(mdp_fixture, attr_str="poa_direct", n_days=15)
     for month, day in [(1, 2), (12, 30), (1, 1), (12, 31)]:
-        profile = dwg.gen_day_sequence(month, day, seed=1)
+        profile = dwg.gen_day(month, day, seed=1)
         assert profile.shape == (24,)
         assert np.isfinite(profile).all()
 
@@ -97,8 +97,8 @@ def test_clear_cache_releases_generators(mdp_fixture):
 
 def test_seeded_generation_is_reproducible(mdp_fixture):
     dwg = DayWindowGenerator(mdp_fixture, attr_str="poa_direct", n_days=10)
-    a = dwg.gen_day_sequence(6, 15, seed=7)
-    b = dwg.gen_day_sequence(6, 15, seed=7)
+    a = dwg.gen_day(6, 15, seed=7)
+    b = dwg.gen_day(6, 15, seed=7)
     np.testing.assert_array_equal(a, b)
 
 
@@ -119,7 +119,7 @@ def test_adjacent_days_across_a_month_boundary_share_training_data(mdp_fixture):
 
 
 def test_unknown_attribute_raises(mdp_fixture):
-    with pytest.raises(ValueError, match="attr_str must be one of"):
+    with pytest.raises(ValueError, match="attr_str must be a registered variable"):
         DayWindowGenerator(mdp_fixture, attr_str="not_an_attribute")
 
 

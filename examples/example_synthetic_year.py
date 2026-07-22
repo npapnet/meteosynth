@@ -2,9 +2,10 @@
 """
 Example: Generate a Full Synthetic Non-Leap Year (wind_speed and poa_direct)
 
-Walks a 365-day calendar and, for each day, draws a synthetic 24-hour profile from a
-generator trained on the +/- 15 day rolling window centred on that day. The result is an
-8760-hour series per attribute, written next to the cached PVGIS data.
+Generates a chained 365-day series per attribute, each day drawn from a generator
+trained on the +/- 15 day rolling window centred on that day, and each midnight carried
+by that day's cross-midnight model. The result is an 8760-hour series per attribute,
+written next to the cached PVGIS data.
 
 Two things this demonstrates:
 
@@ -19,26 +20,20 @@ dominates the runtime below.
 
 The two attributes behave differently, which is the point of generating both:
 
-* `poa_direct` is zero every night, so ~10 of its 24 hourly models collapse to the
-  constant-value (CC) singularity case.
-* `wind_speed` never stops, so all 24 of its models are ordinary 2D KDEs (NN).
+* `poa_direct` is zero every night, so ~10 of its hourly models collapse to
+  `Kind.CONSTANT`, and its pi(x0) is degenerate.
+* `wind_speed` never stops, so all of its models are ordinary 2D KDEs (`Kind.KDE_2D`).
 
-That difference also drives how a day is seeded. Rather than starting every day at a
-fixed 0.0 -- correct for irradiance at midnight, but a value wind *never* takes, which
-would ask the hour-0 model to extrapolate outside its data -- each day is chained from
-the previous day's 23:00 value. For irradiance that reduces to 0.0 automatically.
+That difference also shows in how each day *starts*. There is no seed value to supply:
+hour 0 is drawn from the day's fitted initial distribution pi(x0). For `poa_direct`
+every observed midnight is zero, so pi(x0) is a spike at zero and irradiance starts at
+0.0 -- from the data, not from a hard-coded default. For `wind_speed` it is a real
+distribution over observed midnight wind speeds, a value the old fixed 0.0 default never
+took and which used to force the hour-0 model to extrapolate outside its data.
 
-Requires
---------
-`tqdm`, for the progress bars over the two 365-day generation loops. It ships in the
-``examples`` extra rather than as a package dependency, since nothing in ``meteosynth``
-itself needs it::
+Run with::
 
-    uv sync --extra examples
-    uv run --extra examples python examples/example_synthetic_year.py
-
-    # or, outside uv:
-    pip install "meteosynth[examples]"
+    uv run python examples/example_synthetic_year.py
 
 Runtime: ~80 s for both attributes on the shipped 2-year dataset.
 """
@@ -50,7 +45,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from pvlib.iotools import get_pvgis_hourly
-from tqdm import tqdm
 
 from meteosynth import DayWindowGenerator, MetDataProcessor
 
@@ -86,43 +80,33 @@ def load_or_fetch_data() -> pd.DataFrame:
     return data
 
 
-def climatological_start(mdp: MetDataProcessor, attr: str, month: int, day: int) -> float:
-    """A sensible hour-0 seed: the mean observed 23:00 value near this day.
+def generate_year(mdp: MetDataProcessor, attr: str, n_days_out: int) -> np.ndarray:
+    """Generate a chained synthetic year.
 
-    Only used for the very first day of the year; every later day is chained from the
-    day before it.
+    This used to be a hand-rolled loop right here: walk the calendar, call
+    ``gen_day_sequence(start_value=previous_value)``, then set
+    ``previous_value = profile[-1]`` to chain across midnight -- seeding the first day
+    with ``climatological_start``, the mean observed 23:00 value nearby. That was a
+    single number standing in for a distribution, read off the wrong hour, and fed into
+    an hour-0 transition that paired midnight with 23:00 of the *same* day.
+
+    ``generate_series`` replaces all of it and does it properly: day 1 starts from that
+    day's fitted initial distribution pi(x0), and every later midnight uses that day's
+    own cross-midnight model, fitted from real consecutive-day pairs.
+
+    Returns an array of shape (n_days_out, 24).
     """
-    window = mdp.get_day_window_subset(month, day, n_days=N_DAYS)
-    return float(window[window["hour"] == 23][attr].mean())
-
-
-def generate_year(mdp: MetDataProcessor, attr: str, calendar: pd.DatetimeIndex) -> np.ndarray:
-    """Generate one synthetic day per calendar date, chaining across midnight.
-
-    Returns an array of shape (len(calendar), 24).
-    """
-    print(f"\nGenerating {len(calendar)} days of '{attr}'...")
+    print(f"\nGenerating {n_days_out} days of '{attr}'...")
     generator = DayWindowGenerator(mdp, attr_str=attr, n_days=N_DAYS, cache_size=4)
 
-    first = calendar[0]
-    previous_value = climatological_start(mdp, attr, first.month, first.day)
-    print(f"  seeding hour 0 of {first:%b %d} at {previous_value:.2f} "
-          f"(mean observed 23:00 value nearby)")
-
-    days = np.empty((len(calendar), 24))
     started = time.perf_counter()
-    progress = tqdm(calendar, desc=f"  {attr}", unit="day")
-    for i, date in enumerate(progress):
-        profile = generator.for_day(date.month, date.day).gen_day_sequence(
-            start_value=previous_value, seed=SEED + i
-        )
-        days[i] = profile
-        # Chain: tomorrow's hour 0 is conditioned on tonight's 23:00.
-        previous_value = profile[-1]
-        # Memory stays flat: the cache never grows past cache_size, however long we walk.
-        progress.set_postfix(cached=len(generator._cache), refresh=False)
+    # include_feb29=False is the default, so a 365-day walk never visits Feb 29.
+    days = generator.generate_series(start=(1, 1), n_days=n_days_out, seed=SEED)
 
     print(f"  done in {time.perf_counter() - started:.0f}s")
+    print(f"  hour 0 of Jan 1, drawn from pi(x0): {days[0, 0]:.2f}")
+    print(f"  cached generators still held: {len(generator._cache)} "
+          f"-- memory stays flat however long the walk")
     return days
 
 
@@ -184,7 +168,7 @@ def main():
     frame.index.name = "timestamp"
 
     for attr in ATTRS:
-        frame[attr] = generate_year(mdp, attr, calendar).ravel()
+        frame[attr] = generate_year(mdp, attr, len(calendar)).ravel()
 
     print(f"\nGenerated series: {frame.shape[0]} hours x {frame.shape[1]} attributes")
     print(f"  all finite: {np.isfinite(frame.to_numpy()).all()}")

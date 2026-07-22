@@ -1,6 +1,6 @@
 [project]
 name = "meteosynth"
-version = "0.1.0"
+version = "0.2.0"
 description = "A package for generating synthetic environmental time-series using Markov Chain models and PVGIS data integration."
 readme = "README.md"
 authors = [

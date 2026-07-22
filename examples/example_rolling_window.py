@@ -134,10 +134,12 @@ def plot_comparison(mdp: MetDataProcessor, n_profiles: int = 25):
     month_gen = EnvSeriesGenerator(mdp.get_month_subset(5), attr_str=ATTR)
     window_gen = DayWindowGenerator(mdp, attr_str=ATTR, n_days=15).for_day(5, 1)
 
+    # One generator drives both draws, so the comparison differs only in the training
+    # data, not in the randomness. An ensemble is now an explicit loop: pi(x0) is
+    # redrawn per call, so every profile gets its own realistic start.
     rng = np.random.default_rng(42)
-    seeds = rng.integers(0, 10_000, n_profiles)
-    month_days = np.vstack([month_gen.gen_day_sequence(0.0, seed=int(s)) for s in seeds])
-    window_days = np.vstack([window_gen.gen_day_sequence(0.0, seed=int(s)) for s in seeds])
+    month_days = np.vstack([month_gen.gen_day(rng=rng) for _ in range(n_profiles)])
+    window_days = np.vstack([window_gen.gen_day(rng=rng) for _ in range(n_profiles)])
 
     fig, axes = plt.subplots(1, 2, figsize=(13, 5), sharey=True)
     for ax, days, title in [

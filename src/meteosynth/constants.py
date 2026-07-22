@@ -1,12 +1,17 @@
 """
-Canonical column names for a processed PVGIS-shaped hourly frame.
+The canonical calendar schema, and what ships pre-registered.
 
-Single source of truth for "which columns matter". Previously this was
-duplicated independently in :mod:`meteosynth.generators` (``MET_DATA_COLS``,
-used to validate ``attr_str``) and in
-:class:`~meteosynth.met_data_processor.MetDataProcessor` (a private
-``__met_data_columns`` list, asserted on ingestion) -- two hand-maintained
-copies with nothing keeping them in sync. Both now import from here instead.
+"Which columns matter" is no longer a fixed list. A column is modellable **if and only
+if it has a registered** :class:`~meteosynth.variables.VariableSpec`, so
+:mod:`meteosynth.variables` is the authority and this module holds only the calendar
+index plus a documentation-grade note of what ships registered out of the box.
+
+That inversion is deliberate. ``MODELLED_ATTRS`` used to be a whitelist that also
+doubled as the ingestion requirement, which is how ``Int`` -- a PVGIS quality flag --
+became a modellable "meteorological attribute". Making the registry authoritative means
+a user can model ``rel_humidity`` or ``snow_depth`` by declaring what it physically is,
+with no change to this package, and means provider quirk columns fall out by rule rather
+than by a hand-maintained exclusion list.
 
 Pure data, no pandas -- mirrors the free-function style of
 :mod:`meteosynth.day_window`.
@@ -14,22 +19,32 @@ Pure data, no pandas -- mirrors the free-function style of
 
 from __future__ import annotations
 
-#: Meteorological attributes that can be modelled -- valid ``attr_str``
-#: values for :class:`~meteosynth.generators.EnvSeriesGenerator` and
-#: :func:`~meteosynth.generators.generate_hr_simulator`.
-MODELLED_ATTRS: tuple[str, ...] = (
-    "poa_direct",
-    "poa_sky_diffuse",
-    "poa_ground_diffuse",
-    "solar_elevation",
-    "temp_air",
-    "wind_speed",
-    "Int",
-)
+from .variables import registered
 
 #: Chronological index columns every record must carry.
 INDEX_COLS: tuple[str, ...] = ("year", "month", "day", "hour")
 
-#: Everything :class:`~meteosynth.met_data_processor.MetDataProcessor`
-#: requires on ingestion: the modelled attributes plus the calendar index.
-REQUIRED_COLS: tuple[str, ...] = MODELLED_ATTRS + INDEX_COLS
+
+def modelled_attrs() -> tuple[str, ...]:
+    """
+    Every currently registered column name.
+
+    Thin pass-through to :func:`meteosynth.variables.registered`, kept so callers with
+    a "what can I model?" question have an obvious place to ask it. It is a *function*
+    rather than a constant because the registry is extensible at runtime -- a module
+    level tuple would be a stale snapshot taken at import time.
+    """
+    return registered()
+
+
+#: What ships pre-registered, for documentation and error messages. **This gates
+#: nothing**: :func:`meteosynth.variables.registered` is what generators validate
+#: against, and it grows when a user calls :func:`meteosynth.variables.register`.
+SHIPPED_ATTRS: tuple[str, ...] = (
+    "poa_global",
+    "poa_direct",
+    "poa_sky_diffuse",
+    "poa_ground_diffuse",
+    "temp_air",
+    "wind_speed",
+)

@@ -97,34 +97,84 @@ flowchart TD
     Q1 -->|no| Q2{"current varies?"}
     Q1 -->|yes| Q3{"current varies?"}
     Q2 -->|no| CC["CC: constant &#8594; constant"]
-    Q2 -->|yes| CN["CN: 1D KDE of current"]
-    Q3 -->|no| NC["NC: return constant"]
-    Q3 -->|yes| NN["NN: 2D KDE conditional"]
+    Q2 -->|yes| CN["Kind.KDE_1D: 1D KDE of current"]
+    Q3 -->|no| NC["Kind.CONSTANT: return constant"]
+    Q3 -->|yes| NN["Kind.KDE_2D: 2D KDE conditional"]
 ```
 
 This is what lets the generator run through a full 24-hour cycle that includes
 dead night-time hours without numerical failure.
 
-## Building a day, then an ensemble
+## An initial distribution, then transitions
 
-`EnvSeriesGenerator` fits **one simulator per hour of the day** — simulator
-`h` models the transition `hour h-1 -> hour h`. A synthetic day is produced by
-starting from an initial value (e.g. 0 W/m² at midnight) and walking the 24
-hourly simulators in sequence.
+A Markov chain is formally two things: **an initial distribution and a set of
+transitions**. `EnvSeriesGenerator` fits both.
+
+The transitions are the familiar part: simulator `h` models `hour h-1 -> hour h`,
+for h = 1…23. Hour 0 has no previous hour within the day, so there is nothing to
+condition on — and rather than fake one, the chain starts from an **initial
+distribution** π(x₀), fitted to the observed 00:00 value of every training day. It is
+unconditional by construction: no slicing, no conditioning, just the distribution of
+the first value.
 
 ```{mermaid}
 flowchart LR
-    subgraph Day["gen_day_sequence"]
-        H0["h0"] --> H1["h1"] --> H2["h2"] --> Hn["&#8230; h23"]
+    subgraph Day["gen_day()"]
+        P["&#960;(x&#8320;)"] --> H0["h0"] --> H1["h1"] --> Hn["&#8230; h23"]
     end
-    Train["training subset"] --> Fit["fit 24 hourly<br/>MarkovChainSimulator2dKDE"]
+    Train["training subset"] --> Fit["fit &#960;(x&#8320;) + 23 hourly<br/>MarkovChainSimulator2dKDE"]
     Fit --> Day
-    Day -->|"repeat n_days"| Ens["generate_ensemble<br/>(n_days &times; 24)"]
 ```
 
-Because each day is an independent draw, `generate_ensemble(n_days=N)` yields an
-$N \times 24$ array — exactly the kind of input a downstream energy model
-integrates over to obtain distributions of output and requirements.
+Two consequences worth seeing:
+
+- For **irradiance**, every observed 00:00 value is exactly zero. A density fitted to
+  a list of identical numbers is a spike at that number, so π(x₀) returns 0.0 every
+  time. *"Irradiance starts at zero" is an observation read off the data, not an
+  assumption baked into a default argument.*
+- For **temperature and wind**, π(x₀) is a real distribution over observed midnight
+  values, so every drawn day gets its own realistic start. The old fixed default of
+  `0.0` sat outside the observed midnight range of both.
+
+π(x₀) is a **dated** object: midnight is a different distribution in January and in
+July, so one that does not know *when* it is being asked about is fitted to both at
+once and right for neither. That is why a chained series requires a start date.
+
+An ensemble is an explicit loop over `gen_day()`, yielding an $N \times 24$ array —
+exactly the kind of input a downstream energy model integrates over to obtain
+distributions of output and requirements.
+
+## Crossing midnight
+
+Independent days reset at midnight. A **continuous series** links them:
+`DayWindowGenerator.generate_series(start, n_days)` draws day 1's hour 0 from π(x₀),
+and every later day's hour 0 from **that day's** cross-midnight model, conditioned on
+the previous day's 23:00 value.
+
+That model is fitted from *actual consecutive dates* — for each target day d, the
+23:00 of d−1 looked up in the full record — never from calendar slots. The distinction
+matters because the training window wraps climatologically: a Jan 2 window contains
+late-December days, and pairing on the slot would produce Dec 31 **2012** → Jan 1
+**2012**, a 364-day backwards jump presented as a one-hour step.
+
+```{mermaid}
+flowchart LR
+    subgraph D1["14 March models"]
+        P["&#960;(x&#8320;)"] --> A0["h0"] --> A23["&#8230; h23"]
+    end
+    subgraph D2["15 March models"]
+        B0["h0"] --> B23["&#8230; h23"]
+    end
+    A23 -->|"cross-midnight model<br/><b>of 15 March</b>"| B0
+```
+
+The chain is therefore **time-inhomogeneous at daily resolution**: each calendar day
+uses models fitted to its own window, and the boundary step belongs to the *later*
+day, so every generated value comes from a model belonging to its own date.
+
+On the shipped record a real one-hour step across midnight correlates at 0.98
+(`wind_speed`) and 1.00 (`temp_air`); the same-day 23:00 → 00:00 pairs the old hour-0
+model learned correlate at only 0.36 and 0.89.
 
 ## Choosing the training subset
 

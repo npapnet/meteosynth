@@ -44,9 +44,8 @@ dataset (`data/pvgis_hourly_data.xlsx`) over estimates, and say which is which.
 
 Active — proposed or in progress:
 
-| document | status | what it is |
-|---|---|---|
-| [variable-specs-and-initialisation.md](variable-specs-and-initialisation.md) | **proposed** | Give each quantity an explicit physical support; replace `start_value` with a fitted initial distribution π(x₀) plus a real cross-midnight transition; truncate sampling to the support. Fixes negative irradiance, out-of-domain crashes, and the hour-0 quirk. Breaking — targets 0.2.0. Not started: no `variables.py`, `start_value` and `CC/CN/NC/NN` still live in `markov_chain_simulator_kde2d.py`. |
+*(none — everything currently designed has landed.)*
+
 
 ## Completed
 
@@ -57,5 +56,6 @@ the test suite, not before.
 
 | document | type | implemented | what it is |
 |---|---|---|---|
+| [completed/variable-specs-and-initialisation.md](completed/variable-specs-and-initialisation.md) | design spec | 2026-07-22 | An extensible `VariableSpec` registry replacing the fixed column whitelist; sampling truncated to each quantity's physical support; `start_value` replaced by a fitted initial distribution π(x₀) plus a real cross-midnight transition; `generate_series` on the rolling-window path; an optional source-adapter layer. Fixes negative irradiance, out-of-domain crashes and the hour-0 quirk. Carries an archive note recording two claims that did not survive measurement. |
 | [completed/rolling-day-window.md](completed/rolling-day-window.md) | design spec | 2026-07-15 | A rolling ±n-day training window as an alternative to the month split, incl. the `all_leap` calendar, Feb 29 handling, and why generators are built lazily rather than persisted. |
 | [completed/transition-pair-alignment.md](completed/transition-pair-alignment.md) | explainer | 2026-07-15 | Plain-language account of why `previous`/`current` pairs must be matched by date rather than row position, and how an innocent `sort_values` silently corrupts 26,808 training pairs. |

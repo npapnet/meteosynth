@@ -152,14 +152,14 @@ def test_feb29_window_on_leapfree_record_spans_feb14_to_mar15(leapfree_record):
 
 
 def test_feb29_generator_builds_from_a_leapfree_record(leapfree_record):
-    """Requirement: generate Feb 29 even with no observed Feb 29 anywhere."""
+    """Requirement: generate Feb 29 even with no observed Feb 29 anywhere.
+
+    No start value has to be supplied any more -- hour 0 comes from that day's own
+    pi(x0), which is fitted from the neighbouring days the window pooled.
+    """
     for attr in ("poa_direct", "wind_speed", "temp_air"):
         generator = DayWindowGenerator(leapfree_record, attr_str=attr, n_days=15)
-        subset = leapfree_record.get_day_window_subset(2, 29, n_days=15)
-        start = 0.0 if attr.startswith("poa") else float(
-            subset[subset["hour"] == 23][attr].mean()
-        )
-        profile = generator.for_day(2, 29).gen_day_sequence(start_value=start, seed=1)
+        profile = generator.gen_day(2, 29, seed=1)
 
         assert profile.shape == (24,)
         assert np.isfinite(profile).all(), f"{attr} produced a non-finite Feb 29"

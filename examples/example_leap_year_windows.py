@@ -113,10 +113,9 @@ def question_2(mdp: MetDataProcessor):
     print("\n  Generating a synthetic Feb 29 anyway:")
     for attr in ("poa_direct", "wind_speed", "temp_air"):
         generator = DayWindowGenerator(mdp, attr_str=attr, n_days=N_DAYS)
-        start = 0.0 if attr.startswith("poa") else float(
-            subset[subset["hour"] == 23][attr].mean()
-        )
-        profile = generator.for_day(2, 29).gen_day_sequence(start_value=start, seed=1)
+        # No start value to supply: hour 0 comes from this day's own pi(x0), fitted
+        # from the neighbouring days the window pooled.
+        profile = generator.gen_day(2, 29, seed=1)
         print(f"    {attr:16} -> 24 values, finite={np.isfinite(profile).all()}, "
               f"peak={np.nanmax(profile):7.2f}")
 
@@ -226,8 +225,7 @@ plot_window_membership(leap_mdp, free_mdp)
 plt.show()
 print("\nDone.")
 
-
-if __name__ == "__main__":
-    main()
+# Note: this file is a `#%%` cell script -- everything above runs at import time so the
+# cells can be stepped through in an editor. There is deliberately no main() to call.
 
 # %%

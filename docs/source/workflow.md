@@ -25,13 +25,16 @@ flowchart TD
     
     Pivot --> PairAlign["Build Transition Pairs: build_transition_pairs"]
     
-    PairAlign --> FitKDE["Fit 24 Hourly Simulators: MarkovChainSimulator2dKDE"]
+    PairAlign --> FitKDE["Fit 23 Hourly Simulators: MarkovChainSimulator2dKDE"]
     
-    FitKDE --> GenDay["Generate Daily Sequence: gen_day_sequence"]
-    
-    GenDay -->|"Loop 24 hours"| GenDay
-    
-    GenDay --> Ensemble["Generate Ensemble: generate_ensemble"]
+    PairAlign --> FitInit["Fit Initial Distribution: build_initial_values"]
+
+    FitKDE --> GenDay["Generate Daily Profile: gen_day"]
+    FitInit --> GenDay
+
+    GenDay -->|"Loop hours 1-23"| GenDay
+
+    GenDay --> Series["Chain Across Midnight: generate_series"]
 ```
 
 ---
@@ -131,7 +134,7 @@ from meteosynth import DayWindowGenerator
 
 dwg = DayWindowGenerator(mdp, attr_str="poa_direct", n_days=15)
 # Generates a sequence for Feb 29, fitting and caching the model on the fly
-feb29_day = dwg.gen_day_sequence(2, 29, seed=1)
+feb29_day = dwg.gen_day(2, 29, seed=1)
 ```
 
 ---
@@ -140,16 +143,16 @@ feb29_day = dwg.gen_day_sequence(2, 29, seed=1)
 
 Once the simulators are fitted, they are ready to produce new synthetic weather series:
 
-### Single Day Generation (`gen_day_sequence`)
-Generates a 24-hour sequence starting from a given initial state (e.g., zero irradiance at midnight):
+### Single Day Generation (`gen_day`)
+Generates a 24-hour profile. There is no initial state to supply — hour 0 is drawn from the fitted initial distribution $\pi(x_0)$:
 ```python
-profile = gen.gen_day_sequence(start_value=0.0, seed=42)
+profile = gen.gen_day(seed=42)
 ```
 * **Step-by-Step Transition**:
-  1. Starts at hour 0 with `current_val = start_value`.
-  2. For each hour $h \in [0, 23]$:
+  1. Draws hour 0 from $\pi(x_0)$, fitted to the observed 00:00 values of the training subset. For irradiance every observed midnight is zero, so this degenerates to a constant 0.0.
+  2. For each hour $h \in [1, 23]$:
      * Takes the hourly simulator `self._dic_simulator[h]`.
-     * Calls `sim.get_next_state(current_val)`.
+     * Calls `sim.get_next_state(current_val, rng=rng)`.
      * Update `current_val` with the sampled output.
   3. Returns a numpy array of shape `(24,)`.
 
@@ -161,9 +164,18 @@ profile = gen.gen_day_sequence(start_value=0.0, seed=42)
   4. Draws a random number $u \sim \mathcal{U}(0,1)$.
   5. Interpolates the CDF to find the next state $x_{t+1}$ (Inverse-Transform Sampling).
 
-### Ensemble Generation (`generate_ensemble`)
-To support Monte-Carlo studies, `generate_ensemble` repeats the single-day generation routine to draw multiple independent synthetic daily profiles:
+### Ensemble Generation
+To support Monte-Carlo studies, draw many independent days by looping. Sharing one `Generator` keeps the whole draw reproducible from a single seed, while $\pi(x_0)$ is redrawn for each day so every profile gets its own realistic start:
 ```python
-ensemble = gen.generate_ensemble(n_days=1000, start_value=0.0, seed=42)
+rng = np.random.default_rng(42)
+ensemble = np.vstack([gen.gen_day(rng=rng) for _ in range(1000)])
 # Returns a numpy array of shape (1000, 24)
 ```
+
+### Continuous Series (`generate_series`)
+A *chained* series links midnights instead of resetting them. It lives on `DayWindowGenerator` and requires a start date, because each day uses its own models and $\pi(x_0)$ is a dated object:
+```python
+year = dwg.generate_series(start=(1, 1), n_days=365, seed=42)
+# Returns a numpy array of shape (365, 24)
+```
+Day 1's hour 0 comes from $\pi(x_0)$; every later day's hour 0 comes from **that day's** cross-midnight model, conditioned on the previous day's 23:00 value.

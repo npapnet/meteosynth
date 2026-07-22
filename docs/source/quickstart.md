@@ -48,14 +48,14 @@ print(sim.generate_sequence(start_state=0.7, length=10, seed=42))
 
 ## End-to-end: a synthetic daily ensemble
 
-The typical workflow chains 24 hourly simulators into a full day and then draws
-an ensemble of days for Monte-Carlo analysis.
+The typical workflow fits an initial distribution plus 23 hourly transitions, walks
+them into a full day, and draws either independent days or a chained series.
 
 ```{mermaid}
 flowchart LR
-    A[PVGIS hourly data] --> B[MetDataProcessor<br/>month subset or<br/>rolling day window]
-    B --> C[EnvSeriesGenerator<br/>24 hourly simulators]
-    C --> D[generate_ensemble<br/>n_days &times; 24]
+    A[hourly data] --> B[MetDataProcessor<br/>month subset or<br/>rolling day window]
+    B --> C["EnvSeriesGenerator<br/>&#960;(x&#8320;) + 23 transitions"]
+    C --> D["gen_day()<br/>or generate_series()"]
     D --> E[Energy Monte-Carlo]
 ```
 
@@ -74,13 +74,26 @@ may = mdp.get_month_subset(5)
 
 gen = EnvSeriesGenerator(may, attr_str="poa_direct", bandwidth=0.1)
 
-# One synthetic day (24 hourly values, starting at 0 W/m2 at midnight):
-day = gen.gen_day_sequence(start_value=0.0, seed=1)
+# One synthetic day (24 hourly values). There is no start value to pass: hour 0 is
+# drawn from the fitted initial distribution pi(x0). For irradiance every observed
+# midnight is zero, so pi(x0) is a spike at zero and the day starts at 0.0 -- read
+# off the data rather than hard-coded.
+day = gen.gen_day(seed=1)
 
-# An ensemble of 500 independent synthetic days -> shape (500, 24):
-ensemble = gen.generate_ensemble(n_days=500, start_value=0.0, seed=1)
+# An ensemble of 500 independent days is an explicit loop. Share one Generator so the
+# whole draw is reproducible from a single seed, and pi(x0) is redrawn for each day.
+rng = np.random.default_rng(1)
+ensemble = np.vstack([gen.gen_day(rng=rng) for _ in range(500)])   # (500, 24)
 daily_energy = ensemble.sum(axis=1)          # crude Wh/m2 per day proxy
 print(daily_energy.mean(), daily_energy.std())
+```
+
+```{note}
+For `temp_air` and `wind_speed` this is a substantive change, not a cosmetic one. The
+old `start_value=0.0` default was *outside the observed midnight range* of both, so
+every day in an ensemble began at an impossible value -- and far enough out the KDE
+returned zero density and the next hour raised
+`ValueError: array must not contain infs or NaNs`.
 ```
 
 ## Choosing a training subset: month or rolling window
@@ -107,7 +120,19 @@ leap = mdp.get_day_window_subset(2, 29)                   # centred on Feb 29
 # DayWindowGenerator fits each day on demand behind a small LRU cache, so you
 # never hold all 366 at once (~126 MB per attribute if you did).
 dwg = DayWindowGenerator(mdp, attr_str="poa_direct", n_days=15)
-feb29_day = dwg.gen_day_sequence(2, 29, seed=1)
+feb29_day = dwg.gen_day(2, 29, seed=1)
+
+# A *chained* series lives here and only here -- it needs a start date, because each
+# day uses its own models and each midnight uses that day's cross-midnight transition.
+year = dwg.generate_series(start=(1, 1), n_days=365, seed=1)      # (365, 24)
+```
+
+```{note}
+`generate_series` is deliberately not available on `EnvSeriesGenerator`. A month
+subset has one pooled initial distribution and one set of transitions shared by every
+generated day, so there is no honest answer to "what does day 32 look like". Chaining
+months by hand would step discontinuously twelve times a year in a quantity that
+varies smoothly.
 ```
 
 ```{note}

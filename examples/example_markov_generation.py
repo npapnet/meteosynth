@@ -73,11 +73,11 @@ def main():
 
     # 4. Generate 10 synthetic daily profiles
     print("\nGenerating 10 synthetic daily profiles for Plane of Array Direct Irradiance...")
-    synthetic_profiles = []
-    for i in range(10):
-        # We start with 0.0 irradiance at hour 0 (midnight)
-        profile = generator.gen_day_sequence(start_value=0.0, seed=None)
-        synthetic_profiles.append(profile)
+    # Hour 0 is drawn from the fitted initial distribution pi(x0). For poa_direct every
+    # observed midnight is zero, so pi(x0) is a spike at zero and each day starts at 0.0
+    # -- read off the data rather than hard-coded as a default argument.
+    rng = np.random.default_rng(42)
+    synthetic_profiles = [generator.gen_day(rng=rng) for _ in range(10)]
 
     # 5. Plot the generated profiles
     plt.figure(figsize=(10, 6))

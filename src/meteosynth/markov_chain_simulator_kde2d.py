@@ -3,57 +3,115 @@
 Simulates a continuous Markov-chain process by fitting a 2D KDE to the joint
 probability distribution of ``(previous, current)`` value pairs and sampling
 from the resulting conditional distribution ``p(current | previous)``.
+
+Sampling is confined to the physical support declared by a
+:class:`~meteosynth.variables.VariableSpec`, so out-of-support values are unsamplable
+by construction rather than merely unlikely. See
+``docs/design/variable-specs-and-initialisation.md`` section 3.
 """
 
 # Developer notes / TODO (kept out of the rendered API docs):
-#   - CRITICAL (open): NN/CN slices can still produce negative values if the
-#     evaluation domain is padded; the domain is currently kept tight to the
-#     data (padding=0) to avoid this.
 #   - get_conditional_density should expose singularity cases more directly.
 #   - PERFORMANCE: move the KDE evaluation into __init__ instead of doing it on
 #     every get_next_state call.
 #   Done: singular-covariance handling, dict return {domain, pdf, cdf},
-#   empirical CDF, common prev/current domain, CN/NC singularity cases.
+#   empirical CDF, common prev/current domain, CN/NC singularity cases,
+#   support truncation (the old CRITICAL about padded domains producing
+#   negatives -- the +/-10% padding is gone and the domain is clamped to the
+#   spec's support in both the 1D and 2D paths).
 
 #%%
 import pandas as pd
 import numpy as np
 from scipy import stats
 from scipy import integrate
-from typing import List, Optional, Tuple
+from enum import Enum, auto
+from typing import List, Optional, Tuple, Union
 import matplotlib.pyplot as plt
 import logging
 from matplotlib.colors import LinearSegmentedColormap
+
+from .variables import VariableSpec
+
+
+class Kind(Enum):
+    """
+    What kind of transition the *data* supports -- not what kind of variable it is.
+
+    Degeneracy is empirical: which hours are constant depends on latitude and season,
+    so it is detected from the data and cannot be declared in a spec. Irradiance is
+    identically zero at night and so degenerates there; wind and temperature never do.
+
+    Replaces the old two-letter ``singularity_type`` codes:
+
+    ============  ==============================================  =========
+    ``Kind``      meaning                                         was
+    ============  ==============================================  =========
+    ``KDE_2D``    previous and current both vary                   ``NN``
+    ``KDE_1D``    previous constant, current varies                ``CN``
+    ``CONSTANT``  current constant                                 ``NC``, ``CC``
+    ============  ==============================================  =========
+
+    ``NC`` and ``CC`` collapse into one: both already dispatched to the same routine
+    (return the constant), and the distinction never affected behaviour.
+    """
+
+    KDE_2D = auto()
+    KDE_1D = auto()
+    CONSTANT = auto()
+
+
+def _as_rng(rng: Union[None, int, np.random.Generator]) -> np.random.Generator:
+    """
+    Coerce ``None`` / an int seed / a Generator into a Generator.
+
+    Every stochastic path in this package draws from an explicit
+    :class:`numpy.random.Generator` rather than the global ``np.random`` state. The old
+    code called ``np.random.seed``, which mutates process-wide state as a side effect --
+    reproducible, but only by making the whole process reproducible, and impossible to
+    thread through an ensemble built from many independent calls.
+    """
+    if isinstance(rng, np.random.Generator):
+        return rng
+    return np.random.default_rng(rng)
+
 
 class MarkovChainSimulator2dKDE:
     """
     A class to simulate continuous Markov chain processes using a 2D KDE for
     joint probability distribution between previous and current values.
 
-    Assumptions:
-     -  the domain of the data (previous and current) is the common
+    Parameters
+    ----------
+    data : pd.DataFrame
+        DataFrame containing ``previous`` and ``current`` columns of floats.
+    bandwidth : float, optional
+        Bandwidth for the KDE. ``None`` uses Scott's rule.
+    spec : VariableSpec, optional
+        Physical constraints of the quantity. When given, the evaluation domain is
+        clamped to ``spec.support`` in both sampling paths, making out-of-support
+        samples impossible. When ``None`` the domain is the observed range alone,
+        which is the old (unconstrained) behaviour.
     """
-    singularity_type: Optional[str] = None  # type of singularity (CC, CN, NC, NN)
 
-    def __init__(self, data: pd.DataFrame, bandwidth: Optional[float] = None):
-        """
-        Initialize the continuous Markov chain simulator with historical data.
-        
-        Parameters:
-        -----------
-        data : pd.DataFrame
-            DataFrame containing 'previous' and 'current' columns with float values.
-        bandwidth : float or str, optional
-            Bandwidth for kernel density estimation. If None, Scott's rule is used.
-        """
+    #: What the data supports. See :class:`Kind`.
+    kind: Optional[Kind] = None
+
+    def __init__(
+        self,
+        data: pd.DataFrame,
+        bandwidth: Optional[float] = None,
+        spec: Optional[VariableSpec] = None,
+    ):
         if 'previous' not in data.columns or 'current' not in data.columns:
             raise ValueError("DataFrame must contain 'previous' and 'current' columns")
-            
+
         self.data = data
         self.bandwidth = bandwidth
+        self.spec = spec
 
-        # Default so that non-NN singularity types (CN/NC/CC) still expose a
-        # ``joint_kde`` attribute (only the NN case builds a real 2D KDE).
+        # Default so that degenerate kinds still expose a ``joint_kde`` attribute
+        # (only KDE_2D builds a real 2D KDE).
         self.joint_kde = None
 
         # Extract array of values
@@ -61,9 +119,12 @@ class MarkovChainSimulator2dKDE:
         self.current_values:np.array = data['current'].values
 
         self._cat_singularity()
-        
 
-        
+    @property
+    def is_degenerate(self) -> bool:
+        """True when the data does not support a full 2D conditional model."""
+        return self.kind is not Kind.KDE_2D
+
     def _build_joint_distribution(self):
         """Build 2D joint kernel density estimation."""
         # Stack previous and current values
@@ -81,55 +142,67 @@ class MarkovChainSimulator2dKDE:
 
     def _cat_singularity(self):
         """
-        Categorise the singularity type using two-letter directional codes.
+        Detect what kind of transition the data supports, and fit accordingly.
 
-        Codes (first letter ⇒ previous values, second ⇒ current values):
-            • "CC" – constant  → constant
-            • "CN" – constant  → non-constant
-            • "NC" – non-constant → constant
-            • "NN" – non-constant → non-constant
+        Sets :attr:`kind`. See :class:`Kind` for the categories and the codes they
+        replace.
         """
         std_prev = np.std(self.previous_values)
         std_curr = np.std(self.current_values)
 
-        if std_prev == 0 and std_curr == 0:
-            self.singularity_type = "CC"
-        elif std_prev == 0 and std_curr > 0:
-            self.singularity_type = "CN"
+        if std_curr == 0:
+            # Current is constant: nothing to sample, whatever previous does.
+            # This is the old NC and CC collapsed into one.
+            self.kind = Kind.CONSTANT
+        elif std_prev == 0:
+            self.kind = Kind.KDE_1D
             self._cdf_table = self.calculate_next_state_cdf(bandwidth=self.bandwidth)
-        elif std_prev > 0 and std_curr == 0:
-            self.singularity_type = "NC"
         else:
-            self.singularity_type = "NN"
+            self.kind = Kind.KDE_2D
             # Build the 2D joint distribution
             self._build_joint_distribution()
 
-        return self.singularity_type  # adjust if you prefer a different return value
+        return self.kind
 
     @staticmethod
-    def _calculate_1d_kde_distribution(values, bandwidth=None, num_points=1000)->pd.DataFrame:
+    def _calculate_1d_kde_distribution(
+        values, bandwidth=None, num_points=1000, spec: Optional[VariableSpec] = None
+    ) -> pd.DataFrame:
         """
-        Calculate kernel density estimation distribution for a set of values.
-        
+        Calculate a kernel density estimation distribution for a set of values.
+
         Args:
             values (array-like): Values to calculate KDE for
             bandwidth (float, optional): Bandwidth for KDE. Defaults to None (uses Scott's rule).
             num_points (int, optional): Number of points for evaluation. Defaults to 1000.
-            
+            spec (VariableSpec, optional): If given, the evaluation domain is clamped to
+                its physical support.
+
         Returns:
-            tuple: (evaluation_points, pdf_values, cdf_values)
+            pd.DataFrame: columns ``x``, ``pdf``, ``cdf``.
+
+        Notes
+        -----
+        The evaluation domain is the observed range, **not** padded. This used to pad by
+        +/-10% on both sides, which is where generated irradiance got its negative
+        values: for the dawn hour the padded domain reached -8.10 W/m2 against an
+        observed minimum of 0.00, and 30.8% of that hour's samples came out negative.
+        Since ``np.interp`` cannot return a value outside the domain it is given,
+        removing the padding and clamping to the support makes out-of-support samples
+        impossible rather than merely rare.
         """
         # Ensure inputs are numpy arrays
         values = np.asarray(values)
-        
+
         # Calculate the kernel density estimation (KDE)
         kde = stats.gaussian_kde(values, bw_method=bandwidth)
-        
-        # Create a range slightly wider than the data for evaluating the PDF and CDF
-        min_val = values.min() - 0.1 * (values.max() - values.min())
-        max_val = values.max() + 0.1 * (values.max() - values.min())
+
+        # Domain is the observed range, clamped to the physical support. No padding.
+        min_val, max_val = float(values.min()), float(values.max())
+        if spec is not None:
+            min_val, max_val = spec.clamp_domain(min_val, max_val)
         eval_points = np.linspace(min_val, max_val, num_points)
-        
+
         # Calculate the PDF
         pdf_values = kde(eval_points)
 
@@ -157,30 +230,38 @@ class MarkovChainSimulator2dKDE:
             pd.DataFrame: _description_
         """
         if update_bandwidth:
-            self.bandwidth = bandwidth 
-        df_cdf =  MarkovChainSimulator2dKDE._calculate_1d_kde_distribution(values=self.current_values, 
-                                                                           bandwidth=bandwidth)
+            self.bandwidth = bandwidth
+        df_cdf =  MarkovChainSimulator2dKDE._calculate_1d_kde_distribution(values=self.current_values,
+                                                                           bandwidth=bandwidth,
+                                                                           spec=self.spec)
         return df_cdf
 
     def _get_x_domain(self, resolution: int = 1000, padding:float=0.0) -> np.ndarray:
         """
         Get the domain of x values for the current value based on the data range.
-        
+
+        Clamped to ``self.spec.support`` when a spec is present, so that inverse-transform
+        sampling over this domain cannot return an out-of-support value.
+
         Parameters:
         -----------
         resolution : int
             Number of points to evaluate
         padding : float
-            Padding to extend the domain range (default is 0.0, no padding)
-        
+            Padding to extend the domain range (default is 0.0, no padding). Applied
+            *before* the support clamp, so padding can never push the domain outside the
+            physical bounds.
+
         Returns:
         --------
         np.ndarray: Array of x values (current values) for the KDE evaluation.
         """
         dom_min, dom_max, dom_range = self._calc_domain()
-        return np.linspace(dom_min - padding*dom_range, 
-                           dom_max + padding*dom_range, 
-                           resolution)
+        lo = dom_min - padding * dom_range
+        hi = dom_max + padding * dom_range
+        if self.spec is not None:
+            lo, hi = self.spec.clamp_domain(lo, hi)
+        return np.linspace(lo, hi, resolution)
     
     
     def _calc_domain(self, previous=None, current=None):
@@ -263,9 +344,24 @@ class MarkovChainSimulator2dKDE:
         dom_min, dom_max, dom_range = self._calc_domain(previous=x_values, current=x_values)
         resolution = len(x_values)
 
+        # Clamp the conditioning value into the range the model was actually fitted
+        # over. Far enough outside it, every kernel evaluates to ~0, the joint density
+        # sums to zero, and the 0/0 below yields NaN -- which then kills the *next*
+        # hour with "array must not contain infs or NaNs". Extrapolating a KDE beyond
+        # its data is not meaningful anyway, so the nearest fitted value is both the
+        # safest and the most faithful answer.
+        #
+        # This is reachable in ordinary use: in a rolling series, day d's 23:00 value
+        # comes from day d's window fit while day d+1's cross-midnight model is fitted
+        # on a different (overlapping) sample, so the conditioning value can land just
+        # outside. See tests/test_window_boundary_continuity.py.
+        prev_value = float(
+            np.clip(prev_value, self.previous_values.min(), self.previous_values.max())
+        )
+
         # Create grid points combining fixed previous value with all current values
         grid_points = np.vstack([np.full_like(x_values, prev_value), x_values])
-        
+
         # Evaluate joint density at these points
         if self.joint_kde is not None:
             joint_density = self.joint_kde(grid_points)
@@ -277,11 +373,31 @@ class MarkovChainSimulator2dKDE:
             singularity = True
             singl_value_0 = self.previous_values.mean()
             singl_value_1 = self.current_values.mean()
-                
+
         # Normalize to get conditional density
         # p(current|previous) = p(previous,current) / p(previous)
         # We can skip computing p(previous) since we'll normalize the density anyway
-        conditional_density = joint_density / np.sum(joint_density)
+        total = np.sum(joint_density)
+        if not np.isfinite(total) or total <= 0:
+            # Belt and braces: clamping should make this unreachable, but a NaN escaping
+            # here corrupts the rest of the day silently, so fall back to the marginal
+            # of ``current`` -- the honest answer when conditioning carries no
+            # information -- rather than propagating it.
+            logging.warning(
+                "joint density vanished at previous=%.6g; falling back to the marginal "
+                "of `current`. This suggests the conditioning value is far outside the "
+                "fitted range.", prev_value,
+            )
+            joint_density = np.histogram(
+                self.current_values, bins=len(x_values),
+                range=(float(x_values[0]), float(x_values[-1])),
+            )[0].astype(float)
+            total = np.sum(joint_density)
+            if total <= 0:
+                joint_density = np.ones_like(x_values, dtype=float)
+                total = float(len(x_values))
+
+        conditional_density = joint_density / total
         conditional_density *= resolution / dom_range  # Scale by range
         
         # TODO: Add empirical CDF to the output
@@ -296,48 +412,48 @@ class MarkovChainSimulator2dKDE:
     
 
 
-    def get_next_state(self, current_state: float, seed: Optional[int] = None) -> float:
+    def get_next_state(
+        self,
+        current_state: float,
+        rng: Union[None, int, np.random.Generator] = None,
+    ) -> float:
         """
-        Dispatch to the appropriate transition routine, depending on the
-        previously-computed singularity code held in ``self.singularity_type``.
-        
-        Generate the next state based on the current state using conditional density.
-        
-        Parameters:
-        -----------
+        Sample the next state, dispatching on :attr:`kind`.
+
+        Parameters
+        ----------
         current_state : float
-            The current state from which to transition
-        seed : int, optional
-            Random seed for reproducibility
-            
-        Returns:
-        --------
-        float: The next state sampled from the conditional distribution
+            The current state from which to transition. Ignored when
+            :attr:`kind` is not :attr:`Kind.KDE_2D` -- a 1D or constant model has
+            nothing to condition on.
+        rng : None, int or np.random.Generator, optional
+            Source of randomness. An int is treated as a seed for a fresh generator;
+            ``None`` draws from a fresh unseeded one. Pass a ``Generator`` to draw
+            successive values from one stream, which is what the chain walkers do.
+
+        Returns
+        -------
+        float
+            The next state, guaranteed inside ``self.spec.support`` when a spec is set.
         """
-        if seed is not None:
-            np.random.seed(seed)
-        
-        # --- Python ≥ 3.10: match-case “switch” -------------------------------
-        match self.singularity_type:
-            case "NN":
-                return self._get_next_state_NN(current_state, seed=seed)
-            case "CN":
-                return self._get_next_state_CN(current_state, seed=seed)
-            case "NC"|"CC":
-                return self._get_next_state_CC(current_state, seed=seed)
+        rng = _as_rng(rng)
+
+        match self.kind:
+            case Kind.KDE_2D:
+                return self._get_next_state_kde2d(current_state, rng)
+            case Kind.KDE_1D:
+                return self._get_next_state_kde1d(rng)
+            case Kind.CONSTANT:
+                return self._get_next_state_constant()
             case _:
-                raise ValueError(f"Unknown singularity_type: {self.singularity_type!r}")
+                raise ValueError(f"Unknown kind: {self.kind!r}")
 
     def generate_sequence(self,
                           start_state: float,
                           length: int,
-                          seed: Optional[int] = None) -> List[float]:
+                          rng: Union[None, int, np.random.Generator] = None) -> List[float]:
         """
         Generate a Markov sequence of states starting from ``start_state``.
-
-        The seed (if given) is applied once, at the start of the sequence, so
-        the whole trajectory is reproducible while remaining stochastic from
-        step to step.
 
         Parameters
         ----------
@@ -346,98 +462,56 @@ class MarkovChainSimulator2dKDE:
         length : int
             Number of transitions to simulate. The returned list has
             ``length + 1`` elements (the start state plus each transition).
-        seed : int, optional
-            Random seed for reproducibility of the whole sequence.
+        rng : None, int or np.random.Generator, optional
+            Source of randomness, resolved once so the whole trajectory is
+            reproducible while remaining stochastic from step to step.
 
         Returns
         -------
         List[float]
             The generated sequence, including ``start_state`` as the first item.
         """
-        if seed is not None:
-            np.random.seed(seed)
+        rng = _as_rng(rng)
 
         sequence = [start_state]
         current_state = start_state
         for _ in range(length):
-            # Do not forward the seed here, otherwise every step would reseed
-            # to the same value and produce an identical draw each time.
-            current_state = self.get_next_state(current_state)
+            # Draw from the one stream: re-resolving per step would restart it and
+            # produce an identical draw every time.
+            current_state = self.get_next_state(current_state, rng=rng)
             sequence.append(current_state)
         return sequence
 
-    def _get_next_state_NN(self, current_state: float, seed: Optional[int] = None) -> float:
-        """Generate the next state for non-constant previous and current values.
+    def _get_next_state_kde2d(self, current_state: float, rng: np.random.Generator) -> float:
+        """Sample from ``p(current | previous=current_state)`` via the 2D KDE.
 
-        Args:
-            current_state (float): _description_
-            seed (Optional[int], optional): _description_. Defaults to None.
-
-        Returns:
-            float: _description_
+        Slices the joint density vertically at ``current_state`` and inverse-transform
+        samples the resulting 1D conditional.
         """
-                
-        # Get conditional distribution
         res_dict = self.get_conditional_density(current_state)
-        curr_values, conditional_density, cdf = res_dict['domain'], res_dict['pdf'], res_dict['cdf']
-        
-        # Generate random value and find corresponding point in CDF
-        random_value = np.random.random()
+        curr_values, cdf = res_dict['domain'], res_dict['cdf']
 
-        # Use inverse transform sampling to get samples from the distribution
-        sample = np.interp(random_value, cdf, curr_values)
-        return sample
-    
+        return float(np.interp(rng.random(), cdf, curr_values))
 
+    def _get_next_state_kde1d(self, rng: np.random.Generator) -> float:
+        """Sample from the marginal of ``current``, ignoring the previous value.
 
-    def _get_next_state_CN(self, current_state:float, seed:Optional[int] = None, bandwidth:float= None) -> float:
-        """Generate the next state for constant previous and non-constant current values.
-
-        Samples from a continuous distribution defined by values and their PDF.
-
-        Args:
-            current_state (float): starting point for the next state (obsolete for this case). 
-                                   This is kept only for consistency with the other methods.
-            seed (Optional[int], optional): _description_. Defaults to None.
-
-        Returns:
-            float: _description_
+        Used when ``previous`` is constant: there is no information in it to condition
+        on, so the transition reduces to a draw from the current hour's own
+        distribution.
         """
-        # in this case, the markov chain only uses the current value to generate the next state. 
-        # So the idea is to create a cdf of the current values and sample from it.
-        # calculate the pdf of the current values
+        return float(
+            np.interp(rng.random(), self._cdf_table.cdf.values, self._cdf_table.x.values)
+        )
 
-        # Set random seed if provided
-        if seed is not None:
-            np.random.seed(seed)
+    def _get_next_state_constant(self) -> float:
+        """Return the constant value that ``current`` always takes.
 
-        if bandwidth is not None:
-            # update the cdf with the new bandwidth
-            self._cdf_table  = self.calculate_next_state_cdf(bandwidth=bandwidth)
-        
-        # Generate uniform random numbers
-        uniform_sample = np.random.random()
-        
-        # Use inverse transform sampling to get samples from the distribution
-        samples = np.interp(uniform_sample, self._cdf_table.cdf.values, self._cdf_table.x.values)
-        return samples
-    
-    
-    def _get_next_state_CC(self, current_state: float, seed: Optional[int] = None) -> float:
-        """Generate the next state for constant previous and current values.
-
-        Args:
-            current_state (float): _description_
-            seed (Optional[int], optional): _description_. Defaults to None.
-
-        Returns:
-            float: _description_
+        Deterministic, so it consumes no randomness -- which is why the walkers can
+        share one generator across degenerate and non-degenerate hours without the
+        degenerate ones perturbing the stream.
         """
-        # In this case, the next state is always the same independent of the current state
-    
-        
-        # Return the sampled state
-        return self.current_values[0]
+        return float(self.current_values[0])
    
     def plot_joint_distribution(self, resolution: int = 100) -> Tuple[plt.Figure, plt.Axes]:
         """
@@ -608,13 +682,13 @@ class MarkovChainSimulator2dKDE:
 # Example usage
 if __name__ == "__main__":
     # Create a sample dataset with continuous values
-    np.random.seed(42)
+    demo_rng = np.random.default_rng(42)
     n_samples = 1000
-    
+
     # Generate data where the next value is related to the previous
     # next = previous * 0.8 + random noise
-    prev_values = np.random.uniform(0, 10, n_samples)
-    next_values = prev_values * 0.8 + np.random.normal(0, 1, n_samples)
+    prev_values = demo_rng.uniform(0, 10, n_samples)
+    next_values = prev_values * 0.8 + demo_rng.normal(0, 1, n_samples)
     
     data = pd.DataFrame({
         'previous': prev_values,
@@ -629,12 +703,12 @@ if __name__ == "__main__":
     print(simulator.summary())
     
     # Generate a single next state
-    start_value = 7.0
-    print(f"\nNext state from {start_value} (with seed):", simulator.get_next_state(start_value, seed=42))
-    
+    start_state = 7.0
+    print(f"\nNext state from {start_state} (with seed):", simulator.get_next_state(start_state, rng=42))
+
     # Generate a sequence
-    print(f"\nSequence starting from {start_value}:")
-    sequence = simulator.generate_sequence(start_value, length=5, seed=42)
+    print(f"\nSequence starting from {start_state}:")
+    sequence = simulator.generate_sequence(start_state, length=5, rng=42)
     print(sequence)
     
     # Plot joint distribution
