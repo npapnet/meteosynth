@@ -2,6 +2,11 @@
 
 Status: implemented · Author: N. Papadakis · Date: 2026-07-15
 
+> **Archive note.** Moved to `docs/design/completed/` on 2026-07-22. Implemented
+> 2026-07-15 (`214250c`, `ce6c428`); verified green against the full test suite
+> (152/152 passing as of this move). See [transition-pair-alignment](transition-pair-alignment.md)
+> for the companion fix this feature required.
+
 This document describes a rolling ±n-day window as an *alternative* to the
 month-based split for building Markov transition data. The month split is retained;
 the two are selectable strategies.

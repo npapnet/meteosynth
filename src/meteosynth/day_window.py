@@ -18,7 +18,7 @@ records pooled from leap and non-leap years line up. Note that pandas'
 ``.dt.dayofyear`` does *not* have this property: it shifts by one after February in leap
 years, which would misalign the whole March-December calendar when pooling years.
 
-See ``docs/design/rolling-day-window.md`` for the full rationale.
+See ``docs/design/completed/rolling-day-window.md`` for the full rationale.
 """
 
 from __future__ import annotations

@@ -113,7 +113,7 @@ feb29_day = dwg.gen_day_sequence(2, 29, seed=1)           # a synthetic Feb 29
 
 > **Note:** with only two years of data both strategies pool ~62 days, so the
 > window buys *centring* and *smoothness*, not sample size. See
-> [`docs/design/rolling-day-window.md`](docs/design/rolling-day-window.md).
+> [`docs/design/completed/rolling-day-window.md`](docs/design/completed/rolling-day-window.md).
 
 Fetch real data from PVGIS with `meteosynth.metdata_pvgis`:
 

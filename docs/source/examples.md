@@ -85,7 +85,7 @@ leap = DayWindowGenerator(mdp, attr_str="poa_direct").gen_day_sequence(2, 29)
 
 ```{note}
 With only two years of data both strategies pool ~62 days, so the window buys
-*centring* and *smoothness*, not sample size. See `docs/design/rolling-day-window.md`.
+*centring* and *smoothness*, not sample size. See `docs/design/completed/rolling-day-window.md`.
 ```
 
 ## 4. A full synthetic year

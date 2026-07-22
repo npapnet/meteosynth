@@ -2,6 +2,11 @@
 
 Status: explainer · Author: N. Papadakis · Date: 2026-07-15
 
+> **Archive note.** Moved to `docs/design/completed/` on 2026-07-22. The fix this
+> document argues for landed alongside [rolling-day-window](rolling-day-window.md)
+> on 2026-07-15 (`214250c`); the order-invariance regression test it specifies is in
+> `tests/test_transition_pairs.py` and passes.
+
 This document explains a bug that is **hiding** in `generators.py` right now. It is not
 causing trouble today. But the rolling-day-window feature
 ([rolling-day-window](rolling-day-window.md)) is exactly the kind of code that would wake it up, and when

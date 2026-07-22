@@ -42,8 +42,20 @@ dataset (`data/pvgis_hourly_data.xlsx`) over estimates, and say which is which.
 
 ## Contents
 
+Active — proposed or in progress:
+
 | document | status | what it is |
 |---|---|---|
-| [variable-specs-and-initialisation.md](variable-specs-and-initialisation.md) | **proposed** | Give each quantity an explicit physical support; replace `start_value` with a fitted initial distribution π(x₀) plus a real cross-midnight transition; truncate sampling to the support. Fixes negative irradiance, out-of-domain crashes, and the hour-0 quirk. Breaking — targets 0.2.0. |
-| [rolling-day-window.md](rolling-day-window.md) | implemented | A rolling ±n-day training window as an alternative to the month split, incl. the `all_leap` calendar, Feb 29 handling, and why generators are built lazily rather than persisted. |
-| [transition-pair-alignment.md](transition-pair-alignment.md) | explainer | Plain-language account of why `previous`/`current` pairs must be matched by date rather than row position, and how an innocent `sort_values` silently corrupts 26,808 training pairs. |
+| [variable-specs-and-initialisation.md](variable-specs-and-initialisation.md) | **proposed** | Give each quantity an explicit physical support; replace `start_value` with a fitted initial distribution π(x₀) plus a real cross-midnight transition; truncate sampling to the support. Fixes negative irradiance, out-of-domain crashes, and the hour-0 quirk. Breaking — targets 0.2.0. Not started: no `variables.py`, `start_value` and `CC/CN/NC/NN` still live in `markov_chain_simulator_kde2d.py`. |
+
+## Completed
+
+Implemented, tested, and moved to [`completed/`](completed/) so this top-level folder
+only holds work still in flight. Each retains its own status line plus an archive note
+recording when it landed; move a doc here once its feature is implemented and green in
+the test suite, not before.
+
+| document | type | implemented | what it is |
+|---|---|---|---|
+| [completed/rolling-day-window.md](completed/rolling-day-window.md) | design spec | 2026-07-15 | A rolling ±n-day training window as an alternative to the month split, incl. the `all_leap` calendar, Feb 29 handling, and why generators are built lazily rather than persisted. |
+| [completed/transition-pair-alignment.md](completed/transition-pair-alignment.md) | explainer | 2026-07-15 | Plain-language account of why `previous`/`current` pairs must be matched by date rather than row position, and how an innocent `sort_values` silently corrupts 26,808 training pairs. |

@@ -20,7 +20,7 @@ always slot 61 regardless of the year. Non-leap years simply never emit slot 60.
 
     Jan 1 -> 1  ...  Feb 28 -> 59,  Feb 29 -> 60,  Mar 1 -> 61  ...  Dec 31 -> 366
 
-See `docs/design/rolling-day-window.md` and `docs/source/theory.md`.
+See `docs/design/completed/rolling-day-window.md` and `docs/source/theory.md`.
 """
 
 import matplotlib.pyplot as plt

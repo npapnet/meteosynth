@@ -63,7 +63,7 @@ def build_transition_pairs(wide: pd.DataFrame, hour: int) -> pd.DataFrame:
     correct while both slices happen to share a day ordering; it fails silently -- same
     lengths, no exception, ~27k mispaired rows -- as soon as anything re-sorts the input.
     Here, alignment is keyed on the date index, so it holds under any ordering. See
-    ``docs/design/transition-pair-alignment.md``.
+    ``docs/design/completed/transition-pair-alignment.md``.
 
     Days with a missing value at either hour are dropped, and only those days.
 
@@ -311,7 +311,7 @@ class DayWindowGenerator:
     numbers already present in the source data, ~31x duplicated across overlapping
     windows, to save 58 ms -- and it does not work at the default ``bandwidth=0.1``
     anyway, since ``scipy``'s ``gaussian_kde`` stores an unpicklable local lambda in
-    ``covariance_factor``. See ``docs/design/rolling-day-window.md``.
+    ``covariance_factor``. See ``docs/design/completed/rolling-day-window.md``.
 
     Parameters
     ----------

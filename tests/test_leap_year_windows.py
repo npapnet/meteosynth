@@ -12,7 +12,7 @@ to pin the two questions that are otherwise impossible to see working:
 2. With no leap year in the record at all, can Feb 29 still be generated from its
    late-February and early-March neighbours?
 
-See ``TODOs.md`` item 1 and ``docs/design/rolling-day-window.md`` (Caveat B).
+See ``TODOs.md`` item 1 and ``docs/design/completed/rolling-day-window.md`` (Caveat B).
 """
 
 import numpy as np

@@ -17,7 +17,7 @@ generator steps discontinuously at every month boundary.
 Note what the window does *not* buy: with only 2 years of data both strategies pool ~62
 days, so this is about *centring* and *smoothness*, not sample size.
 
-See `docs/design/rolling-day-window.md` for the full rationale.
+See `docs/design/completed/rolling-day-window.md` for the full rationale.
 """
 
 import pathlib

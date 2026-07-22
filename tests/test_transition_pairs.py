@@ -7,7 +7,7 @@ Two tests here carry the weight:
 * ``test_pairs_are_order_invariant`` is the executable proof that the alignment hazard is
   disarmed. It fails on the legacy positional implementation and passes on the wide one.
 
-See ``docs/design/transition-pair-alignment.md`` for what the hazard is and why it is
+See ``docs/design/completed/transition-pair-alignment.md`` for what the hazard is and why it is
 silent.
 """
 
@@ -220,7 +220,7 @@ def test_generate_hr_simulator_validates_its_arguments(mdp_fixture):
 
 # The hour-0 quirk, pinned deliberately: hour 0's "previous" is hour 23 of the SAME day,
 # not 23:00 the night before. Preserved so this refactor changes no output; see
-# docs/design/rolling-day-window.md for the follow-up.
+# docs/design/completed/rolling-day-window.md for the follow-up.
 def test_hour_zero_pairs_with_hour_23_of_the_same_day(mdp_fixture):
     window = mdp_fixture.get_day_window_subset(6, 15, n_days=2)
     pairs = build_transition_pairs(_to_wide(window, "poa_direct"), 0)

@@ -10,7 +10,7 @@ to re-derive it. Design rationale lives in [`docs/design/`](docs/design/README.m
 **Status:** ✅ **DONE** — behaviour confirmed **correct**, now tested and demonstrable
 · `tests/test_leap_year_windows.py` (30 tests) ·
 `examples/example_leap_year_windows.py` · documented in `docs/source/theory.md` and
-`docs/design/rolling-day-window.md`
+`docs/design/completed/rolling-day-window.md`
 
 The shipped record is 2 years (2011–2012) with exactly one leap day, so **no test and no
 example exercised the cases that actually mattered**: a multi-year record with several leap
@@ -73,7 +73,7 @@ synthesised from its neighbours.
    leap day enters and leaves a window, and plots which (year, slot) cells feed a
    synthetic Feb 29. No PVGIS fetch.
 3. **Documented** in `docs/source/theory.md` (a "What this means around the end of
-   February" subsection) and `docs/design/rolling-day-window.md` (Caveat B), both stating
+   February" subsection) and `docs/design/completed/rolling-day-window.md` (Caveat B), both stating
    the deficit and the interpolation point explicitly.
 
 **One correction to the plan above:** slot symmetry is 31 slots only when leap years are
@@ -233,7 +233,7 @@ multiprocessing of fitted generators. A custom `__reduce__` would fix it.
 
 Deliberately not blocking anything today: generators are built lazily behind an LRU cache
 precisely because persisting them buys ~58 ms and duplicates data already on disk. See
-[`docs/design/rolling-day-window.md`](docs/design/rolling-day-window.md).
+[`docs/design/completed/rolling-day-window.md`](docs/design/completed/rolling-day-window.md).
 
 ---
 
