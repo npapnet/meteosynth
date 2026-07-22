@@ -30,7 +30,17 @@ Daily Series Generators
 Data Processing
 ---------------
 
+.. automodule:: meteosynth.constants
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 .. automodule:: meteosynth.met_data_processor
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: meteosynth.day_window
    :members:
    :undoc-members:
    :show-inheritance:

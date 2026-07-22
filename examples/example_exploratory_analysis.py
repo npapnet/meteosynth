@@ -91,10 +91,10 @@ def main():
     print("- Creating Error Bar Plot...")
     spl.plot_hourly_mean_with_error_bars_plt(met_data=month_data, value_str='poa_direct', k=1.0, show_points=False)
     
-    # Plotnine monthly line plot faceted by year
-    print("- Creating plotnine faceted line plot...")
-    p = spl.p9_month_by_year(mdp, month_ind=month_ind, value_col='poa_direct')
-    print(p)
+    # Faceted monthly line plot by year using Seaborn
+    print("- Creating Seaborn faceted line plot...")
+    g = spl.plot_month_by_year_sns(mdp, month_ind=month_ind, value_col='poa_direct')
+    plt.show()
 
     print("\nAnalysis complete.")
 

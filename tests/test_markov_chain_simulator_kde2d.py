@@ -88,8 +88,34 @@ def test_get_conditional_density_n100(simulator_fixture):
 def test_get_next_state(simulator_fixture):
     # Test next state generation
     current_state = 0.0
-    next_state = simulator_fixture.get_next_state(current_state, seed=42)
+    next_state = simulator_fixture.get_next_state(current_state, rng=42)
     assert isinstance(next_state, float)
+
+
+def test_get_next_state_is_reproducible_from_a_seed(simulator_fixture):
+    a = simulator_fixture.get_next_state(0.0, rng=42)
+    b = simulator_fixture.get_next_state(0.0, rng=42)
+    assert a == b
+
+
+def test_a_shared_generator_advances_between_draws(simulator_fixture):
+    """Passing one Generator must not restart the stream on every call.
+
+    The old code reseeded the global RNG per step, so forwarding a seed produced the
+    same draw every time. Threading a Generator is what fixes that.
+    """
+    rng = np.random.default_rng(0)
+    draws = [simulator_fixture.get_next_state(0.0, rng=rng) for _ in range(5)]
+    assert len(set(draws)) == 5
+
+
+def test_no_global_random_state_is_touched(simulator_fixture):
+    """Generating must not mutate process-wide numpy random state."""
+    np.random.seed(1234)
+    before = np.random.get_state()[1][:5].copy()
+    simulator_fixture.get_next_state(0.0, rng=7)
+    after = np.random.get_state()[1][:5]
+    np.testing.assert_array_equal(before, after)
 
 
 def test_plot_joint_distribution(simulator_fixture):

@@ -6,7 +6,7 @@ sys.path.insert(0, os.path.abspath("../../src"))
 project = "meteosynth"
 copyright = "2026, N.Papadakis"
 author = "N.Papadakis"
-release = "0.1.0"
+release = "0.2.0"
 
 extensions = [
     "sphinx.ext.autodoc",
@@ -32,9 +32,6 @@ myst_enable_extensions = [
 templates_path = ["_templates"]
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 
-# Do not fail the build if optional third-party plotting deps are missing when
-# autodoc imports modules (e.g. seaborn/plotnine used by sup_plot_lib).
-autodoc_mock_imports = ["seaborn", "plotnine"]
-
+# Enable the HTML theme
 html_theme = "furo"
 html_static_path = ["_static"]

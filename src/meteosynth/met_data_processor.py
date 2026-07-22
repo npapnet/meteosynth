@@ -1,13 +1,81 @@
-import numpy as np
 import pandas as pd
+
+from .constants import INDEX_COLS
+from .day_window import circular_delta, day_slot, day_slots
+from .variables import registered
+
+
+def validate_columns(met_data: pd.DataFrame) -> None:
+    """
+    Check a frame carries the calendar index and at least one modellable column.
+
+    The rule is conditional -- *all* of :data:`~meteosynth.constants.INDEX_COLS`, and
+    *any* registered column -- which is why it is a function rather than the flat
+    ``REQUIRED_COLS`` tuple it replaces: a tuple of things that must all be present
+    cannot express "all of these and any of those".
+
+    Requiring only one registered column means a temperature-only source with no
+    irradiance at all ingests cleanly. "Is this frame usable for what you asked?" is a
+    different question, answered later by the generator's ``attr_str`` validation, which
+    can name the specific column that is missing.
+
+    Raises
+    ------
+    ValueError
+        If an index column is missing, or no registered column is present.
+    """
+    missing = [col for col in INDEX_COLS if col not in met_data.columns]
+    if missing:
+        raise ValueError(
+            f"met_data is missing required index columns: {missing}. "
+            f"Every record needs {INDEX_COLS}."
+        )
+
+    known = [col for col in met_data.columns if col in registered()]
+    if not known:
+        raise ValueError(
+            f"met_data has no modellable column. Registered variables are "
+            f"{registered()}; the frame has {list(met_data.columns)}. Use "
+            f"meteosynth.register() to declare a spec for one of them."
+        )
+
+
+def trim_columns(met_data: pd.DataFrame) -> pd.DataFrame:
+    """
+    Return a copy holding only the index columns and registered variables.
+
+    Unregistered columns are dropped rather than carried through, so nothing downstream
+    can come to depend on a provider-specific column -- which is exactly how a PVGIS
+    quality flag ended up being treated as a meteorological quantity.
+
+    ``solar_elevation`` and ``Int`` fall out **by this rule**, not by a hardcoded list:
+    neither is a stochastic environmental quantity, so neither has a spec. A user who
+    genuinely wants to model solar elevation registers a spec for it and it survives.
+    Declaring it is the deliberate act.
+
+    Note the caller's original frame is never mutated -- only this processed copy is
+    trimmed -- so a dropped column remains available to the caller.
+    """
+    keep = [
+        col
+        for col in met_data.columns
+        if col in INDEX_COLS or col in registered()
+    ]
+    return met_data.loc[:, keep].copy()
+
 
 class MetDataProcessor():
     """
-    Class to process meteorological data from PVGIS.
+    Slice a canonical meteorological frame by month or by rolling day window.
+
+    Accepts any frame carrying :data:`~meteosynth.constants.INDEX_COLS` plus at least
+    one column with a registered :class:`~meteosynth.variables.VariableSpec`. The frame
+    may come from :mod:`meteosynth.adapters` or straight from the user -- adapters are
+    an optional collection helper, not a required layer.
+
+    On ingestion the frame is validated (:func:`validate_columns`) and trimmed to the
+    registered columns (:func:`trim_columns`).
     """
-    __met_data_columns =['poa_direct', 'poa_sky_diffuse', 'poa_ground_diffuse',
-       'solar_elevation', 'temp_air', 'wind_speed', 'Int', 'year', 'month',
-       'day', 'hour']
     def __init__(self, met_data:pd.DataFrame):
         """
         Initialize the MetDataProcessor with meteorological data.
@@ -15,11 +83,11 @@ class MetDataProcessor():
         Parameters:
         met_data (pd.DataFrame): DataFrame containing meteorological data.
         """
-        # assert metdata contains all the columns  in self.__met_data_columns
-        assert all(col in met_data.columns for col in self.__met_data_columns), "Missing columns in met_data"
+        validate_columns(met_data)
 
-        self.met_data = met_data
-        
+        self.met_data = trim_columns(met_data)
+        self.__slots_cache = None
+
     def get_month_subset(self, month_ind:int):
         """
         Get a subset of the meteorological data for a specific month.
@@ -31,11 +99,76 @@ class MetDataProcessor():
         pd.DataFrame: Subset of the meteorological data for the specified month.
         """
         month_data = self.met_data[self.met_data['month'] == month_ind].copy()
-        
-        # creating an id column so that I can create a line for each unique date_id
-        month_data["date_id"] = month_data["year"].astype(str) + "-" + month_data["month"].astype(str) + "-" + month_data["day"].astype(str)    
-        return month_data
-    
+
+        return _add_date_id(month_data)
+
+    def get_day_window_subset(self, month:int, day:int, n_days:int=15):
+        """
+        Get a rolling window of the meteorological data centred on a calendar day.
+
+        Selects every record lying within ``n_days`` of ``(month, day)`` on the
+        ``all_leap`` calendar, pooled across all years in the dataset. This is the
+        seasonal counterpart to :meth:`get_month_subset`: where a month subset is
+        centred on the middle of the month (so a May 1 model trains on data centred on
+        May 16) and jumps discontinuously at month boundaries, a window is centred on
+        the target day and slides smoothly from one day to the next.
+
+        The window wraps across New Year, so a Jan 2 target reaches back into December
+        and a Dec 30 target reaches forward into January. Feb 29 needs no special
+        handling: it is an ordinary slot, so it is pooled into any nearby window and can
+        also be requested as the target.
+
+        Note this is a *climatological* window, not a chronological one -- a Jan 2 2011
+        target pools December 2011 as a proxy for "late-December climate".
+
+        Parameters
+        ----------
+        month : int
+            Month of the target day (1-12).
+        day : int
+            Day of the target month.
+        n_days : int, optional
+            Half-width of the window in days. Defaults to 15, giving a 31-day window
+            (~62 days pooled over 2 years, matching a month subset's sample size).
+            ``n_days=0`` selects the target day alone; any ``n_days >= 183`` selects
+            the whole year.
+
+        Returns
+        -------
+        pd.DataFrame
+            Subset of the meteorological data for the window, with the same ``date_id``
+            column that :meth:`get_month_subset` adds, plus the ``day_slot`` of each
+            record.
+
+        Raises
+        ------
+        ValueError
+            If ``(month, day)`` is not a valid date, or ``n_days`` is negative.
+        """
+        n_days = int(n_days)
+        if n_days < 0:
+            raise ValueError(f"n_days must be non-negative, got {n_days}")
+
+        center = day_slot(month, day)
+        slots = self._day_slots()
+
+        mask = circular_delta(slots, center) <= n_days
+        window_data = self.met_data[mask].copy()
+        window_data["day_slot"] = slots[mask]
+
+        return _add_date_id(window_data)
+
+    def _day_slots(self):
+        """The all_leap calendar slot of every record, computed once and reused.
+
+        The source data does not change over a processor's lifetime, so caching this
+        keeps a 366-day calendar walk from re-mapping all rows on every window.
+        """
+        if self.__slots_cache is None:
+            self.__slots_cache = day_slots(self.met_data['month'].values,
+                                           self.met_data['day'].values)
+        return self.__slots_cache
+
     def describe_time_range(self):
         """
         Describe the time range of the meteorological data.
@@ -64,6 +197,28 @@ class MetDataProcessor():
             temp_df = self.get_month_subset(month_ind=month_id)
 
         return convert_to_daily_wide(temp_df, value_col=value_col)
+
+
+def _add_date_id(subset:pd.DataFrame):
+    """
+    Add the ``date_id`` column identifying each unique date, in place.
+
+    Shared by :meth:`MetDataProcessor.get_month_subset` and
+    :meth:`MetDataProcessor.get_day_window_subset` so the two slicing strategies cannot
+    drift apart on the format downstream consumers group by.
+
+    Note the id is not zero-padded (``'2011-1-2'``), so it does not sort
+    lexicographically -- do not rely on it for ordering. :func:`convert_to_daily_wide`
+    builds its own zero-padded ``date_str`` for that reason.
+
+    Parameters:
+    subset (pd.DataFrame): Subset to annotate. Mutated and returned.
+
+    Returns:
+    pd.DataFrame: The same frame, with a ``date_id`` column.
+    """
+    subset["date_id"] = subset["year"].astype(str) + "-" + subset["month"].astype(str) + "-" + subset["day"].astype(str)
+    return subset
 
 
 def convert_to_daily_wide(met_data:pd.DataFrame, value_col:str):

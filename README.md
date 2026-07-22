@@ -7,14 +7,17 @@ Its primary target is **Monte-Carlo simulation of energy-project output and requ
 ## Features
 
 - **Markov Chain Simulators** (shared `get_next_state` / `generate_sequence` interface):
-  - `MarkovChainSimulator2dKDE`: Continuous state simulation using 2D Kernel Density Estimation with handling for various singularity cases (CC, CN, NC, NN).
+  - `MarkovChainSimulator2dKDE`: Continuous state simulation using 2D Kernel Density Estimation, with degenerate data handled via the `Kind` enum (`KDE_2D`, `KDE_1D`, `CONSTANT`) and sampling truncated to each variable's physical support.
   - `ContinuousMarkovChainSimulator`: Binned continuous state simulation using 1D Kernel Density Estimation.
   - `MarkovChainSimulatorDiscrete`: Discrete state transition modeling.
 - **Daily Series Generators** (`meteosynth.generators`):
-  - `EnvSeriesGenerator`: chains 24 hourly simulators into complete 24-hour profiles and draws Monte-Carlo ensembles via `generate_ensemble`.
+  - `EnvSeriesGenerator`: one day's worth of model — a fitted initial distribution π(x₀) plus 23 hourly transitions — walked into a complete 24-hour profile by `gen_day()`.
+  - `DayWindowGenerator`: a generator per calendar day, trained on a rolling window and fitted lazily behind an LRU cache so a whole year never holds all 366 at once. `generate_series(start, n_days)` chains days across midnight.
 - **Meteorological Data Processing**:
   - Pivoting hourly data into daily wide formats.
-  - Subsetting and filtering datasets by month/year.
+  - Two selectable training strategies: by calendar month (`get_month_subset`) or by a **rolling ±n-day window** centred on a target day (`get_day_window_subset`).
+- **Seasonal day windows** (`meteosynth.day_window`):
+  - A circular `all_leap` (CF-conventions `366_day`) calendar, so windows wrap across New Year and **Feb 29 is an ordinary day** — never discarded, and requestable as a generation target.
 - **PVGIS Integration**:
   - Retrieve hourly or Typical Meteorological Year (TMY) data directly using the `pvlib` API (`meteosynth.metdata_pvgis`).
 
@@ -25,17 +28,19 @@ Its primary target is **Monte-Carlo simulation of energy-project output and requ
 This package is managed using the `uv` tool. To install the package and its dependencies:
 
 ```bash
-# Sync core dependencies (numpy, pandas, scipy, pvlib, matplotlib) + dev group
+# Sync core dependencies (numpy, pandas, scipy, pvlib, matplotlib, seaborn) + dev group
 uv sync
 
-# Add the extra statistical-plotting helpers (seaborn, plotnine)
-uv sync --extra plot
+# Add the extras used by the example scripts (tqdm progress bars)
+uv sync --extra examples
 ```
 
-`matplotlib` is a core dependency (the simulators expose plotting helpers directly).
+`matplotlib` and `seaborn` are core dependencies (the simulators and plotting helpers expose plotting methods directly).
 The `dev` dependency group — installed by default with `uv sync` — provides the
 documentation toolchain (Sphinx, furo, Mermaid, MyST) and an interactive
 workflow (`jupyter`, `notebook`, `ipykernel`) for VS Code / JupyterLab.
+The optional `examples` extra adds `tqdm`, needed only by
+`examples/example_synthetic_year.py`; nothing in the package itself requires it.
 
 ---
 
@@ -70,6 +75,7 @@ Chain 24 hourly simulators into synthetic days and draw an ensemble for
 downstream energy analysis:
 
 ```python
+import numpy as np
 from meteosynth import MetDataProcessor, EnvSeriesGenerator
 
 # `df` is a processed PVGIS hourly frame (year, month, day, hour, poa_direct, ...)
@@ -78,11 +84,42 @@ may = mdp.get_month_subset(5)                     # train on one month
 
 gen = EnvSeriesGenerator(may, attr_str="poa_direct", bandwidth=0.1)
 
-# 500 independent synthetic days -> shape (500, 24)
-ensemble = gen.generate_ensemble(n_days=500, start_value=0.0, seed=1)
+# 500 independent synthetic days -> shape (500, 24). Hour 0 is drawn from the fitted
+# initial distribution pi(x0); there is no start value to supply.
+rng = np.random.default_rng(1)
+ensemble = np.vstack([gen.gen_day(rng=rng) for _ in range(500)])
 daily_energy = ensemble.sum(axis=1)               # per-day yield proxy
 print(daily_energy.mean(), daily_energy.std())
 ```
+
+### Rolling day windows
+
+A month subset is off-centre and jumps: a May 1 model trained on *all of May*
+inherits May 16's climate, and May 31 shares no training data with June 1. A
+rolling window is centred on its target and slides smoothly.
+
+```python
+from meteosynth import MetDataProcessor, DayWindowGenerator
+
+mdp = MetDataProcessor(df)
+
+# Both pool ~62 days from a 2-year record, around different centres:
+may_month = mdp.get_month_subset(5)                       # all of May
+may_window = mdp.get_day_window_subset(5, 1, n_days=15)   # Apr 16 - May 16
+
+# Wraps across New Year; Feb 29 is an ordinary target needing no special-casing:
+new_year = mdp.get_day_window_subset(1, 2, n_days=4)      # Dec 29 - Jan 6
+
+dwg = DayWindowGenerator(mdp, attr_str="poa_direct", n_days=15)
+feb29_day = dwg.gen_day(2, 29, seed=1)                    # a synthetic Feb 29
+
+# A chained series needs a start date, and lives only on the window path:
+year = dwg.generate_series(start=(1, 1), n_days=365, seed=1)   # (365, 24)
+```
+
+> **Note:** with only two years of data both strategies pool ~62 days, so the
+> window buys *centring* and *smoothness*, not sample size. See
+> [`docs/design/completed/rolling-day-window.md`](docs/design/completed/rolling-day-window.md).
 
 Fetch real data from PVGIS with `meteosynth.metdata_pvgis`:
 
@@ -97,7 +134,7 @@ save_hourly(df)   # caches to data/pvgis_hourly_data.xlsx
 
 ## Examples
 
-Two runnable scripts live under `examples/`. On first run they fetch data from
+Four runnable scripts live under `examples/`. On first run they fetch data from
 PVGIS and cache it to `data/pvgis_hourly_data.xlsx`, so subsequent runs are
 offline and fast.
 
@@ -107,6 +144,16 @@ uv run python examples/example_exploratory_analysis.py
 
 # Synthetic generation: build hourly simulators and plot synthetic daily profiles
 uv run python examples/example_markov_generation.py
+
+# Rolling windows: month subset vs rolling window, the year wrap, and Feb 29
+uv run python examples/example_rolling_window.py
+
+# A full synthetic non-leap year of poa_direct + wind_speed -> data/synthetic_year.csv
+# (needs the `examples` extra for tqdm; ~80 s)
+uv run --extra examples python examples/example_synthetic_year.py
+
+# Leap years: how Feb 29 and the end of February are pooled (no PVGIS needed)
+uv run python examples/example_leap_year_windows.py
 ```
 
 See the **Examples** page in the documentation for a full walk-through.
