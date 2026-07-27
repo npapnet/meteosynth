@@ -13,6 +13,10 @@ Runnable scripts, split by what they are for.
 Every script is a `#%%` cell script, so it can be stepped through in an editor as well
 as run start to finish.
 
+New to the vocabulary — *ensemble*, *realisation*, *envelope*, *P90*? Read
+[`docs/source/concepts.md`](../docs/source/concepts.md) first; it defines every term
+these scripts print or plot.
+
 ## Before the first run
 
 ```bash

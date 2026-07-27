@@ -13,6 +13,7 @@ single deterministic profile.
    :caption: Getting started
 
    quickstart
+   concepts
    workflow
    theory
    examples

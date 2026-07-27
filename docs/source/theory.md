@@ -3,6 +3,11 @@
 This page explains how `meteosynth` turns a historical record into a generator
 of statistically-plausible synthetic series.
 
+```{note}
+If terms like *ensemble*, *realisation*, *conditional distribution* or *P90* are new,
+read {doc}`concepts` first — it defines the vocabulary this page uses, in plain language.
+```
+
 ## The problem
 
 Energy-project Monte-Carlo studies need *many* weather realisations, not one.
