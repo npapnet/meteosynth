@@ -39,8 +39,8 @@ uv sync --extra examples
 The `dev` dependency group — installed by default with `uv sync` — provides the
 documentation toolchain (Sphinx, furo, Mermaid, MyST) and an interactive
 workflow (`jupyter`, `notebook`, `ipykernel`) for VS Code / JupyterLab.
-The optional `examples` extra adds `tqdm`, needed only by
-`examples/example_synthetic_year.py`; nothing in the package itself requires it.
+The optional `examples` extra adds `tqdm`, needed only by the longer-running
+example scripts; nothing in the package itself requires it.
 
 ---
 
@@ -134,26 +134,33 @@ save_hourly(df)   # caches to data/pvgis_hourly_data.xlsx
 
 ## Examples
 
-Four runnable scripts live under `examples/`. On first run they fetch data from
-PVGIS and cache it to `data/pvgis_hourly_data.xlsx`, so subsequent runs are
-offline and fast.
+`examples/` is split by purpose — `use_cases/` (applied workflows that produce
+data), `concepts/` (how the package behaves), and `tools/` (shared helpers).
+Downloads are cached under `examples/data/` and everything generated is written
+to the git-ignored `examples/output/`. See [`examples/README.md`](examples/README.md)
+for the full index.
 
 ```bash
-# Exploratory analysis: fetch, process, and plot PVGIS data
-uv run python examples/example_exploratory_analysis.py
+# Optional: download the two records the examples use, once, up front
+uv run python examples/tools/fetch_site_data.py
 
-# Synthetic generation: build hourly simulators and plot synthetic daily profiles
-uv run python examples/example_markov_generation.py
+# Use cases: Heraklion 2010-2020, one synthetic 21 May against eleven real ones
+uv run --extra examples python examples/use_cases/day_envelope_pv.py
+uv run --extra examples python examples/use_cases/day_envelope_temp.py
+uv run --extra examples python examples/use_cases/day_envelope_wind.py
 
-# Rolling windows: month subset vs rolling window, the year wrap, and Feb 29
-uv run python examples/example_rolling_window.py
+# A complete 8760-hour synthetic year of all three attributes, written to CSV (~4 min)
+uv run --extra examples python examples/use_cases/synthetic_year.py
 
-# A full synthetic non-leap year of poa_direct + wind_speed -> data/synthetic_year.csv
-# (needs the `examples` extra for tqdm; ~80 s)
-uv run --extra examples python examples/example_synthetic_year.py
+# An ensemble of synthetic Mays, reported as statistics against the observed years (~3 min)
+uv run --extra examples python examples/use_cases/monthly_statistics.py
 
-# Leap years: how Feb 29 and the end of February are pooled (no PVGIS needed)
-uv run python examples/example_leap_year_windows.py
+# Concepts: exploratory plots, the Markov engine, rolling windows, leap days
+uv run python examples/concepts/example_exploratory_analysis.py
+uv run python examples/concepts/example_markov_generation.py
+uv run python examples/concepts/example_rolling_window.py
+uv run --extra examples python examples/concepts/example_synthetic_year.py   # ~80 s
+uv run python examples/concepts/example_leap_year_windows.py                 # no PVGIS needed
 ```
 
 See the **Examples** page in the documentation for a full walk-through.

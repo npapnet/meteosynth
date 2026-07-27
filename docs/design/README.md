@@ -42,9 +42,12 @@ dataset (`data/pvgis_hourly_data.xlsx`) over estimates, and say which is which.
 
 ## Contents
 
-Active — proposed or in progress:
+Active / Architecture reference:
 
-*(none — everything currently designed has landed.)*
+| document | type | description |
+|---|---|---|
+| [architecture.md](architecture.md) | architecture reference | Concise overview of package essence, current state (v0.2.0), mathematical foundation, repository tree structure, module responsibilities, and developer/agent onboarding guide. |
+
 
 
 ## Completed

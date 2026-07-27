@@ -245,7 +245,7 @@ Two consequences fall out for free, with no special-casing:
 ### What this means around the end of February
 
 Two properties follow, and both are easier to trust once seen —
-`examples/example_leap_year_windows.py` demonstrates them on synthetic records
+`examples/concepts/example_leap_year_windows.py` demonstrates them on synthetic records
 with and without leap years, since the shipped 2011–2012 record has only one
 leap day and cannot.
 
@@ -333,4 +333,4 @@ chronological "±n days by timestamp" design would fail outright, since January 
 - **Hour 0 looks backwards.** `hour_prev = (hour - 1) % 24` makes hour 0's
   *previous* value hour 23 of the **same** day rather than 23:00 the night
   before. Chaining each generated day from the previous day's final value (as
-  `examples/example_synthetic_year.py` does) is the practical workaround.
+  `examples/concepts/example_synthetic_year.py` does) is the practical workaround.

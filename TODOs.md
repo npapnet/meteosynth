@@ -9,7 +9,7 @@ to re-derive it. Design rationale lives in [`docs/design/`](docs/design/README.m
 
 **Status:** ✅ **DONE** — behaviour confirmed **correct**, now tested and demonstrable
 · `tests/test_leap_year_windows.py` (30 tests) ·
-`examples/example_leap_year_windows.py` · documented in `docs/source/theory.md` and
+`examples/concepts/example_leap_year_windows.py` · documented in `docs/source/theory.md` and
 `docs/design/completed/rolling-day-window.md`
 
 The shipped record is 2 years (2011–2012) with exactly one leap day, so **no test and no
@@ -69,7 +69,7 @@ synthesised from its neighbours.
    exact year-count assertions; Q2 span/emptiness/generation; the slot-60 boundary
    parametrised over eight target/`n_days` combinations; the deficit; slot symmetry; and
    a guard that the fixture's nights are *exactly* zero (see the note below).
-2. **`examples/example_leap_year_windows.py`** — prints the tables above plus where the
+2. **`examples/concepts/example_leap_year_windows.py`** — prints the tables above plus where the
    leap day enters and leaves a window, and plots which (year, slot) cells feed a
    synthetic Feb 29. No PVGIS fetch.
 3. **Documented** in `docs/source/theory.md` (a "What this means around the end of
@@ -351,3 +351,143 @@ unrecoverable and should raise with a clear message rather than return NaN.
   it is a breaking change for anything grouping on `date_id`.
 - **No `conftest.py`.** `MPLBACKEND=Agg` is required for the test suite but only
   documented, not enforced.
+
+---
+
+## 9. Cached data metadata and cache check (coordinates, time period, source)
+
+**Status:** open · **Impact:** prevents redundant network fetches and accidental cached file mismatches
+
+Saved datasets (e.g. from PVGIS or other providers) currently do not carry embedded metadata identifying their origin parameters.
+
+### Requirement & Implementation Plan
+
+- **Metadata Tracking**: Include metadata tags or headers when caching meteorological data, recording:
+  - Source provider (e.g., `"PVGIS"`),
+  - Geographic coordinates (`latitude`, `longitude`),
+  - Time period (`start_year`, `end_year`).
+- **Automatic Cache Match Check**: When fetching data (e.g. via `fetch_pvgis_hourly`), check if an existing cached file matches the requested latitude, longitude, period, and source. If a matching cached version exists, use it immediately and skip the API call.
+- **Force / Override Flag**: Introduce a `force_refetch` (or `override`) parameter on the fetch/load method calls so users can explicitly force a fresh network request when needed.
+
+---
+
+## 10. `metdata_pvgis` unpacks `pvlib` return values that no longer exist
+
+**Status:** open · **Impact:** both fetch functions in the module raise on every call ·
+**Effort:** one line each
+
+`pvlib` changed the arity of its PVGIS readers. `src/meteosynth/metdata_pvgis.py` still
+unpacks the old shapes, so with the pinned `pvlib` (0.15.2, verified 2026-07-27) neither
+function can run:
+
+| function | line | unpacks | `pvlib` 0.15.2 returns | result |
+|---|---|---|---|---|
+| `fetch_pvgis_hourly` | `metdata_pvgis.py:81` | `data, _inputs, _metadata` | `(data, meta)` | `ValueError: not enough values to unpack (expected 3, got 2)` |
+| `fetch_pvgis_tmy` | `metdata_pvgis.py:113` | `tmy_data, _months, _inputs, tmy_meta` | `(data, meta)` | same, expected 4 got 2 |
+
+Nothing in the package depends on either — which is why the test suite is green and this
+went unnoticed. `adapters.fetch_pvgis` already does it correctly (`data, _ = ...`,
+`adapters.py:236`), and `examples/tools/site_data.py` deliberately indexes `result[0]`
+rather than unpacking, so it works against either arity.
+
+### Fix
+
+Index instead of unpacking (`result = get_pvgis_hourly(...); data = result[0]`), matching
+`site_data.py`. That is arity-agnostic and needs no version check. Add a smoke test that
+calls both functions against a recorded response so a future `pvlib` change is caught by
+CI rather than by a user.
+
+Worth deciding at the same time: **whether `metdata_pvgis` should exist at all.** It
+overlaps `adapters.fetch_pvgis`, which is the newer, spec-aware path (it normalises,
+validates against `support`, and emits a canonical frame). If the module stays, it should
+delegate to the adapter rather than call `pvlib` a second, differently-broken way.
+
+---
+
+## 11. Irradiance: pick one column by availability — never sum synthetic components
+
+**Status:** open · **Decision needed before item 6 (other sources)** · **Impact:** how a
+synthetic irradiance series is interpreted and whether two of them can be combined
+
+> **Settled (2026-07-27): one irradiance column is modelled, and it is chosen by what the
+> source supplies.** Components are *not* modelled separately and summed. The open work
+> below is about **selection and provenance** — how the package decides between
+> `poa_global` and `poa_direct` when only one of them is available, and how it records
+> which one it used — not about decomposition.
+
+PVGIS returns **either** the global plane-of-array irradiance **or** its three
+components, never both — one boolean, two mutually exclusive column sets:
+
+```text
+components=False -> poa_global
+components=True  -> poa_direct, poa_sky_diffuse, poa_ground_diffuse
+```
+
+`adapters.fetch_pvgis` handles this by making the caller choose one via
+`irradiance="global"|"direct"|...` and emitting exactly that column. The examples need
+both the components (for the concept scripts) and the total (for the PV use case), so
+`examples/tools/site_data.py:add_poa_global` fetches `components=True` and reconstructs
+the total by summation.
+
+**The reconstruction is numerically sound.** Measured on Heraklion 2010, fetched
+`poa_global` against the summed components, 8760 hours: max absolute difference
+**0.01 W/m²**, mean **0.0003 W/m²**, annual totals identical to four significant figures
+(1914.6 vs 1914.6 kWh/m²). The 0.01 is PVGIS's own two-decimal rounding. So
+`poa_global == poa_direct + poa_sky_diffuse + poa_ground_diffuse` holds for this provider.
+
+That matters for **one** operation only: deriving an *observed* total from *observed*
+components, before any fitting, which is exact and stays allowed. It says nothing about
+the synthetic side.
+
+### Why summing synthetic components is ruled out
+
+Recording the reasoning so it does not get re-litigated. Fitting the three components
+independently and summing the *generated* series is not equivalent to fitting
+`poa_global`: each component gets its own KDE and its own random draw, so the physical
+anticorrelation between direct and diffuse — a cloud moves one down and the other up —
+is destroyed. The sum is then under-dispersed at the day scale and over-dispersed hour to
+hour, and it can produce hours that no sky could.
+
+The consequence to document rather than fix: a user who needs internally consistent
+components — to re-transpose onto a different tilt, say, which needs direct and diffuse
+separately — cannot get them from this package. That is a limitation of the
+one-attribute-at-a-time engine, and it is accepted, not a bug to file.
+
+### The questions still to decide
+
+1. **How is the column selected?** The rule wanted is *by availability*: use whichever
+   irradiance column the source actually supplies, rather than making every caller name
+   one. Today `adapters.fetch_pvgis` requires an explicit `irradiance="global"|"direct"|…`
+   at fetch time, and a user-supplied frame gets no help at all — `EnvSeriesGenerator`
+   just takes an `attr_str` and fails if that exact column is absent. What is missing is a
+   resolver: given a frame, return the one irradiance column to model, following a
+   documented preference order (`poa_global` first as the quantity a plane actually
+   receives, then `poa_direct`, …), erroring only when none is present and saying which
+   were looked for. Note this must **not** silently pick a different quantity than the
+   caller expected: preference order is for when nothing was asked for, not an override.
+2. **What does a cache hold?** One PVGIS fetch cannot carry both forms, and two fetches of
+   the same site and period differ only by a flag no filename currently records. Ties into
+   item 9 (cache metadata): whichever form was fetched is another field the metadata has
+   to carry, otherwise a warm cache silently answers a question it was not asked.
+3. **Is a derived column distinguishable from a fetched one?** Today it is not.
+   `adapters.py`'s docstring states the design position — *"the column name is the
+   provenance… no metadata sidecar"* — and a summed `poa_global` sits byte-for-byte
+   alongside a fetched one with a different derivation behind it. Either the position gets
+   qualified or derivation gets recorded. Options: a `source`/provenance field on the frame
+   (`DataFrame.attrs` — lost on a CSV round-trip), a sidecar keyed to the cache file (item
+   9), a naming convention, or accepting that the summation is exact enough (measured
+   above) that the distinction does not matter for PVGIS. It will matter for a provider
+   where the identity does *not* hold exactly.
+4. **What does a saved synthetic series carry?** Whatever answers (1) and (3) for observed
+   data should ride along with generated data too: a file holding one `poa_global` column
+   with no record of which source column it was modelled from, and how that column was
+   obtained, cannot be audited later.
+
+### Related
+
+Item 6 makes this concrete rather than academic: Open-Meteo supplies GHI/DNI/DHI on the
+**horizontal**, not plane-of-array components, so "which irradiance is this column" stops
+being a PVGIS-only question — and the availability-based selection in (1) is exactly the
+seam where a provider that offers a different set plugs in. Item 9's metadata is the
+natural place for the answer to live.
+

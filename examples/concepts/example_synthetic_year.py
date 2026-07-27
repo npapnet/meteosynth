@@ -39,45 +39,30 @@ Runtime: ~80 s for both attributes on the shipped 2-year dataset.
 """
 
 import pathlib
+import sys
 import time
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from pvlib.iotools import get_pvgis_hourly
 
 from meteosynth import DayWindowGenerator, MetDataProcessor
 
-DATA_DIR = pathlib.Path("./data")
-DATA_DIR.mkdir(exist_ok=True)
-XLSX_FNAME = DATA_DIR / "pvgis_hourly_data.xlsx"
-OUT_FNAME = DATA_DIR / "synthetic_year.csv"
+# Make `examples/` importable however this file is run (script, -m, or an editor cell).
+_HERE = pathlib.Path(__file__).resolve().parent if "__file__" in globals() else pathlib.Path.cwd()
+_EXAMPLES = next(p for c in (_HERE, *_HERE.parents) for p in (c, c / "examples")
+                 if (p / "tools" / "site_data.py").is_file())
+sys.path.insert(0, str(_EXAMPLES))
+
+from tools.site_data import load_paris_demo, output_path
+
+OUT_FNAME = output_path("concepts_synthetic_year_paris.csv")
 
 # A non-leap reference year: walking it means Feb 29 is never asked for.
 REFERENCE_YEAR = 2023
 ATTRS = ["poa_direct", "wind_speed"]
 N_DAYS = 15
 SEED = 42
-
-
-def load_or_fetch_data() -> pd.DataFrame:
-    """Load PVGIS hourly data from cache, or download it if missing."""
-    if XLSX_FNAME.exists():
-        print(f"Loading cached weather data from {XLSX_FNAME}...")
-        return pd.read_excel(XLSX_FNAME)
-
-    print("No cached data found. Fetching hourly data from PVGIS for Paris...")
-    data, _ = get_pvgis_hourly(
-        latitude=48.8566, longitude=2.3522, start=2011, end=2012,
-        usehorizon=True, outputformat="json", components=True,
-    )
-    data["year"] = data.index.year
-    data["month"] = data.index.month
-    data["day"] = data.index.day
-    data["hour"] = data.index.hour
-    data.to_excel(XLSX_FNAME, index=False)
-    print(f"Data saved to {XLSX_FNAME}")
-    return data
 
 
 def generate_year(mdp: MetDataProcessor, attr: str, n_days_out: int) -> np.ndarray:
@@ -153,7 +138,7 @@ def plot_year(frame: pd.DataFrame):
 
 
 def main():
-    df = load_or_fetch_data()
+    df = load_paris_demo()
     mdp = MetDataProcessor(df)
     print(mdp.describe_time_range())
 

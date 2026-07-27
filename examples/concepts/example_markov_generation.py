@@ -7,62 +7,30 @@ This script demonstrates how to construct a daily weather generator
 synthetic hourly sequences of solar radiation (poa_direct) based on historical TMY/hourly data.
 """
 
-import os
-import pathlib
 import logging
-import pandas as pd
+import pathlib
+import sys
+
 import numpy as np
 import matplotlib.pyplot as plt
-from pvlib.iotools import get_pvgis_hourly
+
+# Make `examples/` importable however this file is run (script, -m, or an editor cell).
+_HERE = pathlib.Path(__file__).resolve().parent if "__file__" in globals() else pathlib.Path.cwd()
+_EXAMPLES = next(p for c in (_HERE, *_HERE.parents) for p in (c, c / "examples")
+                 if (p / "tools" / "site_data.py").is_file())
+sys.path.insert(0, str(_EXAMPLES))
 
 # Import from our package (assuming installed in editable/dev mode)
 from meteosynth.met_data_processor import MetDataProcessor
 from meteosynth.generators import EnvSeriesGenerator
+from tools.site_data import load_paris_demo
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
-# Setup directories
-DATA_DIR = pathlib.Path("./data")
-DATA_DIR.mkdir(exist_ok=True)
-XLSX_FNAME = DATA_DIR / "pvgis_hourly_data.xlsx"
-
-def load_or_fetch_data() -> pd.DataFrame:
-    """Load cached PVGIS hourly data or download it."""
-    if XLSX_FNAME.exists():
-        logging.info(f"Loading cached weather data from {XLSX_FNAME}...")
-        return pd.read_excel(XLSX_FNAME)
-        
-    logging.info("No cached data found. Fetching hourly data from PVGIS for Paris (48.8566, 2.3522)...")
-    latitude = 48.8566
-    longitude = 2.3522
-    start_year = 2011
-    end_year = 2012
-
-    data, inputs = get_pvgis_hourly(
-        latitude=latitude, 
-        longitude=longitude, 
-        start=start_year, 
-        end=end_year,
-        usehorizon=True, 
-        outputformat="json", 
-        components=True
-    )
-    
-    # Process index
-    data['year'] = data.index.year
-    data['month'] = data.index.month
-    data['day'] = data.index.day
-    data['hour'] = data.index.hour 
-    
-    # Cache data
-    data.to_excel(XLSX_FNAME, index=False)
-    logging.info(f"Data saved to {XLSX_FNAME}")
-    return data
-
 def main():
-    # 1. Load weather data
-    df = load_or_fetch_data()
+    # 1. Load weather data (Paris 2011-2012, cached under examples/data/)
+    df = load_paris_demo()
     mdp = MetDataProcessor(df)
 
     # 2. Get subset for May (Month = 5) to train our generators

@@ -54,3 +54,7 @@ Thumbs.db
 *.csv
 *.nc
 data/
+
+# Specific ignores (remove them when not relevant any more. )
+cloudflare_tried.md
+cloudflare.md
