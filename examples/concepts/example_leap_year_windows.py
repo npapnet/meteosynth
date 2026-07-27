@@ -41,7 +41,7 @@ def synthetic_record(start_year: int, end_year: int, seed: int = 0) -> MetDataPr
     Night values must be *exactly* zero, as PVGIS supplies them. `np.sin(np.pi)` is
     1.22e-16 rather than 0, so a clipped sine would leave ~1e-14 residue at dusk -- enough
     to defeat the exact `std == 0` degeneracy check and make the generator emit NaN. The
-    night mask below is therefore explicit. See TODOs.md item 7.
+    night mask below is therefore explicit. See TODOs.md FIX-2.
     """
     rng = np.random.default_rng(seed)
     index = pd.date_range(f"{start_year}-01-01", f"{end_year}-12-31 23:00", freq="h")

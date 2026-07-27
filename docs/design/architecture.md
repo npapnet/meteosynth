@@ -159,6 +159,57 @@ meteosynth/
 
 ---
 
+## Project Record-Keeping: Where Each Kind of Writing Lives
+
+Four files carry the project's written record, and each answers a different question. The
+rule that keeps them from duplicating one another: **an item lives in exactly one place at
+a time, and moves when its status changes.**
+
+| File | Answers | Contains | Never contains |
+| :--- | :--- | :--- | :--- |
+| [`TODOs.md`](../../TODOs.md) | *What is still broken or unbuilt?* | **Open work only**, grouped as Fixes / Performance & internals / Features / Direction / Housekeeping, each with a stable ID (`FIX-1`, `PERF-2`, `FEAT-1`, `VISION-1`, `CHORE-1`) and the measurements behind it, plus an **Inbox** (`INBOX-n`) for notes not yet triaged | A "done" section |
+| [`CHANGELOG.md`](../../CHANGELOG.md) | *What is the package now, and when did that become true?* | Released state per version, `Added`/`Changed`/`Fixed`/`Removed`, plus an optional `### Decisions` subsection | Extended rationale; narrative of how a decision was reached |
+| [`docs/design/`](README.md) | *Why should we do it this way?* | Specifications and argued rationale for work **in flight** | Implemented work |
+| [`docs/design/completed/`](completed/) | *Why was it done this way?* | The same documents once their feature has landed, each with an archive note recording move date, implementation date and commits | Work still in flight |
+
+### The lifecycle
+
+```mermaid
+flowchart LR
+    T["TODOs.md<br/>open item (FIX-n)"] -->|"work starts"| D["docs/design/<br/>spec, if the change<br/>needs an argument"]
+    T -->|"small fix,<br/>no spec needed"| C["CHANGELOG.md<br/>current sprint"]
+    D -->|"implemented + green"| C
+    D -->|"implemented + green"| A["docs/design/completed/<br/>+ archive note"]
+    C -->|"release"| V["CHANGELOG.md<br/>version section"]
+    A -.->|"linked from"| V
+```
+
+### The rules this implies
+
+1. **Completed TODO items move to the changelog.** When an item ships, fold it into the
+   current sprint entry and **delete it from `TODOs.md`**. A `✅ DONE` item left in place
+   is a duplicate that will drift out of sync with the code.
+2. **The changelog states the current state, not the reasoning.** Say what the package
+   does now and what a number measures; do not re-argue the choice. Rationale belongs in
+   `docs/design/`, which the changelog links to.
+3. **Significant decisions get one line each, under `### Decisions`.** A decision is worth
+   recording there when a reader would otherwise ask *"is this missing, or deliberate?"* —
+   typically deliberate absences and API-shape choices. One sentence, then a link to the
+   design doc that argues it.
+4. **Cross-reference TODO items by ID, never by position.** `FIX-2`, not "item 7". Tests,
+   examples and design docs all cite these IDs; ordinal references break the moment the
+   file is re-grouped.
+5. **The Inbox is a waiting room, not a group.** A raw note lands as `INBOX-n` with an
+   initial assessment and the question that decides its shape. It leaves by graduating
+   into a group above with a real ID, or by being dropped — it is not a place items
+   settle. Do not cite an `INBOX-n` ID from code or docs; it is not stable.
+6. **Sync the whole set at release.** Closing a version means: rename the sprint section to
+   `## [x.y.z] — date`, move any newly-completed TODO items into it, drop TODO entries the
+   release invalidated, and re-check that every "already tried" note reflects what actually
+   shipped.
+
+---
+
 ## Onboarding Quickstart for Developers & AI Agents
 
 ### 1. Environment Setup

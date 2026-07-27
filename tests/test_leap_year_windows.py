@@ -12,7 +12,7 @@ to pin the two questions that are otherwise impossible to see working:
 2. With no leap year in the record at all, can Feb 29 still be generated from its
    late-February and early-March neighbours?
 
-See ``TODOs.md`` item 1 and ``docs/design/completed/rolling-day-window.md`` (Caveat B).
+See ``CHANGELOG.md`` (0.2.0) and ``docs/design/completed/rolling-day-window.md`` (Caveat B).
 """
 
 import numpy as np
@@ -31,7 +31,7 @@ def _synthetic_record(start_year: int, end_year: int, seed: int = 0) -> MetDataP
     in ``_cat_singularity`` (an exact ``std == 0`` test) routes a constant-zero hour into
     the 2D KDE path and the generator emits NaN. Note ``np.sin(np.pi)`` is ``1.22e-16``,
     not ``0``, so the night mask below is explicit rather than a ``clip`` -- a clipped
-    sine leaves ~1e-14 residue and trips exactly that trap. See TODOs.md item 7.
+    sine leaves ~1e-14 residue and trips exactly that trap. See TODOs.md FIX-2.
     """
     rng = np.random.default_rng(seed)
     index = pd.date_range(f"{start_year}-01-01", f"{end_year}-12-31 23:00", freq="h")
@@ -83,7 +83,7 @@ def _calendar_days(subset):
 # --- the fixtures themselves -------------------------------------------------------
 
 def test_fixture_nights_are_exactly_zero(leap_record):
-    """Guards the fixture against the trap described in TODOs.md item 7.
+    """Guards the fixture against the trap described in TODOs.md FIX-2.
 
     If this fails, every generation test below becomes a false alarm rather than a
     finding: near-zero-but-not-zero nights defeat the exact ``std == 0`` degeneracy

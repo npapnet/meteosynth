@@ -22,7 +22,7 @@ Status: **implemented** · Author: N. Papadakis · Date: 2026-07-15 · Revised: 
 >    the conditioning value; measured at 0.27% of midnight steps. §3 is therefore
 >    necessary but not sufficient, which this document did not anticipate.
 >
-> Also: the overshoot of `TODOs.md` item 2 moved from +13% to +14%, since removing the
+> Also: the overshoot of `TODOs.md` FIX-1 moved from +13% to +14%, since removing the
 > domain padding's lower side restores more mass than removing its upper side takes away.
 
 A plan to give `meteosynth` an explicit notion of **what each quantity physically is**,
@@ -489,7 +489,7 @@ than hoped for.
 > **Note — scope**
 >
 > This section is about the *negatives* only. Removing the padding also changes the domain's
-> upper end, which bears on the systematic-bias question tracked in TODOs.md item 2; that
+> upper end, which bears on the systematic-bias question tracked in TODOs.md FIX-1; that
 > question is deliberately not argued here, in either direction. Keeping them separate is
 > the point: truncation is cheap, local, and provably correct, and it should land first so
 > the bias work has a clean baseline to measure against.
@@ -817,7 +817,7 @@ out of scope, and the design is shaped so neither is foreclosed:
 - **Bandwidth per spec?** `wind_speed` wants Scott's rule (0% bias) while the shipped
   default of `0.1` overshoots it by ~9%. A `default_bandwidth` field on `VariableSpec`
   is tempting, but it mixes a *physical* description with a *fitting* hyper-parameter.
-  Deferred pending the bias work (TODOs.md item 2).
+  Deferred pending the bias work (TODOs.md FIX-1).
 - **Does `generate_series` need the window at all?** Chaining across midnight within a
   climatological window means day *d*'s model and day *d+1*'s model are different fits.
   That is intended, but the interaction with cross-midnight pairs deserves a test —
@@ -853,4 +853,4 @@ Recorded so they are not relitigated. Every one of these was open in an earlier 
 | Independent-days API | `gen_day_sequence` → `gen_day`; `generate_ensemble` removed |
 | `generate_series` home | `DayWindowGenerator`, and it takes a **start date** |
 | Cache sizing | Out of scope for this document |
-| π(x₀) ↔ the +13% overshoot | Out of scope; the overshoot lives wholly in TODOs.md item 2 |
+| π(x₀) ↔ the +13% overshoot | Out of scope; the overshoot lives wholly in TODOs.md FIX-1 |
