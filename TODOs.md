@@ -11,7 +11,7 @@ use; within a group, most significant first.
 
 ## ID allocation
 
-> **Next ID: 10.**
+> **Next ID: 11.**
 
 IDs come from **one counter shared by every category**. The prefix says what an item
 *is*; the number says *which* item it is. Only the number is the identity.
@@ -497,7 +497,7 @@ Do this pass *after* the items it depends on, so it is one edit rather than thre
 Raw notes land here — refined but not yet costed or classified — and leave by
 graduating into a group above with a real ID, or by being dropped. Nothing stays long.
 
-## INBOX-8 : Move envelope functionality from the examples into the code 
+## INBOX-10 : Move envelope functionality from the examples into the code 
 
 examples/tools/ contains fucntionality that could be part of the main library as a diagnostics or convenience fucntion. 
 

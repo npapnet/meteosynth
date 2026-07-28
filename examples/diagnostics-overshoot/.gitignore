@@ -1,0 +1,5 @@
+# Raw per-realisation dumps and figures are regenerable from the scripts, and large.
+# FINDINGS.md and results/summary_*.csv are committed: they are the evidence FIX-1 cites.
+results/raw/
+results/*.log
+figures/
