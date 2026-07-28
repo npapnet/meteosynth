@@ -9,6 +9,35 @@ Each item records **what was measured**, so nobody has to re-derive it, and carr
 so re-ordering this file breaks nothing. Groups are ordered by how much they block real
 use; within a group, most significant first.
 
+## ID allocation
+
+> **Next ID: 10.**
+
+IDs come from **one counter shared by every category**. The prefix says what an item
+*is*; the number says *which* item it is. Only the number is the identity.
+
+1. **Allocate from the single counter, then bump it.** The next item is `#10`, written
+   `FIX-10`, `FEAT-10` or `CHORE-10` depending on what it turns out to be — never all
+   three. No two items ever share a number, whatever their prefixes.
+2. **Numbers are never reused.** Landing, dropping or superseding an item does not free
+   its number. `FIX-2` and `FIX-3` are burned permanently.
+3. **Reclassification changes the prefix, never the number.** A feature that turns out to
+   be a defect becomes `FIX-14`, not a new ID. This is why the category is not part of the
+   identity: a stale `FEAT-14` in a commit message or design doc still resolves
+   unambiguously to item 14.
+4. **Triage preserves the number.** An `INBOX-n` graduates by swapping its prefix —
+   `INBOX-8` becomes `FEAT-8` — so the link across triage survives without an annotation.
+   The ID only becomes citable at that point — see
+   [the record-keeping rules](docs/design/architecture.md#the-rules-this-implies).
+5. **IDs below 10 are legacy** and predate this scheme, so several categories reuse the
+   same low numbers (`FIX-1`, `PERF-1`, `FEAT-1` are three different items). For those the
+   full `PREFIX-N` string is the identity. They are **not** renumbered — 97 citations
+   across the repo and the git history point at them. From `#10` up, the number alone is
+   unambiguous.
+
+**Retired numbers** — burned, and where they went: `FIX-2`, `FIX-3` → [`CHANGELOG.md`](CHANGELOG.md)
+0.2.0 · `INBOX-1` … `INBOX-7` → triaged 2026-07-27, see the table at the end of this file.
+
 | ID                                                                              | Item                                            | Status                |
 | :------------------------------------------------------------------------------ | :---------------------------------------------- | :-------------------- |
 | [FIX-1](#fix-1--generated-irradiance-is-systematically-too-high)                | Generated irradiance is systematically too high | open · **start here** |

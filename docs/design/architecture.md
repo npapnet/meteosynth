@@ -172,7 +172,7 @@ a time, and moves when its status changes.**
 
 | File | Answers | Contains | Never contains |
 | :--- | :--- | :--- | :--- |
-| [`TODOs.md`](../../TODOs.md) | *What is still broken or unbuilt?* | **Open work only**, grouped as Fixes / Performance & internals / Features / Direction / Housekeeping, each with a stable ID (`FIX-1`, `PERF-2`, `FEAT-1`, `VISION-1`, `CHORE-1`) and the measurements behind it, plus an **Inbox** (`INBOX-n`) for notes not yet triaged | A "done" section |
+| [`TODOs.md`](../../TODOs.md) | *What is still broken or unbuilt?* | **Open work only**, grouped as Fixes / Performance & internals / Features / Direction / Housekeeping, each with a stable ID (`FIX-1`, `PERF-2`, `FEAT-1`, `VISION-1`, `CHORE-1`) drawn from one shared never-reused counter and the measurements behind it, plus an **Inbox** (`INBOX-n`) for notes not yet triaged and a **Next ID** line | A "done" section; a per-category counter |
 | [`CHANGELOG.md`](../../CHANGELOG.md) | *What is the package now, and when did that become true?* | Released state per version, `Added`/`Changed`/`Fixed`/`Removed`, plus an optional `### Decisions` subsection | Extended rationale; narrative of how a decision was reached |
 | [`docs/design/`](README.md) | *Why should we do it this way?* | Specifications and argued rationale for work **in flight** | Implemented work |
 | [`docs/design/completed/`](completed/) | *Why was it done this way?* | The same documents once their feature has landed, each with an archive note recording move date, implementation date and commits | Work still in flight |
@@ -204,11 +204,29 @@ flowchart LR
 4. **Cross-reference TODO items by ID, never by position.** `FIX-2`, not "item 7". Tests,
    examples and design docs all cite these IDs; ordinal references break the moment the
    file is re-grouped.
-5. **The Inbox is a waiting room, not a group.** A raw note lands as `INBOX-n` with an
+5. **IDs come from one shared counter, and the number is the identity.** `TODOs.md` carries
+   a single **Next ID** line for every category together, not one counter per group. The
+   prefix says what an item *is* and may change; the number says *which* item it is and
+   never does.
+   - **Numbers are never reused.** Landing, dropping or superseding an item does not free
+     its number — commit messages and released changelog entries cite them, and history
+     must not be made to lie.
+   - **Reclassifying changes only the prefix.** `FEAT-14` becoming a defect is `FIX-14`.
+     Because the number is unique across all categories, a stale citation still resolves.
+     This is the reason category is deliberately *not* part of the identity: it is the
+     mutable attribute, as the 2026-07-27 triage demonstrated.
+   - **Triage preserves the number**: `INBOX-8` graduates to `FEAT-8`.
+   - **IDs below 10 predate the scheme** and are not globally unique (`FIX-1`, `PERF-1` and
+     `FEAT-1` are three items). For those the full `PREFIX-N` string is the identity. They
+     were deliberately not renumbered.
+   - Splits mint fresh IDs and record their origin in prose (*"split from #12"*). Composite
+     `FIX-12-1` grammar was considered and rejected: it lengthens every citation to express
+     something rare, and the second segment cannot be known when the ID is allocated.
+6. **The Inbox is a waiting room, not a group.** A raw note lands as `INBOX-n` with an
    initial assessment and the question that decides its shape. It leaves by graduating
    into a group above with a real ID, or by being dropped — it is not a place items
    settle. Do not cite an `INBOX-n` ID from code or docs; it is not stable.
-6. **Sync the whole set at release.** Closing a version means: rename the sprint section to
+7. **Sync the whole set at release.** Closing a version means: rename the sprint section to
    `## [x.y.z] — date`, move any newly-completed TODO items into it, drop TODO entries the
    release invalidated, and re-check that every "already tried" note reflects what actually
    shipped.
