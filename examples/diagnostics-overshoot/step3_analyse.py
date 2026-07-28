@@ -22,6 +22,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 from scipy import stats
+from tqdm import tqdm
 
 import config as cfg
 
@@ -33,8 +34,8 @@ RATIO_STATISTICS = (
 )
 SHARE_STATISTICS = ("low_abs_share", "low_rel_share")
 
-#: Printed in this order. The flag marks the statistics run 1 identified as carrying the
-#: signal -- the lower tail, which the omnibus tests could not see.
+#: Printed in this order. The flag marks the statistics carrying the signal -- the lower
+#: tail, which the omnibus tests cannot see.
 REPORT_ORDER = (
     ("sum_mean", "mean of daily sum", False),
     ("sum_sd", "sd of daily sum", False),
@@ -200,7 +201,7 @@ def score(
             "effect": float(ks.pvalue),
             "ci_lo": float("nan"),
             "ci_hi": float("nan"),
-            # Reported, never relied on: run 1 showed KS accepting (p = 0.55) a sample
+            # Reported, never relied on: KS has been seen accepting (p = 0.55) a sample
             # with a fourfold overcast-day deficit. Flagged False so it cannot be counted
             # into the consistency rule by accident.
             "excludes_null": False,
@@ -222,7 +223,7 @@ def seasonal_share(observed: pd.DataFrame) -> float:
     Fraction of the pool's variance explained by position within the window.
 
     A quadratic in the **signed** offset from the centre day. This is the cost of pooling
-    a window rather than a date: run 1 measured 10.4 % at +/-15, and what CHORE-1 asks is
+    a window rather than a date -- 10.4 % at +/-15 on 21 March. What CHORE-1 asks is
     whether that is an acceptable price for the sample size it buys.
     """
     offsets = observed["days_from_centre"].to_numpy(dtype=float)
@@ -309,7 +310,13 @@ def main() -> None:
     print("  '<--' marks an interval that excludes the observed value")
     print("=" * 94)
 
+    # Each configuration is scored three times over -- the result, then the null and
+    # positive controls -- so the bar counts configurations, not bootstraps.
+    scoring = tqdm(total=len(index), desc="scoring configurations", unit="cfg",
+                   dynamic_ncols=True, leave=False, disable=None)
+
     for row in index.itertuples():
+        scoring.set_postfix_str(row.config_id)
         obs = observed[observed["config_id"] == row.config_id]
         syn = synthetic[synthetic["config_id"] == row.config_id]
 
@@ -344,7 +351,7 @@ def main() -> None:
         print(
             f"\n{row.config_id}   {row.month:02d}-{row.day:02d}, +/-{row.n_days} d, "
             f"bandwidth {row.bandwidth}"
-            f"{'   [ANCHOR -- run 1 configuration]' if row.is_anchor else ''}"
+            f"{'   [ANCHOR -- the earlier pass configuration]' if row.is_anchor else ''}"
         )
         print(f"    m = {row.m} observed days, n = {row.n} synthetic;  "
               f"observed CV {row.obs_cv * 100:.1f} %;  "
@@ -369,7 +376,9 @@ def main() -> None:
         )
         controls.insert(0, "config_id", row.config_id)
         all_controls.append(controls)
+        scoring.update(1)
 
+    scoring.close()
     statistics = pd.concat(all_stats, ignore_index=True)
     controls = pd.concat(all_controls, ignore_index=True)
     window = pd.DataFrame(window_rows)
@@ -409,7 +418,7 @@ def main() -> None:
     anchor = statistics[statistics["is_anchor"]]
     if not anchor.empty:
         print("\n" + "=" * 94)
-        print("ANCHOR -- against run 1's published figures for this configuration")
+        print("ANCHOR -- against the earlier pass's figures for this configuration")
         print("=" * 94)
         got = {
             "mean_ratio": float(anchor[anchor["statistic"] == "sum_mean"]["effect"].iloc[0]),
@@ -419,7 +428,7 @@ def main() -> None:
             ),
         }
         for key, expected in cfg.ANCHOR_EXPECTED.items():
-            print(f"  {key:<20} run 1 {expected:8.4f}   now {got[key]:8.4f}   "
+            print(f"  {key:<20} before {expected:8.4f}   now {got[key]:8.4f}   "
                   f"delta {got[key] - expected:+.4f}")
         print("  (a different seed, so agreement is expected within Monte-Carlo error, "
               "not to the digit)")

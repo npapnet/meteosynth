@@ -40,10 +40,10 @@ IDs come from **one counter shared by every category**. The prefix says what an 
 
 | ID                                                                              | Item                                            | Status                |
 | :------------------------------------------------------------------------------ | :---------------------------------------------- | :-------------------- |
-| [FIX-1](#fix-1--the-overcast-tail-is-under-produced)                            | The overcast tail is under-produced             | open · **restated**   |
-| [PERF-1](#perf-1--sampling-re-evaluates-the-kde-on-every-call)                  | Sampling re-evaluates the KDE on every call     | open                  |
+| [PERF-1](#perf-1--sampling-re-evaluates-the-kde-on-every-call)                  | Sampling re-evaluates the KDE on every call     | open · **start here** |
 | [PERF-2](#perf-2--four-copies-of-the-same-data-in-every-simulator)              | Four copies of the same data in every simulator | open · low priority   |
 | [PERF-3](#perf-3--fitted-generators-cannot-be-pickled-at-the-default-bandwidth) | Fitted generators cannot be pickled             | open · low priority   |
+| [FIX-1](#fix-1--the-overcast-tail-is-under-produced)                            | The overcast tail is under-produced             | open · **deferred**   |
 | [FEAT-1](#feat-1--cached-data-metadata-and-cache-match-check)                   | Cached data metadata and cache-match check      | open                  |
 | [FEAT-2](#feat-2--irradiance-pick-one-column-by-availability)                   | Irradiance: pick one column by availability     | decision partly taken |
 | [FEAT-3](#feat-3--chained-series-between-two-dates)                             | Chained series between two dates                | open · shape decided  |
@@ -64,15 +64,19 @@ The [Inbox](#inbox--not-yet-triaged) is empty. `INBOX-1` … `INBOX-7` were tria
 Groups are ordered by how much they block real use; this is the order to *take them in*,
 which is not the same thing.
 
-1. **FIX-1 with CHORE-1 folded in** — one investigation, not two: the Paris-vs-Heraklion
-   gap *is* the sample-size question CHORE-1 asks. Land the calibration test first, or
-   no attempted fix is measurable. **As of 2026-07-28 this is a *verification*, not a fix**
-   — FIX-1's evidence predates the shipped estimator and has not reproduced; see the
-   marker on that item.
-2. **PERF-1** — after FIX-1, not before: a precomputed CDF grid has to encode whatever
-   boundary correction FIX-1 lands, so doing it first means doing it twice.
-3. **FEAT-2 (1)**, then **FEAT-1**, then **FEAT-4** and **FEAT-5**, which both need it.
-4. **CHORE-3**, then **CHORE-4** last, so the docs pass is one edit rather than three.
+> **Reordered 2026-07-28.** `FIX-1` was first and is now deferred: the diagnostic that was
+> meant to measure it instead showed the calibration is sound, and the defect that remains
+> is worth **0.12 % of an annual P90**. That releases `PERF-1`, which was queued behind it
+> and is worth ~97 % of generation runtime.
+
+1. **PERF-1** — the biggest real-use win available, and no longer blocked. See the note on
+   that item: the old "it must wait for FIX-1's boundary correction" argument does not
+   survive contact with the code.
+2. **FEAT-2 (1)**, then **FEAT-1**, then **FEAT-4** and **FEAT-5**, which both need it.
+3. **CHORE-3**, then **CHORE-4** last, so the docs pass is one edit rather than three.
+4. **FIX-1**, whenever the cost is worth paying — the tail deficit is real, measured and
+   documented, and it does not affect any quantity the package currently advertises.
+   **CHORE-1** now stands on its own rather than folded into it; half of it is measured.
 
 **FEAT-3** is independent of all of it and can slot in anywhere.
 
@@ -82,19 +86,126 @@ with it — and `FIX-2` (exact-float degeneracy detection), which **unblocks VIS
 
 ---
 
+# Performance & internals
+
+## PERF-1 — Sampling re-evaluates the KDE on every call
+
+**Status:** open · **start here** · **unblocked 2026-07-28** · **Impact:** ~97 % of
+generation runtime
+
+> **It no longer waits for `FIX-1`.** This item used to be queued behind it, on the argument
+> that "a precomputed CDF grid has to encode whatever boundary correction `FIX-1` lands, so
+> doing it first means doing it twice". Two things retire that. `FIX-1` is deferred, and the
+> argument was too strong anyway: sampling is
+> `get_conditional_density(prev) -> (domain, cdf)` followed by one `np.interp`
+> (`markov_chain_simulator_kde2d.py:555-559`), so a precomputed grid is a **cache of that
+> call**. A boundary correction changes the density the call returns, not the shape of the
+> cache. What it would cost is re-baselining the golden tests — real, but that is a
+> re-record, not a redesign.
+>
+> **What landing it buys, measured:** `examples/diagnostics-overshoot/` takes ~17 minutes,
+> of which the great majority is 9000 `gen_day` calls. Every future experiment on this
+> package pays that tax.
+
+`get_next_state` re-evaluates a 1000-point grid through `gaussian_kde.evaluate` on every
+single call — 53.5 ms per generated day, against 58 ms to *fit* all 24 hourly models.
+Fitting is not the bottleneck; sampling is. On the 11-year record this is what makes a
+full synthetic year take ~4 minutes for three attributes.
+
+Precomputing the conditional CDF on a grid of `previous` values in `__init__` would make
+sampling two interpolations. This is the module's own long-standing TODO
+(`markov_chain_simulator_kde2d.py`). It trades memory for speed: a 200×1000 grid per
+simulator is ~1.6 MB, or ~38 MB per generator.
+
+---
+
+## PERF-2 — Four copies of the same data in every simulator
+
+**Status:** open · low priority
+
+`MarkovChainSimulator2dKDE` holds `self.data`, `self.previous_values`,
+`self.current_values` *and* `joint_kde.dataset` — ~15× overhead (992 bytes of payload held
+as ~14.6 KB). Trimming touches that class's golden tests.
+
+---
+
+## PERF-3 — Fitted generators cannot be pickled at the default bandwidth
+
+**Status:** open · low priority
+
+```text
+bandwidth=0.1  -> AttributeError: Can't get local object
+                  'gaussian_kde.set_bandwidth.<locals>.<lambda>'
+bandwidth=None -> pickles fine, 262 KB
+```
+
+`scipy` stores a local lambda in `covariance_factor`. This blocks any disk-caching or
+multiprocessing of fitted generators. A custom `__reduce__` would fix it.
+
+Not blocking anything today: generators are built lazily behind an LRU cache precisely
+because persisting them buys ~58 ms and duplicates data already on disk — a decision
+recorded in `CHANGELOG.md` 0.2.0 and argued in
+[`rolling-day-window.md`](docs/design/completed/rolling-day-window.md). It would start to
+matter if PERF-1 lands, since a precomputed CDF grid *is* worth persisting.
+
+> **Switching the default to `bandwidth=None` is not the fix** — measured 2026-07-28,
+> `examples/diagnostics-overshoot/`. Scott's rule chooses a factor of **0.390** at a
+> ±7-day window on a 19-year record, against the hand-set **0.100** — a 3.9× wider kernel —
+> and it is worse on every statistic tested: the mean of the daily total drops to
+> 0.944–0.987 of observed at **all four** dates, P50 to 0.890–0.979, P90 to 0.902–0.996,
+> all excluding. The signature is over-smoothing (P10 rises while P50 and P90 fall). So
+> this item needs the custom `__reduce__` it already proposes; it cannot be sidestepped by
+> changing the default.
+
+---
+
 # Fixes — known defects
 
 ## FIX-1 — The overcast tail is under-produced
 
-**Status:** open · **restated 2026-07-28** on measurement · **Impact:** synthetic records
-hold too few heavily overcast days; **magnitudes are calibrated**
+**Status:** open · **deferred 2026-07-28** · **Impact:** confined to low-tail questions —
+storage autonomy, worst-case days. **Nothing the package advertises is affected.**
 
-> **This item used to read "generated irradiance is systematically too high". It does not
-> any more.** Two diagnostics runs on a 19-year Heraklion record failed to reproduce the
-> overshoot and found a different defect in its place. Evidence:
-> [`examples/diagnostics-overshoot/FINDINGS.md`](examples/diagnostics-overshoot/FINDINGS.md);
+> **This item used to read "generated irradiance is systematically too high" and used to be
+> first in the queue. It is neither any more.** The diagnostic built to measure the
+> overshoot failed to reproduce it and found a smaller defect in its place. Evidence:
+> [`examples/diagnostics-overshoot/FINDINGS-2026-07-28.md`](examples/diagnostics-overshoot/FINDINGS-2026-07-28.md);
 > design and the provenance of the retired numbers in
 > [`PLAN.md`](examples/diagnostics-overshoot/PLAN.md).
+
+### Why it is deferred — the cost/benefit, measured
+
+The fix is expensive: reflection, a log/sqrt transform or beta kernels all change
+`MarkovChainSimulator2dKDE`'s density, which means re-baselining every golden test and
+re-validating all three attributes. The benefit, measured on the 19-year Heraklion record:
+
+| question | effect of the defect |
+| :------- | :------------------- |
+| Mean daily total, monthly or annual energy | **none** — ratio 0.994–1.007, no date excluding 1 |
+| Daily P50, P90, and the daily maximum | **≤ 1–4 %**, and the mean of daily maxima is within 2 % |
+| **Annual P90** (the exceedance figure a yield study quotes) | **0.12 % of the mean** — 2.3 kWh/m² on a mean year of 1879 |
+| Daily P10 | biased **high by up to 9 %** |
+| Frequency of overcast days | **~4× too few** where the record has any |
+
+The annual figure is why this is cheap to postpone. Days below 1 kWh/m² are 3.47 % of the
+record but carry **0.50 % of its energy**, and Heraklion's year-to-year CV is only 1.71 %,
+so understating the daily spread by the measured 5.5 % moves an annual P90 by a tenth of a
+percent. **A yield study cannot see this defect.**
+
+### What it does affect, and must therefore be documented
+
+- **Storage sizing, autonomy, worst-case-day analysis.** These read the low tail directly,
+  and the model under-produces it fourfold. The package should say so rather than let a
+  user discover it.
+- **Any daily low percentile.** P10 runs up to 9 % high.
+- **Sites with more overcast weather than Heraklion.** The relative deficit was ~3× at both
+  dates tested, so it is a property of the kernel rather than of the climate — but the
+  *consequence* grows with how much of the year is overcast, and a northern site has far
+  more of it. Untested.
+
+**Revisit when** any of those becomes a use case, when a second site shows a larger effect,
+or when the KDE core is being touched anyway for another reason — the marginal cost is much
+lower then.
 
 ### What is actually wrong
 
@@ -156,64 +267,6 @@ moving the mean ratios off 1.**
 moving the Paris total the wrong way (670 → 678 kWh/m²) — a number now understood to carry
 no error bar. It did fix generated negatives, 1.29 % → 0.00 %, which was its actual purpose.
 The padding is gone from both the 1D and 2D paths.
-
----
-
-# Performance & internals
-
-## PERF-1 — Sampling re-evaluates the KDE on every call
-
-**Status:** open · **Impact:** ~97 % of generation runtime
-
-`get_next_state` re-evaluates a 1000-point grid through `gaussian_kde.evaluate` on every
-single call — 53.5 ms per generated day, against 58 ms to *fit* all 24 hourly models.
-Fitting is not the bottleneck; sampling is. On the 11-year record this is what makes a
-full synthetic year take ~4 minutes for three attributes.
-
-Precomputing the conditional CDF on a grid of `previous` values in `__init__` would make
-sampling two interpolations. This is the module's own long-standing TODO
-(`markov_chain_simulator_kde2d.py`). It trades memory for speed: a 200×1000 grid per
-simulator is ~1.6 MB, or ~38 MB per generator.
-
----
-
-## PERF-2 — Four copies of the same data in every simulator
-
-**Status:** open · low priority
-
-`MarkovChainSimulator2dKDE` holds `self.data`, `self.previous_values`,
-`self.current_values` *and* `joint_kde.dataset` — ~15× overhead (992 bytes of payload held
-as ~14.6 KB). Trimming touches that class's golden tests.
-
----
-
-## PERF-3 — Fitted generators cannot be pickled at the default bandwidth
-
-**Status:** open · low priority
-
-```text
-bandwidth=0.1  -> AttributeError: Can't get local object
-                  'gaussian_kde.set_bandwidth.<locals>.<lambda>'
-bandwidth=None -> pickles fine, 262 KB
-```
-
-`scipy` stores a local lambda in `covariance_factor`. This blocks any disk-caching or
-multiprocessing of fitted generators. A custom `__reduce__` would fix it.
-
-Not blocking anything today: generators are built lazily behind an LRU cache precisely
-because persisting them buys ~58 ms and duplicates data already on disk — a decision
-recorded in `CHANGELOG.md` 0.2.0 and argued in
-[`rolling-day-window.md`](docs/design/completed/rolling-day-window.md). It would start to
-matter if PERF-1 lands, since a precomputed CDF grid *is* worth persisting.
-
-> **Switching the default to `bandwidth=None` is not the fix** — measured 2026-07-28,
-> `examples/diagnostics-overshoot/`. Scott's rule chooses a factor of **0.390** at a
-> ±7-day window on a 19-year record, against the hand-set **0.100** — a 3.9× wider kernel —
-> and it is worse on every statistic tested: the mean of the daily total drops to
-> 0.944–0.987 of observed at **all four** dates, P50 to 0.890–0.979, P90 to 0.902–0.996,
-> all excluding. The signature is over-smoothing (P10 rises while P50 and P90 fall). So
-> this item needs the custom `__reduce__` it already proposes; it cannot be sidestepped by
-> changing the default.
 
 ---
 

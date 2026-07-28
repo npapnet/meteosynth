@@ -78,20 +78,21 @@ DAYS: list[tuple[int, int]] = [(3, 21), (6, 21), (9, 21), (12, 21)]
 #: for anyone reconciling against that number, though the reference differs.
 DAYS_BACKLOG: list[tuple[int, int]] = [(5, 21)]
 
-#: The anchor cell: run 1's exact configuration (+/-15, bandwidth 0.1, 21 March). Not a
-#: factor level -- a regression check. Every other setting changes in this run, so no
-#: other cell is comparable to run 1; this one is, and it is what says the rewritten
-#: step3 returns run 1's published numbers on run 1's settings.
+#: The anchor cell: the earlier pass's configuration (+/-15, bandwidth 0.1, 21 March).
+#: Not a factor level -- a regression check. Every other setting changes in this run, so
+#: no other cell is comparable to that pass; this one is, and it is what says the
+#: rewritten step3 returns the same numbers on the same settings.
 ANCHOR: tuple[int, int, int, Optional[float]] = (3, 21, 15, 0.1)
 
-#: Run 1's published figures for the anchor configuration, checked against by step3.
-#: From FINDINGS.md: mean +1.06 % against the pool, sd ratio 0.915, and 0.60 % of
-#: synthetic days below 1 kWh/m2.
+#: The anchor configuration's figures from the earlier pass, checked against by step3:
+#: mean +1.06 % against the pool, sd ratio 0.915, and 0.60 % of synthetic days below
+#: 1 kWh/m2. Recorded in FINDINGS-2026-07-28.md under "Controls"; that pass used a
+#: different harness, so agreement is expected within Monte-Carlo error, not to the digit.
 ANCHOR_EXPECTED = {"mean_ratio": 1.0106, "sd_ratio": 0.915, "low_abs_share_syn": 0.0060}
 
-#: Realisations per configuration. Run 1 measured the day-to-day CV at 10-39 % depending
-#: on the date, which at n = 1000 puts the minimum detectable effect between ~1.4 %
-#: (21 June) and ~4.8 % (21 March). n = 30, the original brief, was uninformative.
+#: Realisations per configuration. The measured day-to-day CV runs 9-41 % depending on
+#: the date, which at n = 1000 puts the minimum detectable effect between ~1.4 %
+#: (21 June) and ~4.8 % (21 March). Anything near n = 30 is uninformative.
 N_REALISATIONS = 1000
 
 MASTER_SEED = 20260728
@@ -105,8 +106,8 @@ N_BOOTSTRAP = 10_000
 # The statistics
 # --------------------------------------------------------------------------------------
 
-#: Absolute low-tail threshold, kWh/m2/day. Kept for continuity with run 1, which
-#: reported 0.60 % of synthetic days below this against 2.38 % observed.
+#: Absolute low-tail threshold, kWh/m2/day. Kept for continuity with the earlier pass,
+#: which reported 0.60 % of synthetic days below this against 2.38 % observed.
 LOW_TAIL_ABS = 1.0
 
 #: Relative low-tail threshold, as a fraction of the **observed pool median**. The

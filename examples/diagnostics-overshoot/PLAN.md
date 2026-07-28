@@ -1,22 +1,15 @@
-Status: **runs 1 and 2 complete and executed as designed** — results in
-[`FINDINGS.md`](FINDINGS.md) · Date: 2026-07-28 · Serves: `FIX-1`, with a `CHORE-1`
+**Design of the diagnostic** · executed 2026-07-28 · results in
+[`FINDINGS-2026-07-28.md`](FINDINGS-2026-07-28.md) · serves `FIX-1`, with a `CHORE-1`
 by-product
 
-> **Run 2 executed 2026-07-28**, 9 configurations in 16.6 min, all 14 self-checks passing.
-> Three departures from this plan, all recorded in `FINDINGS.md`: **21 September replaced
-> 21 May** for an even spread through the solar year; **a bootstrap of zero events** needed
-> a rule-of-three upper bound, since resampling no events returns the degenerate interval
-> `[0, 0]`; and **an empty observed tail was being counted as a failure to confirm** the
-> deficit, which understated a 2/2 result as 2/4. The consistency rule additionally
-> requires the dates to agree in sign.
+This document is the **why and how**: what is being measured, why it is measured that way,
+and what would have counted as which answer. The numbers live in the findings file.
 
-# Diagnostics: does the generator reproduce the distribution it was fitted to?
+# Does the generator reproduce the distribution it was fitted to?
 
-## Overview
-
-One question, asked of **the code as it ships today**: draw a large ensemble of synthetic
-days, and check whether their daily totals are distributed like the observed days the model
-was trained on.
+One question, asked of the code as it ships: draw a large ensemble of synthetic days, and
+check whether their daily totals are distributed like the observed days the model was
+trained on.
 
 ```mermaid
 flowchart TD
@@ -31,284 +24,205 @@ flowchart TD
     H --> I["repeat at 4 dates × 2 bandwidths"]
 ```
 
-**The pooled window is both the training data and the reference.** That is the design's one
-important property: the model was fitted to exactly this sample, so the comparison target is
-a *known quantity* rather than an estimate of one, and no seasonal or sampling correction is
-needed on the observed side. Run 1's largest methodological finding was that the choice of
-reference moved the answer by up to 16.7 % — more than the effect being chased. This design
-removes that degree of freedom instead of managing it.
-
-**What is deliberately not asked.** Whether the generator reproduces *the climate of a
-specific calendar date* (a different question, with a reference that has to be estimated);
-whether chained multi-day series drift; whether behaviour differs at other sites; and
-anything about the pre-0.2.0 code. Each is a separate run if this one motivates it.
-
-## The three named parts
-
-| name | what it is |
+| term | what it means here |
 | :--- | :--- |
-| **configuration** | one (date, bandwidth) pair — 9 in total |
-| **observed sample** | the 285 days in that date's ±7-day pool, all 19 years |
+| **configuration** | one *(date, window half-width, bandwidth)* — 9 in total |
+| **observed sample** | the 285 days in that date's ±7-day pool, across all 19 years |
 | **synthetic sample** | 1000 independent `gen_day` draws from the generator fitted to that pool |
 
 ---
 
-## Configuration
+## Why this design
 
-| | |
-| :--- | :--- |
-| Record | Heraklion (35.34, 25.14), PVGIS 5.3 / SARAH3, **2005–2023 = 19 years**, 166 536 hourly rows |
-| Attribute | `poa_global` |
-| Window | **`n_days = 7`** (15-day window, 285 pooled days) — **changed from the shipped default of 15** |
-| Bandwidth | **factor with two levels: `None` (Scott's rule) and `0.1`** — Scott is the intended new default |
-| Dates | **21 Mar · 21 Jun · 21 Sep · 21 Dec** — all four run |
-| Realisations | **n = 1000** per configuration |
-| Training sets | **one** — the full 19-year record. No year-subsetting. |
-| Anchor cell | one extra configuration at **±15 / 0.1**, 21 Mar — see [Controls](#controls) |
-| Cost | 9 configurations ≈ **10 min**, plus a ~2 min fetch |
+### Why the training pool is the reference
 
-### Why these two settings changed
+**The model was fitted to exactly the sample it is compared against.** That makes the
+comparison target a *known quantity* rather than an estimate of one: no seasonal correction,
+no sampling error on the observed side, and nothing to defend about which reference was
+chosen.
 
-**Window ±15 → ±7.** Halves the pool (589 → 285 days) and cuts the within-window seasonal
-smear. Run 1 measured that smear at **10.4 % of pool variance** at ±15; a locally linear
-trend's contribution scales with the square of the half-width, so ±7 should put it near 2 %.
-That matters here specifically: the observed pool is the reference, so any seasonal spread
-inside it is spread the model is being asked to reproduce.
+That last point is the reason. An earlier pass computed three references for the same
+question — the pooled window, the exact calendar date, and a detrended estimate of the date —
+and found that **the choice alone moved the answer by up to 16.7 %**, more than the effect
+being chased. The reference estimated from one value per year had a standard error near 25 %
+at small samples, and its noise read as a clean, convincing trend. This design deletes that
+degree of freedom rather than managing it.
 
-**Bandwidth 0.1 → Scott's rule.** Data-driven rather than hand-set, and it is the level at
-which fitted generators are picklable at all (`PERF-3`). But the two changes compound, and
-the direction is not obviously benign:
+It also settles a statistical question that would otherwise need an argument: **only the
+synthetic side is resampled** for intervals. Holding the observed side fixed would be wrong
+if the pool were a sample from a wider population being estimated. It is not — it is the
+object the model was fitted to.
+
+### Why four dates, and why consistency instead of a correction
+
+Nine configurations × ten statistics is a lot of intervals, and a Holm correction across
+them would be both punishing and beside the point. Instead: **a finding counts when every
+informative date excludes, and they agree in sign.** Four dates spread through the solar
+year are four near-independent tests of the same claim; agreement across them is stronger
+evidence than any single corrected p-value, and it cannot be bought by running more cells.
+
+"Informative" is load-bearing. A tail statistic measured against an *empty* observed tail
+can detect an excess but not a deficit, so those cells are excluded from the count rather
+than recorded as failures to confirm.
+
+### Why these statistics, and why the omnibus tests are demoted
+
+This is the one choice that had to be argued rather than assumed. An earlier pass **already
+ran** a distributional-similarity test on daily totals: Kolmogorov–Smirnov p = 0.55,
+Anderson–Darling p = 0.18, neither rejecting. The same data showed the model producing **4×
+too few overcast days**. The tail is too small a share of the mass for an omnibus statistic
+to see, so scoring this comparison with KS/AD would be *less* sensitive than looking
+directly. KS is reported as one line for the record; the conclusion rests on the rest.
+
+| statistic | on | why it is here |
+| :--- | :--- | :--- |
+| **mean ratio** | daily sum | The `FIX-1` claim, stated directly. |
+| **sd ratio** | daily sum | Dispersion is a separate defect from level and points elsewhere. |
+| **P10 ratio** | daily sum | The lower tail, as a quantile. |
+| **low-tail share** | daily sum | The lower tail, as a count: below `0.25 ×` the observed median, and below 1 kWh/m² for continuity with earlier measurements. |
+| P50, P90 ratios | daily sum | Free context. |
+| mean, sd, P90 ratios | daily **max** | The upper end, where the daily sum is insensitive. |
+| KS p-value | daily sum | Reported, not relied on — see above. |
+
+### Why ±7 days and not the shipped ±15
+
+Halving the window halves the pool (589 → 285 days) and cuts the smear from within-window
+seasonal drift. That matters *because the pool is the reference*: any seasonal spread inside
+it is spread the model is being asked to reproduce. The share of pool variance attributable
+to position in the window is measured at both widths, which is what `CHORE-1` asks for.
+
+### Why bandwidth is a factor and not a rebase
+
+Scott's rule is the data-driven choice and the only setting at which fitted generators are
+picklable (`PERF-3`), so it was the intended new default. But it is not a small change:
 
 | | pooled days | Scott's factor |
 | :--- | --: | --: |
 | ±15, 19 yr | 589 | 0.345 |
 | **±7, 19 yr** | **285** | **0.390** |
 
-Both are multipliers on the data covariance, so this is directly comparable to the current
-`0.1`: Scott at the new window is a **3.9× wider kernel**, and the smaller pool is what
-widens it further. `FIX-1`'s bandwidth sweep rises monotonically across that range
-(0.1 → +11 %, 0.2 → +14 %, 0.3 → +15 %). That sweep was measured under the retired month-based
-estimator and is not evidence about today's code — but the mechanism it implies, boundary
-leakage scaling with kernel width, does not depend on the estimator. **This is why bandwidth
-is a factor and not a rebase**: if the numbers move, which change moved them is answerable.
+Both are multipliers on the data covariance, directly comparable to the hand-set `0.1` — so
+Scott at the new window is a **3.9× wider kernel**, and the smaller pool is what widens it
+further. Two changes at once, in a direction an older bandwidth sweep suggested was
+unfavourable. Running bandwidth as a factor costs one loop and keeps *which change moved a
+number* answerable.
+
+### Why the controls are not optional
+
+**A negative result is worth only as much as the demonstration that a positive would have
+been detected.** Three, all reported before any result:
+
+| control | what it catches |
+| :--- | :--- |
+| **Null** — observed pool resampled in place of the synthetic sample | a harness that reports differences that are not there. Every interval must cover the observed value. |
+| **Positive** — synthetic sample inflated 10 % | a harness too blunt to see the effect it is hunting. The lift must come back at 1.10 and exclude 1. |
+| **Anchor** — the ±15 / 0.1 cell of the earlier pass | a rewrite that quietly changed what is computed. It must return the earlier numbers within Monte-Carlo error. |
+
+The anchor exists because every other setting changed at once: without it, no cell in this
+run would be comparable to anything measured before.
+
+### What is deliberately not asked
+
+Whether the generator reproduces *the climate of a specific calendar date* — a different
+question, whose reference has to be estimated. Whether chained multi-day series drift.
+Whether behaviour differs at other sites or for `poa_direct`. And anything about pre-0.2.0
+code: that is a question about the repo's history, not about the package. Each is a separate
+run if this one motivates it.
 
 ---
 
-## The test
+## How it runs
 
-For each configuration, both samples are reduced to two per-day scalars — the **daily sum**
-(kWh/m²/day) and the **daily maximum** (W/m²) — and compared statistic by statistic.
+| | |
+| :--- | :--- |
+| Record | Heraklion (35.34, 25.14), PVGIS 5.3 / SARAH3, **2005–2023 = 19 years** |
+| Attribute | `poa_global` |
+| Window | `n_days = 7` — 285 pooled days |
+| Bandwidth | factor: `None` (Scott) and `0.1` |
+| Dates | 21 Mar · 21 Jun · 21 Sep · 21 Dec |
+| Realisations | n = 1000 per configuration |
+| Anchor | one extra cell at ±15 / 0.1, 21 Mar |
+| Intervals | 10 000 bootstrap resamples, **synthetic side only**, percentile method |
+| Cost | 9 configurations, ~17 min, plus a ~2 min fetch |
 
-| # | statistic | on | why it is here |
-| --: | :--- | :--- | :--- |
-| 1 | **mean ratio** | daily sum | The `FIX-1` claim, stated directly. |
-| 2 | **sd ratio** | daily sum | Dispersion is a separate defect from level and points elsewhere. |
-| 3 | **P10 ratio** | daily sum | **The signal.** Run 1's low tail, as a quantile. |
-| 4 | **low-tail share** | daily sum | **The signal.** Share below `0.25 × observed median`, plus the absolute `< 1 kWh/m²` for continuity with run 1. |
-| 5 | P50, P90 ratios | daily sum | Free context; both matched to ~1 % in run 1. |
-| 6 | mean, sd, P90 ratios | daily **max** | The upper end, where the daily sum is insensitive. |
-| 7 | KS p-value | daily sum | **Reported, not relied on** — see below. |
+```bash
+uv run python examples/diagnostics-overshoot/run_all.py     # all four steps
+```
 
-Each ratio carries a **95 % bootstrap CI from resampling the 1000 synthetic days only**
-(10 000 iterations, percentile interval). The observed pool is held fixed, which is correct
-here and only here: it is not a sample from a wider population being estimated, it is the
-exact object the model was fitted to.
+Four steps, separately runnable, so the simulation is paid once and the analysis re-derives
+in seconds:
 
-### Why the omnibus tests are demoted
+```
+step1_fetch.py      probe PVGIS for the widest range it serves, fetch, cache
+step2_simulate.py   every configuration -> results/raw/*.csv, then self-check them
+step3_analyse.py    reads results/raw/ only -> results/summary_*.csv
+step4_figures.py    ECDF with a tail zoom, ratio-with-interval charts
+```
 
-This is the one place where the simplification had to be argued rather than accepted. Run 1
-**already ran** a distributional-similarity test on daily sums: KS **p = 0.55**,
-Anderson–Darling **p = 0.18**, neither rejecting. The same run found the model producing
-**4× too few overcast days** (0.60 % vs 2.38 % below 1 kWh/m²). The tail is too small a share
-of the mass for an omnibus statistic to see, so scoring this comparison with KS/AD would be
-*less* sensitive than what already exists. KS stays as one reported line for the record;
-statistics 1–6 are what the conclusion rests on.
+**`step3` reads only the files on disk**, never in-memory state from `step2`. That is
+deliberate: any check made by hand against the CSVs is a check against exactly what the
+analysis saw. Column-by-column detail is in [`README.md`](README.md).
 
-### Multiplicity, handled by consistency rather than correction
+### What the harness asserts about itself
 
-Nine configurations × seven statistics is a lot of intervals, and Holm across them would be
-both punishing and beside the point. Instead: **a finding counts when it appears in the same
-direction at all four dates.** Four dates spanning the solar year are four near-independent
-tests of the same claim, and agreement across them is stronger evidence than any single
-corrected p-value. Single-configuration results are reported as descriptive.
+Run at the end of `step2`, printed as a pass/fail block, because a corrupted run should be
+caught before anything is concluded from it: hourly values reconcile against both the daily
+sums and the daily maxima; observed row counts match years × (2n+1); day offsets are signed
+and symmetric about the centre; every year of the record is present; nothing falls outside
+the attribute's registered physical support; no synthetic day exceeds 1.5× the observed
+maximum; and no `config_id` appears twice.
 
-### Dropped from run 1's battery, and why
+Two of those guard defects that actually occurred and produced plausible, wrong answers: an
+**unsigned day offset** silently folded the season's rising and falling sides onto one curve,
+and **two concurrent runs** appended into one another's output. A PID lockfile now refuses
+the second case outright.
 
-Welch's t, the permutation test, Anderson–Darling, Holm–Bonferroni, the three-reference
-comparison, the two-sample bootstrap, the k-sweep over training-set sizes with five random
-draws each, and the per-hour bias profile. The first six are redundant against statistics
-1–6; the k-sweep was answered by run 1 (flat, no size dependence) and the question it served
-is not "how does the current code behave"; the per-hour profile showed no compounding and
-costs a file to keep. **Roughly a fifth of run 1's analysis surface, and it can see one thing
-run 1's could not.**
+### Reproducibility
 
----
+One `MASTER_SEED` in `config.py`; per-configuration streams derive from it via
+`np.random.SeedSequence`, keyed on the cell's identity so adding or removing a cell does not
+reshuffle the others. Library versions are the one caveat — a change in `numpy`'s generator
+or `scipy`'s `gaussian_kde` shifts the draws. The reported run used **pvlib 0.15.2** on
+Python ≥ 3.10; `uv.lock` pins the rest.
 
-## Controls
-
-Three, all cheap, all run before anything is concluded.
-
-**Anchor cell — ±15 / 0.1 at 21 March.** Reproduces run 1's full-record configuration
-exactly. Because everything else about run 2 changes, no other cell is comparable to run 1;
-this one is, and it doubles as a regression check that the rewritten `step3` returns run 1's
-numbers on run 1's settings (**mean +1.06 %, sd ratio 0.915 against the pool, 0.60 % below
-1 kWh/m²**). If it does not, the rewrite changed something and nothing else should be read.
-
-**Null control.** Replace the synthetic sample with a bootstrap resample of the observed
-pool and run the analysis unchanged. Every ratio must cover 1. If one does not, the harness
-carries a bias of its own.
-
-**Positive control.** Multiply the synthetic daily sums by 1.10 and confirm the mean ratio
-comes back at 1.10 with an interval excluding 1. Demonstrates the instrument can see the
-effect it is looking for.
+`FINDINGS-*.md` and `results/summary_*.csv` are committed — they are the evidence `FIX-1`
+cites. `results/raw/` and `figures/` are git-ignored and regenerate from the commands above.
 
 ---
 
-## Decision rule
+## The decision rule, as pre-registered
 
-Pre-registered, so the reading is not chosen after the numbers arrive. Judged on consistency
-across the four dates, at the primary setting (±7, Scott):
+Written before the run, so the reading was not chosen after the numbers arrived. Judged on
+consistency across the four dates at the primary setting (±7, Scott).
 
 | outcome | what it means |
 | :--- | :--- |
-| All ratios cover 1, low-tail share matches | **The generator reproduces its training distribution.** `FIX-1`'s mean-overshoot framing is retired; the item closes against this run as the calibration evidence. |
-| Ratios 1–2 cover 1, but **P10 and low-tail share do not** | The expected result on run 1's evidence. **Restate `FIX-1` as a lower-tail defect** — measurable, mechanistic, and exactly what reflection / log-transform / beta kernels act on. |
-| **Mean ratio excludes 1** at all four dates | A real mean bias in shipped code, with a sign and a size. The boundary-correction work is justified and this run is its baseline. |
-| **Scott and 0.1 disagree** materially | The default is the lever, not the kernel family. Feeds a bandwidth decision, and makes `PERF-3` (only Scott pickles) relevant. |
-| sd ratio excludes 1 while the rest match | Under-dispersion in daily aggregates — a first-order chain losing day-scale persistence. A different defect from `FIX-1`, and it would get its own ID. |
+| All ratios cover 1, low-tail share matches | The generator reproduces its training distribution. `FIX-1`'s mean-overshoot framing is retired and the item closes against this run. |
+| Ratios for mean and sd cover 1, but **P10 and low-tail share do not** | **Restate `FIX-1` as a lower-tail defect** — measurable, mechanistic, and exactly what reflection / log-transform / beta kernels act on. |
+| **Mean ratio excludes 1** at all four dates | A real mean bias in shipped code. The boundary-correction work is justified and this run is its baseline. |
+| **Scott and 0.1 disagree** materially | The default is the lever, not the kernel family. Feeds a bandwidth decision and makes `PERF-3` relevant. |
+| sd ratio excludes 1 while the rest match | Under-dispersion in daily aggregates — a first-order chain losing day-scale persistence. A different defect, and it would get its own ID. |
 
-**`CHORE-1` is not closed by this run.** Fixing ±7 without a ±15 comparison leaves the
-"is 15 right" question open; what this run contributes is the within-window seasonal share at
-±7, measured from the observed pool alone, alongside run 1's 10.4 % at ±15. Two points on
-that curve is not an evaluation, and the item should say so.
+**Which fired:** the second and the fourth. See
+[`FINDINGS-2026-07-28.md`](FINDINGS-2026-07-28.md).
 
----
+### Departures from this plan, as executed
 
-## Raw data written to disk
-
-Unchanged in spirit from run 1: every number the analysis rests on is written out, and
-`step3` reads only these files, never in-memory state from `step2`.
-
-| file | one row per | key columns |
-| :--- | :--- | :--- |
-| `config_index.csv` | configuration | `config_id`, `month`, `day`, `n_days`, `bandwidth`, `seed`, `n`, `m` |
-| `observed_daily.csv` | configuration × observed day | `config_id`, `date`, `year`, `slot`, `days_from_centre`, `sum_kwh_m2`, `max_w_m2` |
-| `synthetic_daily.csv` | configuration × realisation | `config_id`, `realisation`, `sum_kwh_m2`, `max_w_m2` |
-| `observed_hourly.csv` | configuration × observed day × hour | `config_id`, `date`, `hour`, `poa_global_w_m2` |
-| `synthetic_hourly.csv` | configuration × realisation × hour | `config_id`, `realisation`, `hour`, `poa_global_w_m2` |
-
-Daily sums are `sum(hourly) / 1000`, the only arithmetic between the hourly and daily files,
-so it is directly checkable. The `references.csv` of run 1 is **gone** — there is one
-reference now and it is the observed sample itself.
-
-### Self-checks the harness asserts
-
-- `sum(hourly) / 1000 == daily sum` to floating tolerance, both samples.
-- Observed row count `== 15 × 19` per configuration (less any missing day, reported).
-- `days_from_centre` is **signed** and symmetric about zero — the guard on run 1's first
-  harness defect, kept.
-- No negative irradiance; no daily sum above a clear-sky ceiling for the latitude and date.
-- Synthetic row count `== n`; no duplicate `config_id`; PID lockfile against concurrent runs
-  — the guard on run 1's second harness defect, kept.
+1. **21 September replaced 21 May**, for an even spread through the solar year. 21 May is
+   the date an older `FIX-1` figure was measured on, but under this reference that
+   reconciliation was never going to be clean. It remains in `DAYS_BACKLOG`.
+2. **A bootstrap of zero events returns `[0, 0]`** and "excludes" any observed share
+   however small the sample. The upper bound falls back to the rule of three (`3/n`).
+3. **Empty observed tails were being counted as failures to confirm**, understating a 2/2
+   result as 2/4. Informative cells are now identified explicitly, and the consistency rule
+   additionally requires agreement in sign.
 
 ---
 
-## What run 1 established, and what carries forward
+## Appendix — why `FIX-1`'s original numbers are not the baseline
 
-Full detail in [`FINDINGS.md`](FINDINGS.md). The measured facts that shape this design:
-
-- **No mean overshoot at ±15 / 0.1**: +1.06 % at 21 March on the 19-year record, against an
-  MDE of 4.8 %. Two-year configurations came out at −0.02 %, failing to reproduce `FIX-1`'s
-  +14 % in the configuration built to match it.
-- **The real defect is a missing low tail** — 0.60 % of synthetic days below 1 kWh/m²
-  against 2.38 % observed, while P50 and P90 match to ~1 %. **This run exists to confirm or
-  refute that at four dates and two bandwidths.**
-- **Day-to-day CV varies enormously by date** — 21 Mar 35.2 %, 21 May 22.0 %, 21 Jun 10.1 %,
-  21 Dec 39.3 %. At n = 1000 that is an MDE of 4.8 % at March against ~1.4 % at June: **June
-  is the sharpest cell in the design, December the noisiest and the most overcast-heavy.**
-- **No compounding along the walk** — flat per-hour bias, so `FIX-1`'s hour-6 → hour-12 ramp
-  does not reproduce.
-- **Reference choice moved the answer by up to 16.7 %**, which is why this run has one
-  reference by construction.
-- **Two harness defects** — unsigned day offsets, and concurrent runs interleaving rows into
-  one another's output. Both now fail loudly, and both guards are kept.
-
-`21 Sep` replaces `21 May` in the date list: four dates spread evenly through the solar year
-test the consistency requirement better than three clustered in spring and summer. `21 May`
-remains available in `DAYS_BACKLOG` for anyone reconciling against `FIX-1`'s +3.2 % row.
-
----
-
-## Harness changes
-
-The four `step*.py` scripts stay; this is a simplification of them, not a rewrite.
-
-| file | change |
-| :--- | :--- |
-| `config.py` | `WINDOW_N_DAYS = 7`; new `BANDWIDTHS = (None, 0.1)`; all four dates in `DAYS`; **delete** `training_sizes`, `N_DRAWS`, `REFERENCES`, `PRIMARY_REFERENCE`; `config_id` gains window and bandwidth |
-| `step2_simulate.py` | drop year-subsetting and the reference triple; loop over bandwidth; record `max_w_m2` alongside the daily sum; keep the lockfile, the signed-offset helper and the self-checks |
-| `step3_analyse.py` | replace the test battery with the seven statistics and a synthetic-side bootstrap |
-| `step4_figures.py` | ECDF overlay on a log x-axis (where the tail is visible), and a ratio-with-CI chart per statistic; drop the spread-vs-years figure |
-
-**Run 1's outputs are not in this checkout** — `results/` is absent and `examples/data/` holds
-only the 11-year file. The anchor cell regenerates what is needed to check the rewrite against
-run 1's published numbers.
-
----
-
-## Structure and cost
-
-```
-examples/diagnostics-overshoot/
-├── PLAN.md              this file
-├── README.md            what it is and how to run it
-├── FINDINGS.md          run 1's result; run 2 appends its own section
-├── config.py            dates, bandwidths, n, seeds, paths
-├── step1_fetch.py       probe PVGIS, fetch, cache
-├── step2_simulate.py    all configurations -> results/raw/*.csv, then self-checks
-├── step3_analyse.py     reads results/raw/ only -> results/summary_*.csv
-├── step4_figures.py     ECDF, ratio charts
-├── results/
-│   ├── raw/             the five tidy files above, plus a README
-│   └── summary_*.csv    the aggregate tables
-└── figures/
-```
-
-**Cost.** 9 configurations × 1000 realisations × ~53.5 ms ≈ **8 min of sampling**, plus
-fitting and a ~2 min fetch. Step 2 times one configuration and prints a measured ETA before
-committing, and writes incrementally so an interrupted run resumes.
-
-**Reproducibility.** One `MASTER_SEED`, per-configuration streams via
-`np.random.SeedSequence`. Library versions are the one caveat — a change in `numpy`'s
-generator or `scipy`'s `gaussian_kde` shifts the draws. Run 1 used **pvlib 0.15.2** on
-Python ≥ 3.10; `uv.lock` pins the rest.
-
-**Committed vs ignored.** `FINDINGS.md` and `results/summary_*.csv` are committed;
-`results/raw/` and `figures/` are git-ignored, matching the repo's rule for
-`examples/output/`. Git-ignored means *not in version control*, not *not written*.
-
-```bash
-uv run python examples/diagnostics-overshoot/step1_fetch.py        # ~2 min, network
-uv run python examples/diagnostics-overshoot/step2_simulate.py     # ~10 min
-uv run python examples/diagnostics-overshoot/step3_analyse.py      # seconds
-uv run python examples/diagnostics-overshoot/step4_figures.py      # seconds
-```
-
----
-
-## What lands in `TODOs.md`
-
-Nothing mid-flight. `FIX-1` currently carries an **unverified — under verification** marker
-(added 2026-07-28) so the boundary-correction work is not started on a contested number. On
-completion it is restated, closed, or confirmed per the decision rule, and `CHORE-1` gains
-the ±7 seasonal-share figure with an explicit note that two points do not settle it.
-
----
-
-## Appendix — why `FIX-1`'s numbers are not the baseline
-
-Dated against the git history, because the item reports numbers without saying which code
-produced them:
+`FIX-1` recorded a +14 % overshoot without saying which code produced it. Dated against the
+git history:
 
 | measured | recorded | estimator |
 | :--- | :--- | :--- |
@@ -316,15 +230,16 @@ produced them:
 | bandwidth sweep, **+9 % … +15 %** | same commit | same — the entry says "the May *subset*" |
 | **678 kWh/m², +14 %** (the headline) | `e2337e4`, 2026-07-22 | post-padding-removal re-measure; generator path not recorded |
 | Heraklion **+3.2 %**, **+2.0 %** | `71548c6`, 2026-07-27 | rolling ±15 d, shipped defaults |
-| 21 Mar **+1.06 %** | run 1, 2026-07-28 | same |
 
-The rolling window landed at 08:21 on 2026-07-15; the `FIX-1` entry was written 48 minutes
-later, citing measurements from the previous sprint against a month subset. The fitted π(x₀)
-and the padding removal landed a week after that. Pre-0.2.0 there was no `generate_series`
-at all — a chained year came from `gen_day_sequence(start_value=0.0)`, every day starting
-from a hard zero rather than a fitted initial distribution.
+The rolling window landed at **08:21 on 2026-07-15**; the `FIX-1` entry was written **48
+minutes later**, citing measurements from the previous sprint against a month subset. The
+fitted π(x₀) and the removal of the ±10 % domain padding landed a week after that. Pre-0.2.0
+there was no `generate_series` at all — a chained year came from
+`gen_day_sequence(start_value=0.0)`, every day starting from a hard zero rather than a fitted
+initial distribution.
 
 **So the numbers that motivated the boundary-correction work were not produced by the code
-that ships today**, and reproducing them would be a question about the repo's history rather
-than about the package. That is why this run measures the current code against its own
-training data and nothing else.
+that ships today**, and each was a single measurement with nothing establishing its spread.
+Reproducing them would answer a question about the repo's history rather than about the
+package — which is why this diagnostic measures the current code against its own training
+data and nothing else.

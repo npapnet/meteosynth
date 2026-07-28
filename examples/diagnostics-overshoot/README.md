@@ -7,14 +7,15 @@ Heraklion (2005–2023, 19 years). It began as an investigation of the generated
 overshoot recorded in [`FIX-1`](../../TODOs.md) and **ended by retiring it**: the mean is
 calibrated, and the defect is elsewhere.
 
-- **[`PLAN.md`](PLAN.md)** — the design and the reasoning behind each choice, with the
-  decision rule pre-registered before any code ran.
-- **[`FINDINGS.md`](FINDINGS.md)** — what came out. Run 2 is the current result; run 1 is
-  kept below it because run 2's anchor cell reproduces it.
+- **[`PLAN.md`](PLAN.md)** — the design: *why* it is measured this way and *how* it runs,
+  with the decision rule pre-registered before any code ran.
+- **[`FINDINGS-2026-07-28.md`](FINDINGS-2026-07-28.md)** — what came out. **One dated file
+  per run**; a later run adds a file rather than editing this one, so a result always keeps
+  the date it was measured on.
 
 ## The result in three lines
 
-- **No overshoot** at any of four dates through the year: mean daily total within 0.6 % of
+- **No overshoot** at any of four dates through the year: mean daily total within 0.7 % of
   the pool the model was fitted to, on an instrument that detects an injected +10 % in 9 of
   9 configurations.
 - **Too few overcast days**, at every date where the record contains any — 0.2 % against
@@ -40,21 +41,37 @@ resampling the synthetic side only.
 ## Running it
 
 ```bash
+uv run python examples/diagnostics-overshoot/run_all.py
+```
+
+That runs all four steps in order — about **20 minutes** cold, most of it the simulation —
+announcing what each is about to do and roughly how long it will take, with a progress bar
+per configuration and per draw inside it. It says up front whether the fetch will hit the
+network or read the cache.
+
+```bash
+--n 100           # fewer realisations: a quick pass to check the pipeline
+--from analyse    # start partway: fetch | simulate | analyse | figures
+--resume          # skip configurations already written
+--skip-figures    # stop after the tables
+```
+
+The four steps are also runnable on their own, and are import-safe and cell-friendly for an
+interactive session:
+
+```bash
 uv run python examples/diagnostics-overshoot/step1_fetch.py      # probe + download, once
 uv run python examples/diagnostics-overshoot/step2_simulate.py   # ~17 min
 uv run python examples/diagnostics-overshoot/step3_analyse.py    # tables, seconds
 uv run python examples/diagnostics-overshoot/step4_figures.py    # figures, seconds
 ```
 
-Steps are separate so the simulation is paid once. Every script is import-safe and
-cell-friendly for an interactive session.
+Progress bars need `tqdm`, which is in the `examples` extra — `uv sync --extra examples`.
+They disable themselves automatically when output is not a terminal, so a redirected log
+holds the printed results rather than several thousand redraws of a bar.
 
-Flags on step 2:
-
-```bash
---n 1000     # realisations per configuration (config.py sets the default)
---resume     # skip configurations already written
-```
+Interrupting is safe: step 2 writes incrementally, so a stopped run picks up with
+`--resume`, and the analysis and figures re-derive from the CSVs in seconds.
 
 All knobs live in [`config.py`](config.py) — dates, window half-width, the bandwidth
 factor, seeds, thresholds. 21 May sits in `DAYS_BACKLOG` and is a one-line edit to enable.
@@ -101,8 +118,8 @@ that are. The anchor catches a rewrite that quietly changed what is computed.
 
 `results/summary_*.csv` and `figures/` are derived and regenerate from the raw files in
 seconds. `results/raw/` and `figures/` are git-ignored, matching the repo's rule for
-`examples/output/`; `FINDINGS.md` and the summary tables are committed, because they are
-the evidence `FIX-1` cites.
+`examples/output/`; the dated `FINDINGS-*.md` and the summary tables are committed, because
+they are the evidence `FIX-1` cites.
 
 ## What it reuses
 

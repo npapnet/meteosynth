@@ -5,7 +5,7 @@ Three, each answering one question:
 
 1. ``distribution_comparison`` -- do synthetic and observed daily sums share a shape,
    and what happens in the lower tail? Top row is the whole ECDF, bottom row the same
-   curves zoomed into the bottom 15 % where run 1 found the defect. The zoom is the
+   curves zoomed into the bottom 15 % where the defect lives. The zoom is the
    point: at full scale a fourfold overcast-day deficit is a few pixels.
 2. ``statistic_ratios`` -- every ratio with its bootstrap interval, against the line at
    1.0 that means "matches the pool".
@@ -103,7 +103,7 @@ def figure_distribution(index: pd.DataFrame, observed: pd.DataFrame, synthetic: 
                              color=INK, fontsize=11)
                 ax.set_ylim(0, 1)
             else:
-                # The lower tail, at a scale where it is legible. Run 1's defect lived
+                # The lower tail, at a scale where it is legible. The defect lives
                 # entirely inside this box: 0.6 % of synthetic days against 2.4 %
                 # observed is invisible on the panel above.
                 ax.set_ylim(0, 0.15)

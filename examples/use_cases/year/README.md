@@ -48,6 +48,7 @@ The monthly summary is the first thing to look at before using the file: individ
 months wander by a degree or two and should, since this is one draw and not a
 climatology. It is the **annual totals** and the **shape correlation** that have to hold
 up. Absolute irradiance magnitudes **are** calibrated — measured 2026-07-28, the mean daily
-total sits within 0.6 % of the pool the generator was fitted to. The known defect is the
-**overcast tail**, which is under-produced (see `FIX-1` in `TODOs.md`), so a synthetic year
-holds fewer very dark days than the record does.
+total sits within 0.7 % of the pool the generator was fitted to, and an annual P90 is within
+0.12 %. The known defect is the **overcast tail**, under-produced about fourfold (`FIX-1` in
+`TODOs.md`), so a synthetic year holds fewer very dark days than the record does. That is
+immaterial to annual energy and material to anything sizing storage against a dark spell.

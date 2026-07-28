@@ -19,12 +19,11 @@ Design notes worth knowing when reading the output:
 
 * **The pooled window is both the training data and the reference.** The model is fitted
   to exactly the observed days written to ``observed_daily.csv``, so the comparison target
-  is a known quantity rather than an estimate of one. There is no reference file, and no
-  detrending: run 1 needed three references because it was aiming at a calendar date the
-  training pool only approximates.
-* **One training set.** The whole record, every configuration. Run 1's k-sweep found no
-  dependence on record length, and the question here is how the shipped code behaves, not
-  how it degrades.
+  is a known quantity rather than an estimate of one. There is no reference file and no
+  detrending -- both would be needed only if the target were a calendar *date*, which the
+  pooled window merely approximates.
+* **One training set.** The whole record, every configuration. The question is how the
+  shipped code behaves, not how it degrades on a thin record.
 """
 
 from __future__ import annotations
@@ -36,6 +35,7 @@ from typing import Optional
 
 import numpy as np
 import pandas as pd
+from tqdm import tqdm
 
 import config as cfg
 
@@ -53,8 +53,8 @@ def signed_circular_delta(slots: np.ndarray, centre: int) -> np.ndarray:
     ``meteosynth.day_window.circular_delta`` is deliberately *unsigned* -- it answers
     "how far apart", which is what window selection needs. Anything fitting a trend
     across the window needs "which side", because a curve fitted against ``|offset|``
-    folds a rising season and a falling one onto each other. Run 1 was bitten by exactly
-    that, so the helper stays, and the symmetry self-check below guards it.
+    folds a rising season and a falling one onto each other. An earlier pass was bitten by
+    exactly that, so the helper stays, and the symmetry self-check below guards it.
     """
     half = DAYS_IN_YEAR // 2
     return np.mod(np.asarray(slots) - centre + half, DAYS_IN_YEAR) - half
@@ -178,8 +178,21 @@ def run_config(mdp: MetDataProcessor, spec: dict, n_realisations: int) -> dict:
 
     # One Generator drives the whole ensemble, so the draws are independent of one
     # another but the ensemble as a whole is reproducible from the single seed.
+    # Sampling is ~97 % of the runtime (PERF-1), so the inner bar is where the wait
+    # actually is -- a per-configuration bar alone would sit still for a minute at a time.
     rng = np.random.default_rng(spec["seed"])
-    ensemble = np.vstack([day_generator.gen_day(rng=rng) for _ in range(n_realisations)])
+    draws = tqdm(
+        range(n_realisations),
+        desc=f"    {spec['config_id']}",
+        unit="day",
+        leave=False,
+        position=1,
+        dynamic_ncols=True,
+        # None auto-disables when stdout is not a terminal, so a redirected log holds
+        # the printed lines and not several thousand redraws of a bar.
+        disable=None,
+    )
+    ensemble = np.vstack([day_generator.gen_day(rng=rng) for _ in draws])
 
     synthetic_daily, synthetic_hourly = _synthetic_frames(ensemble, spec["config_id"])
 
@@ -367,7 +380,7 @@ def sanity_checks(configs: list[dict], record_years: list[int]) -> bool:
 
     # 2b. Offsets are signed and symmetric about the centre. An unsigned offset column
     #     silently folds the season's two sides together, and nothing downstream would
-    #     have complained -- run 1's first harness defect.
+    #     have complained -- a defect an earlier pass actually hit.
     grouped_offsets = obs_daily.groupby("config_id")["days_from_centre"]
     half_widths = index.set_index("config_id")["n_days"]
     check(
@@ -422,7 +435,7 @@ def sanity_checks(configs: list[dict], record_years: list[int]) -> bool:
     )
 
     # 7. Every configuration asked for is present, exactly once. A duplicate config_id
-    #    means two runs appended to the same files -- run 1's second harness defect.
+    #    means two runs appended to the same files -- which has happened.
     duplicated = index["config_id"][index["config_id"].duplicated()].unique()
     check(
         "no duplicate configurations",
@@ -450,14 +463,13 @@ def sanity_checks(configs: list[dict], record_years: list[int]) -> bool:
 # ======================================================================================
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--n", type=int, default=cfg.N_REALISATIONS,
-                        help=f"realisations per configuration (default {cfg.N_REALISATIONS})")
-    parser.add_argument("--resume", action="store_true",
-                        help="skip configurations already present in the raw output")
-    args = parser.parse_args()
+def run(n_realisations: int = cfg.N_REALISATIONS, resume: bool = False) -> bool:
+    """
+    Run every pending configuration and self-check the output.
 
+    Split out from :func:`main` so ``run_all.py`` can call it without going through
+    ``argparse``. Returns whether the self-checks passed.
+    """
     cfg.ensure_dirs()
 
     meta = json.loads(cfg.RECORD_META.read_text(encoding="utf-8"))
@@ -469,7 +481,7 @@ def main() -> None:
     mdp = MetDataProcessor(record)
 
     configs = build_configs()
-    done = _done_config_ids() if args.resume else set()
+    done = _done_config_ids() if resume else set()
     pending = [c for c in configs if c["config_id"] not in done]
 
     print(f"Record : {meta['site_name']} {meta['start_year']}-{meta['end_year']}, "
@@ -479,25 +491,21 @@ def main() -> None:
     print(f"Bandw. : {[cfg.bandwidth_tag(b) for b in cfg.BANDWIDTHS]}  (+ anchor cell "
           f"{cfg.config_id(*cfg.ANCHOR)})")
     print(f"Configs: {len(configs)}" + (f" ({len(done)} already done, {len(pending)} pending)" if done else ""))
-    print(f"n      : {args.n} realisations per configuration\n")
+    print(f"n      : {n_realisations} realisations per configuration\n")
 
     first = not done
     started = time.perf_counter()
     with RunLock(cfg.RAW_DIR / ".run_lock"):
-        for i, spec in enumerate(pending, start=1):
-            config_started = time.perf_counter()
-            frames = run_config(mdp, spec, args.n)
+        outer = tqdm(pending, desc="configurations", unit="cfg", position=0,
+                     dynamic_ncols=True, disable=None)
+        for spec in outer:
+            outer.set_postfix_str(
+                spec["config_id"] + (" (anchor)" if spec["is_anchor"] else "")
+            )
+            frames = run_config(mdp, spec, n_realisations)
             for name, frame in frames.items():
                 _append(name, frame, first=first)
             first = False
-            elapsed = time.perf_counter() - config_started
-
-            if i == 1 and len(pending) > 1:
-                print(f"  first configuration took {elapsed:.1f} s -- "
-                      f"estimated total {elapsed * len(pending) / 60:.1f} min\n", flush=True)
-            print(f"  [{i:2d}/{len(pending)}] {spec['config_id']}"
-                  f"{'  (anchor)' if spec['is_anchor'] else ''}  ({elapsed:.1f} s)",
-                  flush=True)
 
     print(f"\nDone in {(time.perf_counter() - started) / 60:.1f} min. Wrote:")
     for name, filename in RAW_FILES.items():
@@ -505,7 +513,18 @@ def main() -> None:
         if path.exists():
             print(f"  {filename:<30} {len(pd.read_csv(path)):>8,} rows")
 
-    sanity_checks(configs, years)
+    return sanity_checks(configs, years)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--n", type=int, default=cfg.N_REALISATIONS,
+                        help=f"realisations per configuration (default {cfg.N_REALISATIONS})")
+    parser.add_argument("--resume", action="store_true",
+                        help="skip configurations already present in the raw output")
+    args = parser.parse_args()
+
+    run(n_realisations=args.n, resume=args.resume)
 
 
 if __name__ == "__main__":
