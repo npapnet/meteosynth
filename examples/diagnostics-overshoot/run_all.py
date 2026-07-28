@@ -50,9 +50,13 @@ def _describe_fetch() -> str:
 
 def _describe_simulate(n: int) -> str:
     configs = len(cfg.configurations())
-    # ~53.5 ms per generated day, measured; fitting on top is a few seconds per cell.
-    minutes = configs * n * 0.0535 / 60 * 1.25
-    eta = f"~{minutes:.0f} min" if minutes >= 1 else "under a minute"
+    # Two regimes, both measured on this record: the first ~64 draws of a configuration
+    # evaluate the KDE directly at ~92 ms/day, after which the cached conditional
+    # quantile grid takes over at ~11 ms/day. Estimating with one number would be wrong
+    # by 8x at whichever end of the range it was not fitted to.
+    direct = min(n, 64)
+    seconds = configs * (direct * 0.092 + max(0, n - direct) * 0.011) * 1.25
+    eta = f"~{seconds / 60:.0f} min" if seconds >= 60 else "under a minute"
     return f"{configs} configurations x {n:,} realisations -- {eta}"
 
 

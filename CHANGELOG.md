@@ -71,6 +71,28 @@ Two project-specific conventions:
 
 ### Changed
 
+- **Sampling is ~8× faster for ensembles** (`PERF-1`). `get_next_state` used to evaluate a
+  1000-point KDE grid on every call — ~97 % of generation runtime. A simulator that turns
+  out to be sampled often now caches its conditional **inverse CDF** over 64 uniform
+  `previous` nodes and answers with two interpolations. Measured on 21 March, Heraklion
+  2005–2023: 1000 synthetic days go from 91.6 to **11.5 ms/day**, and the
+  `examples/diagnostics-overshoot/` run from **16.6 min to 2.1 min**.
+
+  Three design points, argued and measured in
+  [`docs/design/precomputed-conditional-quantiles.md`](docs/design/precomputed-conditional-quantiles.md):
+  the **quantile function** is what is interpolated across `previous`, because averaging
+  two CDFs of distributions centred in different places produces a bimodal blend of them;
+  node spacing is **uniform, not quantile-based**, because irradiance's `previous` piles up
+  at zero and quantile nodes would starve the daytime range; and the cache is built
+  **lazily**, on the 65th call, because building it costs 64 direct calls' worth of work
+  and `generate_series` takes exactly one sample per simulator — building it in `__init__`
+  as originally proposed would have been a 64× pessimisation for a year-long walk.
+
+  Behaviour below the threshold is bit-for-bit unchanged. Above it, sampled values shift
+  by ~0.03 % per transition and ~0.19 % on a daily total (KS p = 1.0 against the direct
+  path over 2000 days) — an order of magnitude below the smallest effect the diagnostics
+  can resolve. `precompute_grid()` forces the cache when the ensemble size is known up
+  front.
 - The concept scripts share one data loader instead of four copies of
   `load_or_fetch_data`, and no longer depend on the working directory.
 - **`TODOs.md` regrouped** into Fixes / Performance & internals / Features / Direction /

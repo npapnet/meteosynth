@@ -178,8 +178,10 @@ def run_config(mdp: MetDataProcessor, spec: dict, n_realisations: int) -> dict:
 
     # One Generator drives the whole ensemble, so the draws are independent of one
     # another but the ensemble as a whole is reproducible from the single seed.
-    # Sampling is ~97 % of the runtime (PERF-1), so the inner bar is where the wait
-    # actually is -- a per-configuration bar alone would sit still for a minute at a time.
+    # Sampling still dominates the runtime, so the inner bar is where the wait actually
+    # is -- a per-configuration bar alone would sit still for tens of seconds at a time.
+    # It is also where the cached quantile grid kicks in: the first ~64 draws of each
+    # configuration are visibly slower than the rest.
     rng = np.random.default_rng(spec["seed"])
     draws = tqdm(
         range(n_realisations),

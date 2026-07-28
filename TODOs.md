@@ -11,7 +11,7 @@ use; within a group, most significant first.
 
 ## ID allocation
 
-> **Next ID: 11.**
+> **Next ID: 13.**
 
 IDs come from **one counter shared by every category**. The prefix says what an item
 *is*; the number says *which* item it is. Only the number is the identity.
@@ -40,9 +40,9 @@ IDs come from **one counter shared by every category**. The prefix says what an 
 
 | ID                                                                              | Item                                            | Status                |
 | :------------------------------------------------------------------------------ | :---------------------------------------------- | :-------------------- |
-| [PERF-1](#perf-1--sampling-re-evaluates-the-kde-on-every-call)                  | Sampling re-evaluates the KDE on every call     | open · **start here** |
 | [PERF-2](#perf-2--four-copies-of-the-same-data-in-every-simulator)              | Four copies of the same data in every simulator | open · low priority   |
 | [PERF-3](#perf-3--fitted-generators-cannot-be-pickled-at-the-default-bandwidth) | Fitted generators cannot be pickled             | open · low priority   |
+| [PERF-11](#perf-11--grid-node-spacing-may-want-to-depend-on-the-variable)       | Grid node spacing may want to be per-variable   | open · low priority   |
 | [FIX-1](#fix-1--the-overcast-tail-is-under-produced)                            | The overcast tail is under-produced             | open · **deferred**   |
 | [FEAT-1](#feat-1--cached-data-metadata-and-cache-match-check)                   | Cached data metadata and cache-match check      | open                  |
 | [FEAT-2](#feat-2--irradiance-pick-one-column-by-availability)                   | Irradiance: pick one column by availability     | decision partly taken |
@@ -54,6 +54,7 @@ IDs come from **one counter shared by every category**. The prefix says what an 
 | [CHORE-2](#chore-2--date_id-is-not-zero-padded)                                 | `date_id` is not zero-padded                    | open · breaking       |
 | [CHORE-3](#chore-3--document-the-on-disk-format)                                | Document the on-disk format                     | open · needs FEAT-1   |
 | [CHORE-4](#chore-4--bring-docssource-back-in-line-with-the-repo)                | Bring `docs/source/` back in line with the repo | open · do last        |
+| [CHORE-12](#chore-12--nothing-pins-what-the-sampler-produces)                   | Nothing pins what the sampler produces          | open · **for review** |
 
 The [Inbox](#inbox--not-yet-triaged) is empty. `INBOX-1` … `INBOX-7` were triaged on
 2026-07-27: two landed (see [`CHANGELOG.md`](CHANGELOG.md)), one merged into the former
@@ -66,58 +67,27 @@ which is not the same thing.
 
 > **Reordered 2026-07-28.** `FIX-1` was first and is now deferred: the diagnostic that was
 > meant to measure it instead showed the calibration is sound, and the defect that remains
-> is worth **0.12 % of an annual P90**. That releases `PERF-1`, which was queued behind it
-> and is worth ~97 % of generation runtime.
+> is worth **0.12 % of an annual P90**. That released `PERF-1`, which was queued behind it
+> — and `PERF-1` has since **landed**, see [`CHANGELOG.md`](CHANGELOG.md).
 
-1. **PERF-1** — the biggest real-use win available, and no longer blocked. See the note on
-   that item: the old "it must wait for FIX-1's boundary correction" argument does not
-   survive contact with the code.
-2. **FEAT-2 (1)**, then **FEAT-1**, then **FEAT-4** and **FEAT-5**, which both need it.
-3. **CHORE-3**, then **CHORE-4** last, so the docs pass is one edit rather than three.
-4. **FIX-1**, whenever the cost is worth paying — the tail deficit is real, measured and
+1. **FEAT-2 (1)**, then **FEAT-1**, then **FEAT-4** and **FEAT-5**, which both need it.
+2. **CHORE-3**, then **CHORE-4** last, so the docs pass is one edit rather than three.
+3. **FIX-1**, whenever the cost is worth paying — the tail deficit is real, measured and
    documented, and it does not affect any quantity the package currently advertises.
    **CHORE-1** now stands on its own rather than folded into it; half of it is measured.
 
 **FEAT-3** is independent of all of it and can slot in anywhere.
 
-*Landed 2026-07-28, both folded into [`CHANGELOG.md`](CHANGELOG.md): `FIX-3` (stale
+*Landed 2026-07-28, all folded into [`CHANGELOG.md`](CHANGELOG.md): `FIX-3` (stale
 `pvlib` unpacking) — which shrank `CHORE-4`, since the broken quickstart snippet went
-with it — and `FIX-2` (exact-float degeneracy detection), which **unblocks VISION-1**.*
+with it — `FIX-2` (exact-float degeneracy detection), which **unblocks VISION-1**, and
+`PERF-1` (cached conditional quantiles), which makes ensemble generation ~8× faster and
+is argued in
+[`docs/design/precomputed-conditional-quantiles.md`](docs/design/precomputed-conditional-quantiles.md).*
 
 ---
 
 # Performance & internals
-
-## PERF-1 — Sampling re-evaluates the KDE on every call
-
-**Status:** open · **start here** · **unblocked 2026-07-28** · **Impact:** ~97 % of
-generation runtime
-
-> **It no longer waits for `FIX-1`.** This item used to be queued behind it, on the argument
-> that "a precomputed CDF grid has to encode whatever boundary correction `FIX-1` lands, so
-> doing it first means doing it twice". Two things retire that. `FIX-1` is deferred, and the
-> argument was too strong anyway: sampling is
-> `get_conditional_density(prev) -> (domain, cdf)` followed by one `np.interp`
-> (`markov_chain_simulator_kde2d.py:555-559`), so a precomputed grid is a **cache of that
-> call**. A boundary correction changes the density the call returns, not the shape of the
-> cache. What it would cost is re-baselining the golden tests — real, but that is a
-> re-record, not a redesign.
->
-> **What landing it buys, measured:** `examples/diagnostics-overshoot/` takes ~17 minutes,
-> of which the great majority is 9000 `gen_day` calls. Every future experiment on this
-> package pays that tax.
-
-`get_next_state` re-evaluates a 1000-point grid through `gaussian_kde.evaluate` on every
-single call — 53.5 ms per generated day, against 58 ms to *fit* all 24 hourly models.
-Fitting is not the bottleneck; sampling is. On the 11-year record this is what makes a
-full synthetic year take ~4 minutes for three attributes.
-
-Precomputing the conditional CDF on a grid of `previous` values in `__init__` would make
-sampling two interpolations. This is the module's own long-standing TODO
-(`markov_chain_simulator_kde2d.py`). It trades memory for speed: a 200×1000 grid per
-simulator is ~1.6 MB, or ~38 MB per generator.
-
----
 
 ## PERF-2 — Four copies of the same data in every simulator
 
@@ -147,6 +117,74 @@ because persisting them buys ~58 ms and duplicates data already on disk — a de
 recorded in `CHANGELOG.md` 0.2.0 and argued in
 [`rolling-day-window.md`](docs/design/completed/rolling-day-window.md). It would start to
 matter if PERF-1 lands, since a precomputed CDF grid *is* worth persisting.
+
+> **PERF-1 landed 2026-07-28, and it makes this *less* urgent rather than more.** The
+> grid is built **lazily**, only for simulators that are actually sampled often, and it
+> costs ~0.5 MB and ~0.5 s to build. Persisting it would write a derived array to save
+> half a second, for the subset of generators that happen to be hot — a worse trade than
+> the one already rejected for fitted generators. What remains is the original problem:
+> `bandwidth=0.1` cannot be pickled at all, which still blocks multiprocessing.
+
+---
+
+## PERF-11 — Grid node spacing may want to depend on the variable
+
+**Status:** open · low priority · **Impact:** accuracy of the cached sampler, not speed
+
+`PERF-1`'s conditional-quantile grid places its 64 nodes **uniformly** across the range of
+`previous`. That was chosen by measurement, but the measurement was on **`poa_global`
+only**, and there is a good reason to think it does not generalise.
+
+Quantile spacing lost badly on irradiance — at 16 nodes it gave **−11.9 %** on the sampled
+standard deviation against **−1.2 %** for uniform. The cause is specific: irradiance's
+`previous` has a **huge atom at zero**, because night is most of the hours at some
+transitions, so quantile nodes pile up resolving the difference between 0 and 0 and starve
+the daytime range where the conditional actually moves.
+
+**`temp_air` has no such atom.** Its marginal is unimodal and roughly symmetric with no
+floor, so quantile spacing would concentrate nodes near the mode — where most transitions
+actually land — and thin them in the tails. That is the case quantile spacing is *designed*
+for, and it may well win. `wind_speed` sits in between: bounded below, but with no atom at
+the bound (its observed minimum is 0.07), so it may behave like temperature.
+
+### The metric to use
+
+The obvious metric is misleading and was already measured to be so. **Do not use the
+sup-norm of the quantile function**: on irradiance it reads 15–25 % of the domain even
+where the sampler is distributionally exact, because it is dominated by conditioning
+values at the sparse edges of the range that the chain essentially never visits.
+
+Use the **distributional error under the marginal of `previous`**, which is the quantity
+that actually reaches a user:
+
+1. Draw `previous` values by resampling the simulator's own `previous_values` (20 000 is
+   ample), pair each with a uniform draw, and map both through the cached sampler and
+   through the direct path.
+2. Report the relative error in the **mean** and the **standard deviation** of the two
+   resulting samples. On irradiance, uniform spacing at 64 nodes gives −0.03 % and
+   −0.04 %; those are the numbers a competing rule has to beat.
+3. Report the **low-tail share** as well — the share below `0.25 ×` the observed median —
+   since that is the statistic `FIX-1` turns on and the one most sensitive to node
+   placement near a bound.
+
+Repeat per attribute (`poa_global`, `temp_air`, `wind_speed`) and at several hours, since
+degeneracy and skew both vary through the day.
+
+### Why it is low priority, and cheap
+
+Both spacings cost **exactly the same** to build and to sample — same node count, same
+KDE evaluation, same two interpolations. So this is a pure accuracy question with no
+performance trade-off, and the change if it lands is a few lines in
+`_build_quantile_grid`. Against that: the current error on the attribute that was measured
+is already ~0.03 %, two orders of magnitude below anything the diagnostics can resolve, so
+there is no evidence yet that anything is actually wrong for temperature either.
+
+**Adopt a per-variable rule only if it wins on all three attributes at the same node
+count.** Two spacing rules selected by attribute is a maintenance cost that a marginal
+accuracy gain does not justify; a single better rule would.
+
+See [`docs/design/precomputed-conditional-quantiles.md`](docs/design/precomputed-conditional-quantiles.md)
+for the measurements behind the current choice.
 
 > **Switching the default to `bandwidth=None` is not the fix** — measured 2026-07-28,
 > `examples/diagnostics-overshoot/`. Scott's rule chooses a factor of **0.390** at a
@@ -257,7 +295,7 @@ Also not reproduced: **compounding along the 24-step walk** (per-hour bias is fl
 ### The calibration test now exists
 
 `examples/diagnostics-overshoot/` is the harness the old entry asked for: nine
-configurations, 17 minutes, with a null control, a positive control and an anchor cell that
+configurations, ~2 minutes, with a null control, a positive control and an anchor cell that
 reproduces the previous run. **Any attempted fix should move the tail shares above without
 moving the mean ratios off 1.**
 
@@ -565,6 +603,75 @@ What is left:
 Do this pass *after* the items it depends on, so it is one edit rather than three.
 
 *(Was INBOX-3. The quickstart defect went to FIX-3 and landed with it.)*
+
+## CHORE-12 — Nothing pins what the sampler produces
+
+**Status:** open · **raised for review, not yet agreed** · **Recommended priority:
+medium-low** — worth deciding on, not worth dropping other work for
+
+> **This entry exists to be judged, not acted on yet.** It was raised while landing
+> `PERF-1`, and the person raising it may be overstating it. The claim, the evidence
+> against it, and what would settle it are all below so the call can be made on the
+> facts rather than on the framing.
+
+### The observation
+
+`PERF-1` added an entirely new sampling path — a cached quantile grid replacing a live KDE
+evaluation — and **all 271 existing tests passed without modification**. That is convenient,
+but it means the suite could not tell the difference between the two samplers. It also
+could not have told the difference had the new one been *wrong*.
+
+The suite tests **properties**: that a seed reproduces, that a shared generator advances,
+that samples stay inside physical support, that degenerate hours are classified correctly.
+All of those survive a sampler that returns materially different numbers.
+
+### The case that this is less serious than it sounds
+
+Worth stating, because it is real:
+
+- **The density computation *is* pinned.** `test_get_conditional_density_p1000` fixes
+  `argmax == 463` and the density maximum to 1e-8 on a known fixture. What is unpinned is
+  the step from that density to a sampled value, and the chain built on top of it.
+- **Support truncation is pinned end-to-end**, over a whole generated year — which is the
+  defect that actually shipped once (1.29 % negative irradiance) and the one most likely
+  to recur.
+- **A statistical property is genuinely awkward to pin.** An exact-value golden test on a
+  sampler is brittle: a `numpy` or `scipy` release that changes generator internals or
+  `gaussian_kde` would break it without anything being wrong. That is a real reason the
+  gap exists, not an oversight.
+
+### The case that it is worth closing
+
+- The gap is **demonstrated, not hypothetical**: this change exercised it.
+- The defects this repo has actually found — `FIX-2` (degenerate-slice misclassification),
+  `FIX-3`, and the two harness defects in the overshoot diagnostic — were all found by
+  *running things*, never by the suite. The suite has not yet caught a modelling defect.
+- The natural check already exists but lives outside the suite:
+  `examples/diagnostics-overshoot/` compares a generated ensemble against the pool it was
+  fitted to. It needs a network fetch and ~5 minutes, so it cannot be a unit test — but a
+  miniature of it can.
+
+### What would close it, if the answer is yes
+
+A **calibration test**, not a golden-value test. Fit on the existing `synthetic_mdp`
+fixture (two years, a known generative process, all four attributes, already used across
+the suite), draw a few hundred days, and assert against the training pool with tolerances
+loose enough to survive a library upgrade and tight enough to catch a real shift:
+
+| assertion | suggested tolerance | what it catches |
+| :--- | :--- | :--- |
+| mean of daily total vs pool | within 5 % | a level shift — the `FIX-1` class of defect |
+| sd of daily total vs pool | within 15 % | a dispersion collapse, e.g. a mis-built grid |
+| every value inside support | exact | already covered; keep it here too |
+| no NaN or inf anywhere | exact | the failure mode `FIX-2` produced |
+
+Estimated cost: **one test file, a few tens of seconds** now that `PERF-1` has landed. The
+tolerances are the whole design problem — too tight and it becomes a maintenance tax, too
+loose and it asserts nothing. The numbers above are a starting point, not a measurement.
+
+**Do it per attribute, not just for irradiance.** `temp_air` and `wind_speed` exercise
+different structure — no floor, no degenerate hours — and a defect confined to one of
+them is exactly what a single-attribute test would miss.
 
 ---
 

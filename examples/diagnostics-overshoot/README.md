@@ -44,7 +44,7 @@ resampling the synthetic side only.
 uv run python examples/diagnostics-overshoot/run_all.py
 ```
 
-That runs all four steps in order — about **20 minutes** cold, most of it the simulation —
+That runs all four steps in order — about **5 minutes** cold, most of it the PVGIS fetch —
 announcing what each is about to do and roughly how long it will take, with a progress bar
 per configuration and per draw inside it. It says up front whether the fetch will hit the
 network or read the cache.
@@ -61,7 +61,7 @@ interactive session:
 
 ```bash
 uv run python examples/diagnostics-overshoot/step1_fetch.py      # probe + download, once
-uv run python examples/diagnostics-overshoot/step2_simulate.py   # ~17 min
+uv run python examples/diagnostics-overshoot/step2_simulate.py   # ~2 min
 uv run python examples/diagnostics-overshoot/step3_analyse.py    # tables, seconds
 uv run python examples/diagnostics-overshoot/step4_figures.py    # figures, seconds
 ```
