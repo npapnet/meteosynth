@@ -7,6 +7,7 @@ Runnable scripts, split by what they are for.
 | [`use_cases/`](use_cases/) | Applied workflows that produce data, split by time scale into [`day/`](use_cases/day/), [`month/`](use_cases/month/) and [`year/`](use_cases/year/) — each with its own README. |
 | [`concepts/`](concepts/) | Demonstrations of how the package behaves — training windows, leap days, the Markov engine, exploratory plots. |
 | [`tools/`](tools/) | Shared helpers the scripts import (data loading, the observed-vs-synthetic comparison), plus one runnable cache-priming script. Not part of `meteosynth`. |
+| [`diagnostics-overshoot/`](diagnostics-overshoot/) | A measurement rather than a demonstration: does the generator reproduce the distribution it was fitted to? Four steps behind one `run_all.py`, ~20 min, with the design, the pre-registered decision rule and the dated findings alongside. This is what `FIX-1` cites. |
 | `data/` | Cached PVGIS downloads. Git-ignored. |
 | `output/` | Everything the scripts generate. Git-ignored (see `output/.gitignore`). |
 

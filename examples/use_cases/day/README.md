@@ -41,7 +41,8 @@ enough to deserve their own commentary:
 
 - `poa_global` is **degenerate at night** — π(x₀) collapses to a spike at zero and ~10 of
   the day's hourly models are constant — and it sits on its support bound at dawn.
-  Treat absolute magnitudes as uncalibrated (see `FIX-1` in `TODOs.md`); the shape is sound.
+  Magnitudes are calibrated (within 0.7 % of the pool mean, measured 2026-07-28), but the
+  ensemble holds **too few heavily overcast days** — see `FIX-1` in `TODOs.md`.
 - `temp_air` never degenerates and is **dominated by persistence**, so a day's level is
   largely decided at midnight.
 - `wind_speed` **fans out fastest** and is judged on `v³` rather than the mean, where a

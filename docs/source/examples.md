@@ -214,13 +214,19 @@ LRU cache, so the walk holds a few hundred KB rather than the ~126 MB all 366 fi
 generators would cost.
 
 ```{note}
-Seasonal shape tracks the observed record closely, while absolute irradiance
-overshoots. That overshoot is a known open issue (`FIX-1` in `TODOs.md`), and it is not
-the rolling window — a month-based generator overshoots by the same margin. Nor is it
-simply the bandwidth: the bias survives every bandwidth, including Scott's rule.
-Irradiance piles against a hard floor at zero, and a symmetric kernel renormalised onto
-a `[0, max]` domain pushes mass upward. Treat absolute magnitudes as uncalibrated for
-zero-floored variables; the seasonal shape is sound.
+Seasonal shape tracks the observed record closely, and so do absolute magnitudes: measured
+against the pooled window the generator is fitted to, on a 19-year Heraklion record, the
+mean daily total comes out within 0.7 % of observed at four dates through the year.
+
+What *is* off is the **overcast tail** — the model produces roughly four times too few
+heavily overcast days (`FIX-1` in `TODOs.md`). Irradiance piles against a hard floor at
+zero, and a symmetric kernel cannot put enough mass near the bound without putting some
+below it.
+
+How much that matters depends entirely on what you are asking. It moves an **annual P90 by
+0.12 %**, so a yield study cannot see it. It does affect anything that reads the dark end
+directly — **storage autonomy, worst-case days, a daily P10** (up to 9 % high). Deferred
+rather than fixed for exactly that reason.
 ```
 
 ### An ensemble of months

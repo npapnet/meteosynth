@@ -11,7 +11,7 @@ use; within a group, most significant first.
 
 ## ID allocation
 
-> **Next ID: 10.**
+> **Next ID: 11.**
 
 IDs come from **one counter shared by every category**. The prefix says what an item
 *is*; the number says *which* item it is. Only the number is the identity.
@@ -40,10 +40,10 @@ IDs come from **one counter shared by every category**. The prefix says what an 
 
 | ID                                                                              | Item                                            | Status                |
 | :------------------------------------------------------------------------------ | :---------------------------------------------- | :-------------------- |
-| [FIX-1](#fix-1--generated-irradiance-is-systematically-too-high)                | Generated irradiance is systematically too high | open · **start here** |
-| [PERF-1](#perf-1--sampling-re-evaluates-the-kde-on-every-call)                  | Sampling re-evaluates the KDE on every call     | open                  |
+| [PERF-1](#perf-1--sampling-re-evaluates-the-kde-on-every-call)                  | Sampling re-evaluates the KDE on every call     | open · **start here** |
 | [PERF-2](#perf-2--four-copies-of-the-same-data-in-every-simulator)              | Four copies of the same data in every simulator | open · low priority   |
 | [PERF-3](#perf-3--fitted-generators-cannot-be-pickled-at-the-default-bandwidth) | Fitted generators cannot be pickled             | open · low priority   |
+| [FIX-1](#fix-1--the-overcast-tail-is-under-produced)                            | The overcast tail is under-produced             | open · **deferred**   |
 | [FEAT-1](#feat-1--cached-data-metadata-and-cache-match-check)                   | Cached data metadata and cache-match check      | open                  |
 | [FEAT-2](#feat-2--irradiance-pick-one-column-by-availability)                   | Irradiance: pick one column by availability     | decision partly taken |
 | [FEAT-3](#feat-3--chained-series-between-two-dates)                             | Chained series between two dates                | open · shape decided  |
@@ -64,13 +64,19 @@ The [Inbox](#inbox--not-yet-triaged) is empty. `INBOX-1` … `INBOX-7` were tria
 Groups are ordered by how much they block real use; this is the order to *take them in*,
 which is not the same thing.
 
-1. **FIX-1 with CHORE-1 folded in** — one investigation, not two: the Paris-vs-Heraklion
-   gap *is* the sample-size question CHORE-1 asks. Land the calibration test first, or
-   no attempted fix is measurable.
-2. **PERF-1** — after FIX-1, not before: a precomputed CDF grid has to encode whatever
-   boundary correction FIX-1 lands, so doing it first means doing it twice.
-3. **FEAT-2 (1)**, then **FEAT-1**, then **FEAT-4** and **FEAT-5**, which both need it.
-4. **CHORE-3**, then **CHORE-4** last, so the docs pass is one edit rather than three.
+> **Reordered 2026-07-28.** `FIX-1` was first and is now deferred: the diagnostic that was
+> meant to measure it instead showed the calibration is sound, and the defect that remains
+> is worth **0.12 % of an annual P90**. That releases `PERF-1`, which was queued behind it
+> and is worth ~97 % of generation runtime.
+
+1. **PERF-1** — the biggest real-use win available, and no longer blocked. See the note on
+   that item: the old "it must wait for FIX-1's boundary correction" argument does not
+   survive contact with the code.
+2. **FEAT-2 (1)**, then **FEAT-1**, then **FEAT-4** and **FEAT-5**, which both need it.
+3. **CHORE-3**, then **CHORE-4** last, so the docs pass is one edit rather than three.
+4. **FIX-1**, whenever the cost is worth paying — the tail deficit is real, measured and
+   documented, and it does not affect any quantity the package currently advertises.
+   **CHORE-1** now stands on its own rather than folded into it; half of it is measured.
 
 **FEAT-3** is independent of all of it and can slot in anywhere.
 
@@ -80,95 +86,26 @@ with it — and `FIX-2` (exact-float degeneracy detection), which **unblocks VIS
 
 ---
 
-# Fixes — known defects
-
-## FIX-1 — Generated irradiance is systematically too high
-
-**Status:** open · **Impact:** absolute yield figures are not calibrated
-
-Seasonal *shape* is faithful, so this affects magnitudes, not the climatology. Anyone
-using this package for P50/P90 yield estimates needs it fixed first.
-
-**The size of it depends on the record**, which is itself a clue:
-
-| record                      | variable                      | measured               | against                        |
-| :-------------------------- | :---------------------------- | :--------------------- | :----------------------------- |
-| Paris 2011–2012 (2 yr)      | `poa_direct`, synthetic year  | 678 kWh/m² (**+14 %**) | 594 observed                   |
-| Heraklion 2010–2020 (11 yr) | `poa_global`, 21 May ensemble | **+3.2 %**             | ±7-day observed pool           |
-| Heraklion 2010–2020 (11 yr) | `poa_global`, synthetic year  | **+2.0 %**             | 1880 kWh/m² observed mean year |
-
-`wind_speed` on the same 11-year record comes out at +1.1 % (mean speed) and +2.7 % on
-`v³`. So the defect is real but not a fixed +14 %: a thin two-year training sample makes
-it much worse.
-
-### It is not simply the bandwidth
-
-Originally attributed to `bandwidth=0.1`. That is wrong — the bias survives every
-bandwidth, including Scott's rule. Measured on the May subset, 300-day ensemble, observed
-3.27 kWh/m²:
-
-| bandwidth     | generated | bias  |
-| ------------- | --------- | ----- |
-| 0.05          | 3.56      | +9 %  |
-| 0.1 (default) | 3.62      | +11 % |
-| 0.2           | 3.71      | +14 % |
-| 0.3           | 3.75      | +15 % |
-| 0.5           | 3.72      | +14 % |
-| None (Scott)  | 3.71      | +14 % |
-
-Smaller bandwidths help but do not remove it. Contrast `wind_speed`, where bandwidth *is*
-the whole story — 0.05 gives +12 %, Scott's rule gives **0 %**.
-
-### Two coupled causes
-
-**(a) KDE boundary bias at the zero floor.** Every biased hour has `min == 0.0`: the data
-piles against a hard physical bound. The evaluation domain spans exactly `[0, max]`, so
-Gaussian mass that should fall below zero is renormalised back *into* the domain, pushing
-the conditional mean up. This is the classic KDE boundary problem, and it explains why
-`wind_speed` is unaffected — its distribution (min 0.07) does not sit against a bound. It
-also explains the bandwidth trend: boundary bias scales with kernel width.
-
-**(b) The error compounds along the 24-step walk.** One step from *true* observed values
-is only +6 %; the full chain from midnight reaches +18 % by hour 12:
-
-|                                 | hour 12 mean | bias  |
-| ------------------------------- | ------------ | ----- |
-| observed                        | 398.7        | —     |
-| 1 step from true hour-11 values | 422.3        | +6 %  |
-| 24-step chain from midnight     | 469.7        | +18 % |
-
-Per-hour bias grows through the day (hour 6 +9 % → hour 12 +18 % → hour 18 +13 %), the
-signature of accumulation rather than a constant offset.
-
-### Already tried — do not repeat
-
-**Removing the ±10 % domain padding, both sides.** Landed in 0.2.0. It was expected to
-move the total in both directions at once (the lower pad let mass escape below zero, the
-upper pad added headroom); the measured net was the **wrong** way, 670 → 678 kWh/m²
-(+13 % → +14 %). It did fix generated negatives — 1.29 % → 0.00 % — which was its actual
-purpose. The padding is gone from both the 1D and 2D paths, so there is nothing left to
-measure separately here.
-
-### Candidate fixes
-
-- Boundary correction for the bounded-below case: reflection at zero, a log/sqrt transform
-  before fitting, or beta/gamma kernels near the bound. This is the main line of attack
-  now that padding is ruled out.
-- Investigate whether `_calc_domain` taking `min`/`max` across *both* `previous` and
-  `current` widens the domain for hours where the two ranges differ, leaking mass.
-- Quantify the compounding separately: it may be inherent to the first-order chain rather
-  than fixable in the kernel.
-- Add a calibration test pinning generated-vs-observed bias per attribute, so any fix is
-  measurable and cannot silently regress. The 11-year figures in the table above are the
-  natural baseline.
-
----
-
 # Performance & internals
 
 ## PERF-1 — Sampling re-evaluates the KDE on every call
 
-**Status:** open · **Impact:** ~97 % of generation runtime
+**Status:** open · **start here** · **unblocked 2026-07-28** · **Impact:** ~97 % of
+generation runtime
+
+> **It no longer waits for `FIX-1`.** This item used to be queued behind it, on the argument
+> that "a precomputed CDF grid has to encode whatever boundary correction `FIX-1` lands, so
+> doing it first means doing it twice". Two things retire that. `FIX-1` is deferred, and the
+> argument was too strong anyway: sampling is
+> `get_conditional_density(prev) -> (domain, cdf)` followed by one `np.interp`
+> (`markov_chain_simulator_kde2d.py:555-559`), so a precomputed grid is a **cache of that
+> call**. A boundary correction changes the density the call returns, not the shape of the
+> cache. What it would cost is re-baselining the golden tests — real, but that is a
+> re-record, not a redesign.
+>
+> **What landing it buys, measured:** `examples/diagnostics-overshoot/` takes ~17 minutes,
+> of which the great majority is 9000 `gen_day` calls. Every future experiment on this
+> package pays that tax.
 
 `get_next_state` re-evaluates a 1000-point grid through `gaussian_kde.evaluate` on every
 single call — 53.5 ms per generated day, against 58 ms to *fit* all 24 hourly models.
@@ -210,6 +147,126 @@ because persisting them buys ~58 ms and duplicates data already on disk — a de
 recorded in `CHANGELOG.md` 0.2.0 and argued in
 [`rolling-day-window.md`](docs/design/completed/rolling-day-window.md). It would start to
 matter if PERF-1 lands, since a precomputed CDF grid *is* worth persisting.
+
+> **Switching the default to `bandwidth=None` is not the fix** — measured 2026-07-28,
+> `examples/diagnostics-overshoot/`. Scott's rule chooses a factor of **0.390** at a
+> ±7-day window on a 19-year record, against the hand-set **0.100** — a 3.9× wider kernel —
+> and it is worse on every statistic tested: the mean of the daily total drops to
+> 0.944–0.987 of observed at **all four** dates, P50 to 0.890–0.979, P90 to 0.902–0.996,
+> all excluding. The signature is over-smoothing (P10 rises while P50 and P90 fall). So
+> this item needs the custom `__reduce__` it already proposes; it cannot be sidestepped by
+> changing the default.
+
+---
+
+# Fixes — known defects
+
+## FIX-1 — The overcast tail is under-produced
+
+**Status:** open · **deferred 2026-07-28** · **Impact:** confined to low-tail questions —
+storage autonomy, worst-case days. **Nothing the package advertises is affected.**
+
+> **This item used to read "generated irradiance is systematically too high" and used to be
+> first in the queue. It is neither any more.** The diagnostic built to measure the
+> overshoot failed to reproduce it and found a smaller defect in its place. Evidence:
+> [`examples/diagnostics-overshoot/FINDINGS-2026-07-28.md`](examples/diagnostics-overshoot/FINDINGS-2026-07-28.md);
+> design and the provenance of the retired numbers in
+> [`PLAN.md`](examples/diagnostics-overshoot/PLAN.md).
+
+### Why it is deferred — the cost/benefit, measured
+
+The fix is expensive: reflection, a log/sqrt transform or beta kernels all change
+`MarkovChainSimulator2dKDE`'s density, which means re-baselining every golden test and
+re-validating all three attributes. The benefit, measured on the 19-year Heraklion record:
+
+| question | effect of the defect |
+| :------- | :------------------- |
+| Mean daily total, monthly or annual energy | **none** — ratio 0.994–1.007, no date excluding 1 |
+| Daily P50, P90, and the daily maximum | **≤ 1–4 %**, and the mean of daily maxima is within 2 % |
+| **Annual P90** (the exceedance figure a yield study quotes) | **0.12 % of the mean** — 2.3 kWh/m² on a mean year of 1879 |
+| Daily P10 | biased **high by up to 9 %** |
+| Frequency of overcast days | **~4× too few** where the record has any |
+
+The annual figure is why this is cheap to postpone. Days below 1 kWh/m² are 3.47 % of the
+record but carry **0.50 % of its energy**, and Heraklion's year-to-year CV is only 1.71 %,
+so understating the daily spread by the measured 5.5 % moves an annual P90 by a tenth of a
+percent. **A yield study cannot see this defect.**
+
+### What it does affect, and must therefore be documented
+
+- **Storage sizing, autonomy, worst-case-day analysis.** These read the low tail directly,
+  and the model under-produces it fourfold. The package should say so rather than let a
+  user discover it.
+- **Any daily low percentile.** P10 runs up to 9 % high.
+- **Sites with more overcast weather than Heraklion.** The relative deficit was ~3× at both
+  dates tested, so it is a property of the kernel rather than of the climate — but the
+  *consequence* grows with how much of the year is overcast, and a northern site has far
+  more of it. Untested.
+
+**Revisit when** any of those becomes a use case, when a second site shows a larger effect,
+or when the KDE core is being touched anyway for another reason — the marginal cost is much
+lower then.
+
+### What is actually wrong
+
+**The model produces too few overcast days**, at every date where the record contains any.
+Measured against the pooled window the generator is fitted to, 19 years, n = 1000 per cell:
+
+| date · threshold          | observed | synthetic (bw 0.1) |
+| :------------------------ | -------: | -----------------: |
+| 21 Mar · < 1 kWh/m²       |   1.40 % |         **0.20 %** |
+| 21 Mar · < 0.25× median   |   3.16 % |         **1.10 %** |
+| 21 Dec · < 1 kWh/m²       |  15.09 % |        **12.70 %** |
+| 21 Dec · < 0.25× median   |   1.75 % |         **0.60 %** |
+| 21 Mar ±15 d · < 1 kWh/m² |   2.38 % |         **0.40 %** |
+
+Every interval excludes, at both bandwidths tested. 21 June and 21 September hold **no**
+observed days below either threshold, so they cannot test it either way. Daily totals are
+also mildly **under-dispersed** (sd ratio 0.891–1.001 at bandwidth 0.1).
+
+**Mechanism:** a symmetric kernel across a bounded, right-skewed conditional density cannot
+put enough mass near the floor without putting some below it. This is the same boundary
+problem the old entry named — it just does not express itself as a mean bias.
+
+### What was retired, and why
+
+The mean is **not** biased. At the shipped `bandwidth=0.1` the ratio of synthetic to
+observed mean daily total is 1.007 / 0.998 / 0.994 / 1.001 at the four dates, **none**
+excluding 1, on an instrument that recovers an injected +10 % in 9 of 9 configurations.
+
+The retired figures — Paris +13 %/+14 %, the bandwidth sweep, the compounding table — were
+measured under the **month-subset estimator on pre-0.2.0 code** (`gen_day_sequence(start_value=0.0)`,
+±10 % domain padding), on one two-year record, without repetition. The rolling window landed
+at 08:21 on 2026-07-15 and this entry was written at 09:09 the same morning, citing "the May
+*subset*". They are kept in `PLAN.md`'s appendix as provenance, not as live measurements.
+
+Also not reproduced: **compounding along the 24-step walk** (per-hour bias is flat), and any
+**dependence on record length** (k ∈ {19, 9, 3, 2} years, flat, and two-year cells at
+−0.02 %).
+
+### Candidate fixes — unchanged, and now aimed at the right target
+
+- **Boundary correction for the bounded-below case**: reflection at zero, a log/sqrt
+  transform before fitting, or beta/gamma kernels near the bound. All three act directly on
+  the tail deficit.
+- A wider kernel is **not** the answer: Scott's rule makes every measured statistic worse
+  (see `PERF-3`).
+- Investigate whether `_calc_domain` taking `min`/`max` across *both* `previous` and
+  `current` widens the domain where the two ranges differ.
+
+### The calibration test now exists
+
+`examples/diagnostics-overshoot/` is the harness the old entry asked for: nine
+configurations, 17 minutes, with a null control, a positive control and an anchor cell that
+reproduces the previous run. **Any attempted fix should move the tail shares above without
+moving the mean ratios off 1.**
+
+### Already tried — do not repeat
+
+**Removing the ±10 % domain padding, both sides.** Landed in 0.2.0. Measured at the time as
+moving the Paris total the wrong way (670 → 678 kWh/m²) — a number now understood to carry
+no error bar. It did fix generated negatives, 1.29 % → 0.00 %, which was its actual purpose.
+The padding is gone from both the 1D and 2D paths.
 
 ---
 
@@ -429,14 +486,33 @@ missing is a second real provider to prove it.
 
 ## CHORE-1 — Default window half-width needs a real evaluation
 
-`n_days=15` gives 61 pairs per hourly KDE on a two-year record — thin for a 2D density,
-and part of why FIX-1 is so much worse on the Paris record than on the 11-year one, where
-the same setting pools 341 days. Whether 15, 20 or a sample-size-aware default is right
-needs a real evaluation against the month baseline.
+`n_days=15` gives 61 pairs per hourly KDE on a two-year record — thin for a 2D density.
+Whether 15, 7 or a sample-size-aware default is right still needs a real evaluation.
 
-**Do this inside FIX-1, not separately.** The Paris-vs-Heraklion gap in FIX-1's table is
-this question already half-measured; running the evaluation twice would be running the
-same experiment twice.
+**Measured 2026-07-28** (`examples/diagnostics-overshoot/`), as the share of the pooled
+window's variance explained by position *within* the window — the cost of pooling a window
+rather than a date:
+
+| date   |    ±7 |    ±15 |
+| :----- | ----: | -----: |
+| 21 Mar | 3.8 % | 10.4 % |
+| 21 Jun | 1.0 % |      — |
+| 21 Sep | **19.3 %** |  — |
+| 21 Dec | 0.4 % |      — |
+
+Two findings, neither of which settles the default:
+
+1. **Halving the window works as predicted** at 21 March — 10.4 % → 3.8 %, close to the
+   fourfold reduction a locally linear seasonal trend implies.
+2. **The cost is date-dependent, and worst where the record is *least* variable.**
+   21 September is 19.3 % at ±7, worse than 21 March at twice the width, because the same
+   seasonal slope is measured against a much smaller day-to-day variance (CV 19.9 % against
+   31.8 %). A single global half-width cannot be right for both.
+
+**What is still missing:** the other side of the trade. These numbers price the seasonal
+contamination a wider window buys; nothing yet prices the sampling noise a narrower one
+costs. Both bandwidths at ±7 reproduce the pool's mean, so ±7 is not obviously too thin at
+19 years — but that is one record length, and the two-year case is untested.
 
 ## CHORE-2 — `date_id` is not zero-padded
 
@@ -497,7 +573,7 @@ Do this pass *after* the items it depends on, so it is one edit rather than thre
 Raw notes land here — refined but not yet costed or classified — and leave by
 graduating into a group above with a real ID, or by being dropped. Nothing stays long.
 
-## INBOX-8 : Move envelope functionality from the examples into the code 
+## INBOX-10 : Move envelope functionality from the examples into the code 
 
 examples/tools/ contains fucntionality that could be part of the main library as a diagnostics or convenience fucntion. 
 
