@@ -143,7 +143,7 @@ run if this one motivates it.
 | Realisations | n = 1000 per configuration |
 | Anchor | one extra cell at ±15 / 0.1, 21 Mar |
 | Intervals | 10 000 bootstrap resamples, **synthetic side only**, percentile method |
-| Cost | 9 configurations, ~17 min, plus a ~2 min fetch |
+| Cost | 9 configurations, ~2 min, plus a ~2 min fetch |
 
 ```bash
 uv run python examples/diagnostics-overshoot/run_all.py     # all four steps
