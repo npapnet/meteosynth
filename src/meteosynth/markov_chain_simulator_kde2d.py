@@ -54,11 +54,36 @@ class Kind(Enum):
 
     ``NC`` and ``CC`` collapse into one: both already dispatched to the same routine
     (return the constant), and the distinction never affected behaviour.
+
+    "Constant" means constant *to within tolerance* -- see :data:`_DEGENERACY_RTOL`. A
+    physically-zero night stored as ``1e-16`` is constant, whatever an exact comparison
+    against zero would say.
     """
 
     KDE_2D = auto()
     KDE_1D = auto()
     CONSTANT = auto()
+
+
+#: Relative tolerance for calling a slice constant.
+#:
+#: Degeneracy used to be an **exact** ``np.std(...) == 0`` test, which worked only
+#: because PVGIS happens to store literal zeros at night. Any source that stores a
+#: physically-zero night as ``1e-16`` -- interpolation, resampling, unit conversion, or a
+#: provider that keeps near-zero noise -- fell through to the 2D branch instead, and a 2D
+#: KDE was then fitted across a ``previous`` spanning ~50 and a ``current`` spanning
+#: ~1e-14. That covariance is catastrophically ill-conditioned, which is the failure this
+#: tolerance exists to prevent.
+#:
+#: The comparison is against the scale of *this simulator's own data*, not against the
+#: slice being tested. A night slice's spread is large relative to itself -- values of
+#: ~1e-14 vary by ~1e-14 -- so a purely relative test would still call it varying. What
+#: makes it degenerate is that it is negligible next to the other axis, and that
+#: disparity is precisely what conditions the covariance badly.
+#:
+#: 1e-9 sits far below any real meteorological signal (irradiance resolved to 1e-6 W/m2
+#: against a 800 W/m2 day) and far above float64 residue from a trigonometric identity.
+_DEGENERACY_RTOL = 1e-9
 
 
 def _as_rng(rng: Union[None, int, np.random.Generator]) -> np.random.Generator:
@@ -140,27 +165,62 @@ class MarkovChainSimulator2dKDE:
             self.joint_kde = None
             logging.info("KDE failed due to singular covariance matrix. %s", e)
 
+    def _degeneracy_tolerance(self) -> float:
+        """The spread below which a slice counts as constant, in this data's units.
+
+        Scaled by the largest magnitude the simulator holds across *both* axes, so the
+        test asks "is this negligible next to the rest of the data?" rather than "is this
+        exactly zero?". When every value is exactly zero the tolerance is zero too, and
+        the comparison still succeeds -- so literal-zero sources behave as they always
+        did.
+        """
+        scale = max(
+            float(np.max(np.abs(self.previous_values))),
+            float(np.max(np.abs(self.current_values))),
+        )
+        return _DEGENERACY_RTOL * scale
+
     def _cat_singularity(self):
         """
         Detect what kind of transition the data supports, and fit accordingly.
 
         Sets :attr:`kind`. See :class:`Kind` for the categories and the codes they
-        replace.
+        replace, and :data:`_DEGENERACY_RTOL` for why the comparison is scale-aware
+        rather than exact.
         """
-        std_prev = np.std(self.previous_values)
-        std_curr = np.std(self.current_values)
+        tolerance = self._degeneracy_tolerance()
+        std_prev = float(np.std(self.previous_values))
+        std_curr = float(np.std(self.current_values))
 
-        if std_curr == 0:
+        if std_curr <= tolerance:
             # Current is constant: nothing to sample, whatever previous does.
             # This is the old NC and CC collapsed into one.
             self.kind = Kind.CONSTANT
-        elif std_prev == 0:
+        elif std_prev <= tolerance:
             self.kind = Kind.KDE_1D
             self._cdf_table = self.calculate_next_state_cdf(bandwidth=self.bandwidth)
         else:
             self.kind = Kind.KDE_2D
             # Build the 2D joint distribution
             self._build_joint_distribution()
+
+            if self.joint_kde is None:
+                # The covariance was singular despite both axes varying -- perfectly
+                # collinear data does this. Without this branch `kind` stayed KDE_2D
+                # with no KDE behind it, and the first sample died in
+                # `get_conditional_density_gen` with an unreadable
+                # "ufunc 'isfinite' not supported for the input types".
+                #
+                # Degrade rather than raise, matching what this class already does when
+                # the joint density vanishes: fall back to the marginal of `current`.
+                # One unfittable hour should not take a whole synthetic year with it.
+                logging.warning(
+                    "2D KDE could not be fitted (singular covariance); falling back to "
+                    "the marginal of `current` for this transition. The previous value "
+                    "carries no information in this model."
+                )
+                self.kind = Kind.KDE_1D
+                self._cdf_table = self.calculate_next_state_cdf(bandwidth=self.bandwidth)
 
         return self.kind
 
@@ -377,7 +437,12 @@ class MarkovChainSimulator2dKDE:
         # Normalize to get conditional density
         # p(current|previous) = p(previous,current) / p(previous)
         # We can skip computing p(previous) since we'll normalize the density anyway
-        total = np.sum(joint_density)
+        #
+        # `joint_density` is None when no 2D KDE was built. _cat_singularity now
+        # re-categorises that case as KDE_1D so it should never reach here, but the
+        # check is cheap and the alternative is `np.sum(None)` raising a TypeError about
+        # ufunc casting rules -- which says nothing about what actually went wrong.
+        total = -1.0 if joint_density is None else np.sum(joint_density)
         if not np.isfinite(total) or total <= 0:
             # Belt and braces: clamping should make this unreachable, but a NaN escaping
             # here corrupts the rest of the day silently, so fall back to the marginal

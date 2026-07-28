@@ -9,23 +9,22 @@ Each item records **what was measured**, so nobody has to re-derive it, and carr
 so re-ordering this file breaks nothing. Groups are ordered by how much they block real
 use; within a group, most significant first.
 
-| ID | Item | Status |
-| :--- | :--- | :--- |
-| [FIX-1](#fix-1--generated-irradiance-is-systematically-too-high) | Generated irradiance is systematically too high | open |
-| [FIX-2](#fix-2--degeneracy-detection-uses-an-exact-float-comparison) | Degeneracy detection uses an exact float comparison | open · **start here** · blocks VISION-1 |
-| [PERF-1](#perf-1--sampling-re-evaluates-the-kde-on-every-call) | Sampling re-evaluates the KDE on every call | open |
-| [PERF-2](#perf-2--four-copies-of-the-same-data-in-every-simulator) | Four copies of the same data in every simulator | open · low priority |
-| [PERF-3](#perf-3--fitted-generators-cannot-be-pickled-at-the-default-bandwidth) | Fitted generators cannot be pickled | open · low priority |
-| [FEAT-1](#feat-1--cached-data-metadata-and-cache-match-check) | Cached data metadata and cache-match check | open |
-| [FEAT-2](#feat-2--irradiance-pick-one-column-by-availability) | Irradiance: pick one column by availability | decision partly taken |
-| [FEAT-3](#feat-3--chained-series-between-two-dates) | Chained series between two dates | open · shape decided |
-| [FEAT-4](#feat-4--downloads-cache-by-default-keyed-by-sourcesiteperiod) | Downloads cache by default | open · needs FEAT-1 |
-| [FEAT-5](#feat-5--metdataprocessor-metadata-dict) | `MetDataProcessor` metadata dict | open · needs FEAT-1 |
-| [VISION-1](#vision-1--ingest-sources-other-than-pvgis) | Ingest sources other than PVGIS | future |
-| [CHORE-1](#chore-1--default-window-half-width-needs-a-real-evaluation) | Default window half-width needs evaluating | open |
-| [CHORE-2](#chore-2--date_id-is-not-zero-padded) | `date_id` is not zero-padded | open · breaking |
-| [CHORE-3](#chore-3--document-the-on-disk-format) | Document the on-disk format | open · needs FEAT-1 |
-| [CHORE-4](#chore-4--bring-docssource-back-in-line-with-the-repo) | Bring `docs/source/` back in line with the repo | open · do last |
+| ID                                                                              | Item                                            | Status                |
+| :------------------------------------------------------------------------------ | :---------------------------------------------- | :-------------------- |
+| [FIX-1](#fix-1--generated-irradiance-is-systematically-too-high)                | Generated irradiance is systematically too high | open · **start here** |
+| [PERF-1](#perf-1--sampling-re-evaluates-the-kde-on-every-call)                  | Sampling re-evaluates the KDE on every call     | open                  |
+| [PERF-2](#perf-2--four-copies-of-the-same-data-in-every-simulator)              | Four copies of the same data in every simulator | open · low priority   |
+| [PERF-3](#perf-3--fitted-generators-cannot-be-pickled-at-the-default-bandwidth) | Fitted generators cannot be pickled             | open · low priority   |
+| [FEAT-1](#feat-1--cached-data-metadata-and-cache-match-check)                   | Cached data metadata and cache-match check      | open                  |
+| [FEAT-2](#feat-2--irradiance-pick-one-column-by-availability)                   | Irradiance: pick one column by availability     | decision partly taken |
+| [FEAT-3](#feat-3--chained-series-between-two-dates)                             | Chained series between two dates                | open · shape decided  |
+| [FEAT-4](#feat-4--downloads-cache-by-default-keyed-by-sourcesiteperiod)         | Downloads cache by default                      | open · needs FEAT-1   |
+| [FEAT-5](#feat-5--metdataprocessor-metadata-dict)                               | `MetDataProcessor` metadata dict                | open · needs FEAT-1   |
+| [VISION-1](#vision-1--ingest-sources-other-than-pvgis)                          | Ingest sources other than PVGIS                 | future                |
+| [CHORE-1](#chore-1--default-window-half-width-needs-a-real-evaluation)          | Default window half-width needs evaluating      | open                  |
+| [CHORE-2](#chore-2--date_id-is-not-zero-padded)                                 | `date_id` is not zero-padded                    | open · breaking       |
+| [CHORE-3](#chore-3--document-the-on-disk-format)                                | Document the on-disk format                     | open · needs FEAT-1   |
+| [CHORE-4](#chore-4--bring-docssource-back-in-line-with-the-repo)                | Bring `docs/source/` back in line with the repo | open · do last        |
 
 The [Inbox](#inbox--not-yet-triaged) is empty. `INBOX-1` … `INBOX-7` were triaged on
 2026-07-27: two landed (see [`CHANGELOG.md`](CHANGELOG.md)), one merged into the former
@@ -36,20 +35,19 @@ The [Inbox](#inbox--not-yet-triaged) is empty. `INBOX-1` … `INBOX-7` were tria
 Groups are ordered by how much they block real use; this is the order to *take them in*,
 which is not the same thing.
 
-1. **FIX-2** — silent NaN, bounded fix, unblocks VISION-1.
-2. **FIX-1 with CHORE-1 folded in** — one investigation, not two: the Paris-vs-Heraklion
+1. **FIX-1 with CHORE-1 folded in** — one investigation, not two: the Paris-vs-Heraklion
    gap *is* the sample-size question CHORE-1 asks. Land the calibration test first, or
    no attempted fix is measurable.
-3. **PERF-1** — after FIX-1, not before: a precomputed CDF grid has to encode whatever
+2. **PERF-1** — after FIX-1, not before: a precomputed CDF grid has to encode whatever
    boundary correction FIX-1 lands, so doing it first means doing it twice.
-4. **FEAT-2 (1)**, then **FEAT-1**, then **FEAT-4** and **FEAT-5**, which both need it.
-5. **CHORE-3**, then **CHORE-4** last, so the docs pass is one edit rather than three.
+3. **FEAT-2 (1)**, then **FEAT-1**, then **FEAT-4** and **FEAT-5**, which both need it.
+4. **CHORE-3**, then **CHORE-4** last, so the docs pass is one edit rather than three.
 
 **FEAT-3** is independent of all of it and can slot in anywhere.
 
-*`FIX-3` (stale `pvlib` unpacking) landed 2026-07-28 and is folded into
-[`CHANGELOG.md`](CHANGELOG.md). `CHORE-4` shrank as a result — the broken quickstart
-snippet went with it.*
+*Landed 2026-07-28, both folded into [`CHANGELOG.md`](CHANGELOG.md): `FIX-3` (stale
+`pvlib` unpacking) — which shrank `CHORE-4`, since the broken quickstart snippet went
+with it — and `FIX-2` (exact-float degeneracy detection), which **unblocks VISION-1**.*
 
 ---
 
@@ -64,11 +62,11 @@ using this package for P50/P90 yield estimates needs it fixed first.
 
 **The size of it depends on the record**, which is itself a clue:
 
-| record | variable | measured | against |
-| :--- | :--- | :--- | :--- |
-| Paris 2011–2012 (2 yr) | `poa_direct`, synthetic year | 678 kWh/m² (**+14 %**) | 594 observed |
-| Heraklion 2010–2020 (11 yr) | `poa_global`, 21 May ensemble | **+3.2 %** | ±7-day observed pool |
-| Heraklion 2010–2020 (11 yr) | `poa_global`, synthetic year | **+2.0 %** | 1880 kWh/m² observed mean year |
+| record                      | variable                      | measured               | against                        |
+| :-------------------------- | :---------------------------- | :--------------------- | :----------------------------- |
+| Paris 2011–2012 (2 yr)      | `poa_direct`, synthetic year  | 678 kWh/m² (**+14 %**) | 594 observed                   |
+| Heraklion 2010–2020 (11 yr) | `poa_global`, 21 May ensemble | **+3.2 %**             | ±7-day observed pool           |
+| Heraklion 2010–2020 (11 yr) | `poa_global`, synthetic year  | **+2.0 %**             | 1880 kWh/m² observed mean year |
 
 `wind_speed` on the same 11-year record comes out at +1.1 % (mean speed) and +2.7 % on
 `v³`. So the defect is real but not a fixed +14 %: a thin two-year training sample makes
@@ -80,14 +78,14 @@ Originally attributed to `bandwidth=0.1`. That is wrong — the bias survives ev
 bandwidth, including Scott's rule. Measured on the May subset, 300-day ensemble, observed
 3.27 kWh/m²:
 
-| bandwidth | generated | bias |
-|---|---|---|
-| 0.05 | 3.56 | +9 % |
-| 0.1 (default) | 3.62 | +11 % |
-| 0.2 | 3.71 | +14 % |
-| 0.3 | 3.75 | +15 % |
-| 0.5 | 3.72 | +14 % |
-| None (Scott) | 3.71 | +14 % |
+| bandwidth     | generated | bias  |
+| ------------- | --------- | ----- |
+| 0.05          | 3.56      | +9 %  |
+| 0.1 (default) | 3.62      | +11 % |
+| 0.2           | 3.71      | +14 % |
+| 0.3           | 3.75      | +15 % |
+| 0.5           | 3.72      | +14 % |
+| None (Scott)  | 3.71      | +14 % |
 
 Smaller bandwidths help but do not remove it. Contrast `wind_speed`, where bandwidth *is*
 the whole story — 0.05 gives +12 %, Scott's rule gives **0 %**.
@@ -104,11 +102,11 @@ also explains the bandwidth trend: boundary bias scales with kernel width.
 **(b) The error compounds along the 24-step walk.** One step from *true* observed values
 is only +6 %; the full chain from midnight reaches +18 % by hour 12:
 
-| | hour 12 mean | bias |
-|---|---|---|
-| observed | 398.7 | — |
-| 1 step from true hour-11 values | 422.3 | +6 % |
-| 24-step chain from midnight | 469.7 | +18 % |
+|                                 | hour 12 mean | bias  |
+| ------------------------------- | ------------ | ----- |
+| observed                        | 398.7        | —     |
+| 1 step from true hour-11 values | 422.3        | +6 %  |
+| 24-step chain from midnight     | 469.7        | +18 % |
 
 Per-hour bias grows through the day (hour 6 +9 % → hour 12 +18 % → hour 18 +13 %), the
 signature of accumulation rather than a constant offset.
@@ -134,56 +132,6 @@ measure separately here.
 - Add a calibration test pinning generated-vs-observed bias per attribute, so any fix is
   measurable and cannot silently regress. The 11-year figures in the table above are the
   natural baseline.
-
----
-
-## FIX-2 — Degeneracy detection uses an exact float comparison
-
-**Status:** open · **Impact:** silent NaN output on any data with floating-point residue ·
-**Blocks:** VISION-1 (other sources)
-
-`_cat_singularity` (`markov_chain_simulator_kde2d.py`) decides whether a slice is
-degenerate with an **exact** comparison:
-
-```python
-std_prev = np.std(self.previous_values)
-std_curr = np.std(self.current_values)
-if std_curr == 0:        # CONSTANT
-elif std_prev == 0:      # KDE_1D
-else:                    # KDE_2D  <- everything else lands here
-```
-
-This works **only because PVGIS supplies exact zeros at night** (`unique values = [0.]`,
-`std` exactly `0.0`). It is luck, not robustness.
-
-Any value that is physically zero but numerically `1e-16` — from interpolation,
-resampling, unit conversion, or a provider that stores near-zero noise — lands in the
-`KDE_2D` branch. A 2D KDE is then fitted where `current` spans ~`1e-13` while `previous`
-spans ~50. The covariance is catastrophically ill-conditioned, the density evaluates to
-~0 across the whole grid, and the normalisation becomes `0/0` → **NaN**, which propagates
-into the next hour.
-
-Reproduced: a fixture built with `np.clip(np.sin((hour - 6)/12*np.pi), 0, None)` has
-`sin(pi) == 1.2246e-16`, giving hour-18 values of ~`1e-14`, `std = 1.6e-14 > 0` →
-`KDE_2D` → NaN. The failure is **silent** — a `RuntimeWarning: invalid value encountered
-in divide` and a NaN in the output, not an exception.
-
-**This directly threatens VISION-1.** Ingesting Open-Meteo, or any resampled or
-unit-converted source, is exactly the scenario that produces near-zero-but-not-zero
-nights. It is also why `tests/test_leap_year_windows.py` and
-`examples/concepts/example_leap_year_windows.py` must build their fixtures with an
-explicit night mask rather than a clipped sine.
-
-### Fix
-
-Replace the exact test with a scale-aware tolerance — compare the range or standard
-deviation against the data's own scale (`np.isclose`, or `ptp < atol + rtol * scale`)
-rather than against literal `0`. Add a test with deliberately residue-laden input (night
-values of `1e-16` rather than `0.0`) asserting the hour is still treated as constant and
-the output is finite.
-
-Guard separately against the underlying `0/0`: if the joint density sums to ~0 that is
-unrecoverable and should raise with a clear message rather than return NaN.
 
 ---
 
@@ -421,7 +369,7 @@ FEAT-1 to have defined what provenance *is*.
 
 ## VISION-1 — Ingest sources other than PVGIS
 
-**Status:** future · **Blocked by:** FIX-2 · **Shapes:** FEAT-1, FEAT-2
+**Status:** future · **Unblocked** (FIX-2 landed 2026-07-28) · **Shapes:** FEAT-1, FEAT-2
 
 Support other providers (Open-Meteo, ERA5, local station data) via a thin **adapter
 layer** that normalises each source into the canonical schema the core consumes
@@ -434,10 +382,17 @@ against each spec's `support` — turning silent ingestion bugs (kW/m² read as 
 °C) into an error at the boundary. `adapters.py` already has the shape of this; what is
 missing is a second real provider to prove it.
 
-Two prerequisites are not optional. **FIX-2**: any resampled or unit-converted source
-produces near-zero-but-not-zero nights, which currently yield silent NaN. **FEAT-2**:
-Open-Meteo supplies GHI/DNI/DHI on the *horizontal*, not plane-of-array components, so
-"which irradiance is this column" stops being a PVGIS-only question.
+**Both prerequisites are now cleared, so this is buildable.**
+
+- **FIX-2 landed 2026-07-28.** Any resampled or unit-converted source produces
+  near-zero-but-not-zero nights; degeneracy detection is now scale-aware rather than an
+  exact `== 0`, so those hours are classified as constant instead of having a 2D KDE
+  fitted across a catastrophically ill-conditioned covariance.
+- **Horizontal irradiance is registered** (`ghi`, `dni`, `dhi` against
+  `IRRADIANCE_HORIZONTAL`, 2026-07-28). Open-Meteo supplies GHI/DNI/DHI on the
+  horizontal, and `SOURCE_RENAMES["open_meteo"]` already maps `shortwave_radiation` — but
+  onto `poa_global`, which is **wrong** now that a truthful target exists. Fixing that
+  mapping is the first task of this item, and FEAT-2's resolver is what decides the rest.
 
 ---
 
@@ -510,17 +465,23 @@ Do this pass *after* the items it depends on, so it is one edit rather than thre
 
 # Inbox — not yet triaged
 
-*Empty.* Raw notes land here — refined but not yet costed or classified — and leave by
+Raw notes land here — refined but not yet costed or classified — and leave by
 graduating into a group above with a real ID, or by being dropped. Nothing stays long.
+
+## INBOX-8 : Move envelope functionality from the examples into the code 
+
+examples/tools/ contains fucntionality that could be part of the main library as a diagnostics or convenience fucntion. 
+
+## Archived items from TODOs.md
 
 `INBOX-1` … `INBOX-7` were triaged on **2026-07-27**:
 
-| Was | Became |
-| :--- | :--- |
-| INBOX-1 — one folder per use case | **landed**, see `CHANGELOG.md` |
-| INBOX-2 — retire duplicate concept scripts | **landed**, see `CHANGELOG.md` |
-| INBOX-3 — realign `docs/source/` | `CHORE-4`, minus the broken snippet → `FIX-3` |
-| INBOX-4 — chained series between two dates | `FEAT-3` |
-| INBOX-5 — downloads cache by default | `FEAT-4` |
-| INBOX-6 — confirm and document the on-disk format | `CHORE-3` |
-| INBOX-7 — `MetDataProcessor` metadata dict | `FEAT-5` |
+| Was                                               | Became                                        |
+| :------------------------------------------------ | :-------------------------------------------- |
+| INBOX-1 — one folder per use case                 | **landed**, see `CHANGELOG.md`                |
+| INBOX-2 — retire duplicate concept scripts        | **landed**, see `CHANGELOG.md`                |
+| INBOX-3 — realign `docs/source/`                  | `CHORE-4`, minus the broken snippet → `FIX-3` |
+| INBOX-4 — chained series between two dates        | `FEAT-3`                                      |
+| INBOX-5 — downloads cache by default              | `FEAT-4`                                      |
+| INBOX-6 — confirm and document the on-disk format | `CHORE-3`                                     |
+| INBOX-7 — `MetDataProcessor` metadata dict        | `FEAT-5`                                      |

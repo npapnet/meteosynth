@@ -87,6 +87,37 @@ Two project-specific conventions:
 
 ### Fixed
 
+- **Degeneracy detection is scale-aware instead of an exact float comparison.**
+  `_cat_singularity` decided whether a transition was degenerate with `np.std(...) == 0`,
+  which worked only because PVGIS happens to store literal zeros at night. Any source
+  storing a physically-zero night as `1e-16` — interpolation, resampling, unit
+  conversion, or a provider that keeps near-zero noise — fell through to the 2D branch,
+  and a 2D KDE was fitted across a `previous` spanning ~50 against a `current` spanning
+  ~1e-14. The comparison is now against the scale of the simulator's own data
+  (`_DEGENERACY_RTOL = 1e-9`), so such a slice is classified `CONSTANT` or `KDE_1D` as it
+  should be. Exact-zero sources are unaffected: when every value is zero the tolerance is
+  zero too.
+
+  Two corrections to how this was recorded in `TODOs.md`. The **silent NaN it described
+  is no longer reachable** — the `0/0` guard added during the window-boundary work
+  already falls back to the marginal of `current`, so the residue fixture now yields
+  finite output either way. What the exact comparison still caused was *misclassification*:
+  a needless and badly-conditioned 2D fit where a constant or 1D model was correct. And
+  the item proposed *raising* on an unrecoverable joint density; that would contradict the
+  fallback already in the code, so this degrades and warns instead.
+
+- **A singular covariance no longer crashes.** When `previous` and `current` are
+  perfectly collinear both axes vary, so the 2D branch was taken, but `gaussian_kde`
+  raises `LinAlgError` — caught by setting `joint_kde` to `None` while `kind` stayed
+  `KDE_2D`. The first sample then reached `np.sum(None)` and died with
+  `TypeError: ufunc 'isfinite' not supported for the input types`, which names nothing
+  that went wrong. Such a transition is now re-categorised as `KDE_1D` with a warning,
+  and `get_conditional_density_gen` guards the `None` explicitly.
+
+  Degrading rather than raising matches what the class already does when the joint
+  density vanishes, and means one unfittable hour cannot take a whole synthetic year
+  with it.
+
 - **PVGIS fetching worked in neither module.** `pvlib` changed the arity of its PVGIS
   readers; `metdata_pvgis.fetch_pvgis_hourly` unpacked three values and
   `fetch_pvgis_tmy` four, against the two that pvlib 0.15.2 returns, so both raised
