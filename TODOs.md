@@ -13,17 +13,42 @@ use; within a group, most significant first.
 | :--- | :--- | :--- |
 | [FIX-1](#fix-1--generated-irradiance-is-systematically-too-high) | Generated irradiance is systematically too high | open |
 | [FIX-2](#fix-2--degeneracy-detection-uses-an-exact-float-comparison) | Degeneracy detection uses an exact float comparison | open · blocks VISION-1 |
-| [FIX-3](#fix-3--metdata_pvgis-unpacks-pvlib-return-values-that-no-longer-exist) | `metdata_pvgis` unpacks stale `pvlib` return values | open · one line each |
+| [FIX-3](#fix-3--metdata_pvgis-unpacks-pvlib-return-values-that-no-longer-exist) | `metdata_pvgis` unpacks stale `pvlib` return values | open · **start here** |
 | [PERF-1](#perf-1--sampling-re-evaluates-the-kde-on-every-call) | Sampling re-evaluates the KDE on every call | open |
-| [PERF-2](#perf-2--four-copies-of-the-same-data-in-every-simulator) | Four copies of the same data in every simulator | open |
+| [PERF-2](#perf-2--four-copies-of-the-same-data-in-every-simulator) | Four copies of the same data in every simulator | open · low priority |
 | [PERF-3](#perf-3--fitted-generators-cannot-be-pickled-at-the-default-bandwidth) | Fitted generators cannot be pickled | open · low priority |
 | [FEAT-1](#feat-1--cached-data-metadata-and-cache-match-check) | Cached data metadata and cache-match check | open |
 | [FEAT-2](#feat-2--irradiance-pick-one-column-by-availability) | Irradiance: pick one column by availability | decision partly taken |
+| [FEAT-3](#feat-3--chained-series-between-two-dates) | Chained series between two dates | open · shape decided |
+| [FEAT-4](#feat-4--downloads-cache-by-default-keyed-by-sourcesiteperiod) | Downloads cache by default | open · needs FEAT-1 |
+| [FEAT-5](#feat-5--metdataprocessor-metadata-dict) | `MetDataProcessor` metadata dict | open · needs FEAT-1 |
 | [VISION-1](#vision-1--ingest-sources-other-than-pvgis) | Ingest sources other than PVGIS | future |
 | [CHORE-1](#chore-1--default-window-half-width-needs-a-real-evaluation) | Default window half-width needs evaluating | open |
 | [CHORE-2](#chore-2--date_id-is-not-zero-padded) | `date_id` is not zero-padded | open · breaking |
+| [CHORE-3](#chore-3--document-the-on-disk-format) | Document the on-disk format | open · needs FEAT-1 |
+| [CHORE-4](#chore-4--bring-docssource-back-in-line-with-the-repo) | Bring `docs/source/` back in line with the repo | open · do last |
 
-Untriaged notes wait in the [Inbox](#inbox--not-yet-triaged) (`INBOX-1` … `INBOX-7`).
+The [Inbox](#inbox--not-yet-triaged) is empty. `INBOX-1` … `INBOX-7` were triaged on
+2026-07-27: two landed (see [`CHANGELOG.md`](CHANGELOG.md)), one merged into `FIX-3`,
+the rest became `FEAT-3`, `FEAT-4`, `FEAT-5`, `CHORE-3` and `CHORE-4`.
+
+## Order of work
+
+Groups are ordered by how much they block real use; this is the order to *take them in*,
+which is not the same thing.
+
+1. **FIX-3** — the package's documented path for fetching real data raises on every
+   call, and `quickstart.md` teaches it. Broken in the first thing a new user does.
+2. **FIX-2** — silent NaN, bounded fix, unblocks VISION-1.
+3. **FIX-1 with CHORE-1 folded in** — one investigation, not two: the Paris-vs-Heraklion
+   gap *is* the sample-size question CHORE-1 asks. Land the calibration test first, or
+   no attempted fix is measurable.
+4. **PERF-1** — after FIX-1, not before: a precomputed CDF grid has to encode whatever
+   boundary correction FIX-1 lands, so doing it first means doing it twice.
+5. **FEAT-2 (1)**, then **FEAT-1**, then **FEAT-4** and **FEAT-5**, which both need it.
+6. **CHORE-3**, then **CHORE-4** last, so the docs pass is one edit rather than three.
+
+**FEAT-3** is independent of all of it and can slot in anywhere.
 
 ---
 
@@ -163,8 +188,8 @@ unrecoverable and should raise with a clear message rather than return NaN.
 
 ## FIX-3 — `metdata_pvgis` unpacks `pvlib` return values that no longer exist
 
-**Status:** open · **Impact:** both fetch functions raise on every call ·
-**Effort:** one line each
+**Status:** open · **Impact:** both fetch functions raise on every call, and the
+documentation teaches one of them · **Effort:** one line each, plus a docs snippet
 
 `pvlib` changed the arity of its PVGIS readers. `src/meteosynth/metdata_pvgis.py` still
 unpacks the old shapes, so with the pinned `pvlib` (0.15.2, verified 2026-07-27) neither
@@ -180,6 +205,21 @@ went unnoticed. `adapters.fetch_pvgis` already does it correctly (`data, _ = ...
 `adapters.py:236`), and `examples/tools/site_data.py` deliberately indexes `result[0]`
 rather than unpacking, so it works against either arity.
 
+**The documentation is the reason this is first in the order of work.**
+`docs/source/quickstart.md:144-151` — the section titled *"Fetching real data from
+PVGIS"* — teaches exactly the broken call, and points at the pre-move cache path
+`data/pvgis_hourly_data.xlsx`:
+
+```python
+from meteosynth.metdata_pvgis import fetch_pvgis_hourly, SITE_PARIS, save_hourly
+df = fetch_pvgis_hourly(start_year=2011, end_year=2012, **SITE_PARIS)
+save_hourly(df)   # caches to data/pvgis_hourly_data.xlsx
+```
+
+So a new user's first contact with real data fails. That snippet is fixed here rather
+than in CHORE-4, because it is the same defect and should not wait for a docs pass.
+*(Was INBOX-3's first defect, merged 2026-07-27.)*
+
 ### Fix
 
 Index instead of unpacking (`result = get_pvgis_hourly(...); data = result[0]`), matching
@@ -187,10 +227,15 @@ Index instead of unpacking (`result = get_pvgis_hourly(...); data = result[0]`),
 calling both functions against a recorded response, so a future `pvlib` change is caught
 by CI rather than by a user.
 
+Then repoint `quickstart.md:144-151` at whatever survives that decision, and at a cache
+path that exists.
+
 Worth deciding at the same time: **whether `metdata_pvgis` should exist at all.** It
 overlaps `adapters.fetch_pvgis`, which is the newer, spec-aware path (it normalises,
 validates against `support`, and emits a canonical frame). If the module stays it should
 delegate to the adapter rather than call `pvlib` a second, differently-broken way.
+Deleting it is the cleaner answer and makes the quickstart fix a rewrite rather than a
+patch — decide before touching the docs, not after.
 
 ---
 
@@ -330,6 +375,100 @@ one-attribute-at-a-time engine, not a bug.
 
 ---
 
+## FEAT-3 — Chained series between two dates
+
+**Status:** open · **Shape decided (2026-07-27)** · **Independent of everything else**
+
+Explicit *start* dates already work: `gen_day(5, 21)`, `for_day(month, day)`,
+`generate_series(start=(1, 1), n_days=365)`. What is missing is the **end**: `n_days` is
+a count, and the model carries **no year at all** — it is climatological by construction
+— so "1 Jan → 31 Mar" and "2030-01-01 → 2030-12-31" are different asks.
+
+> **Settled: `end=(month, day)` alongside `n_days`.** The smallest change, and it stays
+> calendar-only. Real dates in / timestamped frame out was rejected: it puts a year into
+> a model that has none, and leap years would then have to mean something.
+
+### Fix
+
+Add `end: Optional[tuple] = None` to `generate_series`
+(`generators.py:605`), mutually exclusive with `n_days`. Convert `end` to a day count
+against the existing slot arithmetic — `day_slot(month, day)`, `DAYS_IN_YEAR`,
+`FEB29_SLOT` — the walk at `generators.py:666-676` already uses.
+
+Three things the implementation has to settle, all visible in that loop:
+
+- **`end` is inclusive**, and wraps: `start=(12, 30), end=(1, 2)` is four days, not an
+  error. The walk is already circular (`slot % DAYS_IN_YEAR + 1`).
+- **`include_feb29=False` shortens the count**, since the walk skips slot 60. Deriving
+  `n_days` must skip it the same way or the series overshoots by a day.
+- **`end=(2, 29)` with `include_feb29=False`** should raise, mirroring the existing
+  guard on `start=(2, 29)` at `generators.py:660-664`.
+
+*(Was INBOX-4.)*
+
+---
+
+## FEAT-4 — Downloads cache by default, keyed by source/site/period
+
+**Status:** open · **Needs:** FEAT-1 · **Impact:** the user-facing half of caching
+
+FEAT-1 is the *record* — what a cached file says about itself, and the match predicate.
+This is the **policy**: for any fetch, not only the examples,
+
+- write to a cache subfolder **by default**, rather than only when handed an explicit
+  path,
+- **skip the download** when a matching file already exists,
+- unless a `force_refetch` / `override` says otherwise.
+
+Tracked separately from FEAT-1 because the two fail differently: a wrong record is a
+correctness bug, a wrong default location is an ergonomics one, and they can land in
+either order once FEAT-1 defines the match.
+
+**Assessment.** Only the examples cache by default today (`examples/tools/site_data.py`,
+keyed by filename via `Site.cache_path`). `adapters.fetch_pvgis` caches solely when
+handed an explicit `cache=` path (`adapters.py:222-228`) and records nothing about what
+the file holds — on a warm cache it re-validates support and returns, without ever
+checking the file answers the question asked.
+
+**Question, still open:** default location — `./data/<source>/` relative to the working
+directory (matches the examples, visible, easy to git-ignore) or a user-level cache
+directory (survives moving between projects, but invisible from any of them)? **Decide
+this before FEAT-1 starts**, since it shapes the API surface both share.
+
+*(Was INBOX-5, kept separate from FEAT-1 by decision on 2026-07-27.)*
+
+---
+
+## FEAT-5 — `MetDataProcessor` metadata dict
+
+**Status:** open · **Needs:** FEAT-1 for the provenance half
+
+Add a `.metadata` dict reporting what the processor can see: row count, years covered,
+date range, columns kept and dropped, non-null count per attribute — plus provenance
+(source, coordinates, period) when an adapter can supply it.
+
+**Two cautions, carried over from the triage.**
+
+1. **"Size of training set" has two meanings, in two homes.** The processor holds the
+   *whole record*; the actual training subset is per calendar day and belongs on
+   `DayWindowGenerator` / `EnvSeriesGenerator` — e.g. 341 pooled days for a ±15-day
+   window on the 11-year record, against 96 432 rows in the record itself. Reporting
+   both, each where it is true, is more useful than one number that has to be qualified.
+2. **Provenance cannot be invented.** A hand-built DataFrame has none, and `adapters.py`
+   deliberately supports that path (case B in its module docstring). The field must be
+   optional and **absent, never an error**.
+
+> **Settled: derived fields, plus an optional provenance passthrough the adapter fills.**
+> Derived-only would mean the one thing a user most wants to audit — where did this come
+> from — is the one thing the dict cannot say.
+
+The derived half needs nothing from FEAT-1 and could land first; the passthrough needs
+FEAT-1 to have defined what provenance *is*.
+
+*(Was INBOX-7.)*
+
+---
+
 # Direction — where the package is going
 
 ## VISION-1 — Ingest sources other than PVGIS
@@ -363,121 +502,74 @@ and part of why FIX-1 is so much worse on the Paris record than on the 11-year o
 the same setting pools 341 days. Whether 15, 20 or a sample-size-aware default is right
 needs a real evaluation against the month baseline.
 
+**Do this inside FIX-1, not separately.** The Paris-vs-Heraklion gap in FIX-1's table is
+this question already half-measured; running the evaluation twice would be running the
+same experiment twice.
+
 ## CHORE-2 — `date_id` is not zero-padded
 
 `'2011-1-2'` does not sort lexicographically. `convert_to_daily_wide` sensibly builds its
 own padded `date_str` instead. Worth aligning, but it is a breaking change for anything
 grouping on `date_id`.
 
+
+## CHORE-3 — Document the on-disk format
+
+**Status:** open · **Needs:** FEAT-1 to settle provenance first
+
+**Assessment, checked `adapters._write_cache`.** The shape is **already
+source-agnostic**: one irradiance column plus `temp_air`, `wind_speed` and the four
+`INDEX_COLS`, written by file extension — csv / xlsx / parquet, `adapters.py:277-285`.
+No redesign is needed. Two gaps:
+
+- The calendar is four integer columns, not a timestamp. `INDEX_COLS` is what the core
+  validates on, so a timestamp would be an *addition* for the file's sake, not a
+  replacement. **Decide whether to add one.**
+- Nothing records which source, or which irradiance form the file holds (FEAT-2, FEAT-1).
+
+**To do:** write the schema into the docs — columns, dtypes, units, calendar convention,
+and what is deliberately absent, with the reasoning already in `adapters.py`'s module
+docstring (*"the column name is the provenance… no metadata sidecar"*). That position is
+what FEAT-1 revisits, which is why this waits on it.
+
+*(Was INBOX-6.)*
+
+## CHORE-4 — Bring `docs/source/` back in line with the repo
+
+**Status:** open · **Do last**, after FIX-3, FEAT-1 and CHORE-3
+
+**Assessment.** Less drift than feared — `quickstart.md` and `workflow.md` already
+describe π(x₀), `generate_series` and the registry. What remains, after the 2026-07-27
+examples reorganisation repointed every stale path:
+
+- **The broken snippet moved to FIX-3**, where it belongs: `quickstart.md:144-151`
+  teaches `fetch_pvgis_hourly` / `save_hourly`, which raise on every call. It is a defect,
+  not drift, and should not wait for this pass.
+- **No page documents the on-disk format** (CHORE-3) — add one once CHORE-3 decides
+  what it says.
+- **`examples.md` still carries the walk-through inline.** Now that every use-case
+  folder has its own README, decide whether that page should summarise and link rather
+  than duplicate — two places to update is how it drifted the first time.
+
+Do this pass *after* the items it depends on, so it is one edit rather than three.
+
+*(Was INBOX-3, minus the quickstart defect merged into FIX-3.)*
+
 ---
 
 # Inbox — not yet triaged
 
-Raw notes, refined but not yet costed or classified. Each carries an initial assessment
-and, where one is needed, **the question that decides its shape**. An item leaves this
-section by graduating into a group above with a real ID, or by being dropped — nothing
-stays here long. *Added 2026-07-27.*
+*Empty.* Raw notes land here — refined but not yet costed or classified — and leave by
+graduating into a group above with a real ID, or by being dropped. Nothing stays long.
 
-## INBOX-1 — One folder per use case, each with its own README → CHORE
+`INBOX-1` … `INBOX-7` were triaged on **2026-07-27**:
 
-Split `examples/use_cases/` into `day/`, `month/` and `year/`, each holding its scripts
-plus a short `README.md` saying what the use case answers, what it writes and how long it
-takes. `examples/use_cases/README.md` becomes the index over the three.
-
-**Assessment.** `day/` takes the three `day_envelope_*.py`, `month/` takes
-`monthly_statistics.py`, `year/` takes `synthetic_year.py`. Two things already permit the
-extra nesting: the `sys.path` bootstrap in each script searches upward for `examples/`
-rather than counting parents, and output filenames are already prefixed `day_` / `month_`
-/ `year_`, so a single shared `examples/output/` still works.
-
-## INBOX-2 — Retire the concept scripts that duplicate a use case → CHORE
-
-**Assessment, review done.** Of the five in `examples/concepts/`:
-
-| Script | Verdict |
+| Was | Became |
 | :--- | :--- |
-| `example_markov_generation.py` | **Superseded** by `day_envelope_*` — month subset, 10 profiles, no comparison |
-| `example_synthetic_year.py` | **Superseded** by `use_cases/synthetic_year.py`. Its year heatmap is the only unique part; move it into the use case as an optional plot |
-| `example_exploratory_analysis.py` | **Convert to a rolling window.** Month-based today, but the only runnable demo of `sup_plot_lib` — worth keeping on those grounds |
-| `example_rolling_window.py` | **Keep, month subset and all.** Contrasting the month subset against the window *is* the script |
-| `example_leap_year_windows.py` | **Keep.** Unique, and needs no PVGIS fetch |
-
-**Question:** delete the two superseded scripts, or convert them onto rolling windows and
-keep them?
-
-## INBOX-3 — Bring `docs/source/` back in line with the repo → CHORE
-
-**Assessment.** Less drift than feared — `quickstart.md` and `workflow.md` already
-describe π(x₀), `generate_series` and the registry. Two real defects:
-
-- **`quickstart.md:144-151` teaches a broken snippet.** It documents
-  `fetch_pvgis_hourly` / `save_hourly`, which raise on every call (FIX-3), and points at
-  the pre-move cache path `data/pvgis_hourly_data.xlsx`.
-- **No page documents the on-disk format** (INBOX-6) or the new `examples/` layout beyond
-  `examples.md`.
-
-Do this pass *after* INBOX-1, -2 and -6, so it is one edit rather than three.
-
-## INBOX-4 — Chained series between two dates → FEAT
-
-**Assessment, checked.** Explicit dates already work: `gen_day(5, 21)`,
-`for_day(month, day)`, `generate_series(start=(1, 1), n_days=365)`. What is missing is the
-*end*: `n_days` is a count, and the model carries **no year at all** — it is
-climatological by construction — so "1 Jan → 31 Mar" and "2030-01-01 → 2030-12-31" are
-different asks.
-
-**Question:** which shape?
-
-1. `end=(month, day)` alongside `n_days`. Smallest change, stays calendar-only. *(Leaning
-   this way.)*
-2. Real dates in, timestamped DataFrame out. Friendliest, but puts a year into a model
-   that has none — and leap years would then have to mean something.
-3. Keep the array core; add a dated wrapper that owns timestamps and leap handling.
-
-## INBOX-5 — Downloads cache by default, keyed by source/site/period → merge into FEAT-1
-
-This is FEAT-1 seen from the user's side; recommend folding it in rather than tracking
-twice. The behaviour wanted, for any fetch and not only the examples: write to a subfolder
-by default, record source + latitude/longitude + year range, and **skip the download when
-a matching file exists** unless explicitly overridden.
-
-**Assessment.** Only the examples do this today
-(`examples/tools/site_data.py`, keyed by filename). `adapters.fetch_pvgis` caches solely
-when handed an explicit path and records nothing about what the file holds.
-
-**Question:** default location — `./data/<source>/` relative to the working directory
-(matches the examples, visible, easy to git-ignore) or a user-level cache directory
-(survives moving between projects, but invisible from any of them)?
-
-## INBOX-6 — Confirm the on-disk format is source-agnostic, then document it → CHORE
-
-**Assessment, checked `adapters._write_cache`.** The shape is already source-agnostic: one
-irradiance column plus `temp_air`, `wind_speed` and the four `INDEX_COLS`, written by file
-extension (csv / xlsx / parquet). Two gaps rather than a redesign:
-
-- The calendar is four integer columns, not a timestamp. `INDEX_COLS` is what the core
-  validates on, so a timestamp would be an *addition* for the file's sake, not a
-  replacement.
-- Nothing records which source, or which irradiance form the file holds (FEAT-2).
-
-**To do:** write the schema into the docs — columns, dtypes, units, calendar convention,
-what is deliberately absent — and decide the timestamp question above.
-
-## INBOX-7 — `MetDataProcessor` metadata dict → FEAT
-
-Add a `.metadata` dict reporting what the processor can see: row count, years covered,
-date range, columns kept and dropped, non-null count per attribute — plus provenance
-(source, coordinates, period) when an adapter can supply it.
-
-**Appropriateness, as asked — two cautions.**
-
-1. **"Size of training set" has two meanings, in two homes.** The processor holds the
-   *whole record*; the actual training subset is per calendar day and belongs on
-   `DayWindowGenerator` / `EnvSeriesGenerator` — e.g. 341 pooled days for a ±15-day window
-   on the 11-year record, against 96 432 rows in the record itself. Reporting both, each
-   where it is true, is more useful than one number that has to be qualified.
-2. **Provenance cannot be invented.** A hand-built DataFrame has none, and `adapters.py`
-   deliberately supports that path. The field must be optional and absent, never an error.
-
-**Question:** derived-only, or derived plus an optional provenance passthrough the adapter
-fills? *(Leaning the latter.)*
+| INBOX-1 — one folder per use case | **landed**, see `CHANGELOG.md` |
+| INBOX-2 — retire duplicate concept scripts | **landed**, see `CHANGELOG.md` |
+| INBOX-3 — realign `docs/source/` | `CHORE-4`, minus the broken snippet → `FIX-3` |
+| INBOX-4 — chained series between two dates | `FEAT-3` |
+| INBOX-5 — downloads cache by default | `FEAT-4` |
+| INBOX-6 — confirm and document the on-disk format | `CHORE-3` |
+| INBOX-7 — `MetDataProcessor` metadata dict | `FEAT-5` |

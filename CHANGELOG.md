@@ -28,11 +28,25 @@ Two project-specific conventions:
   `examples/README.md`. Downloads cache to `examples/data/`; everything generated goes to
   `examples/output/`, git-ignored via its own `.gitignore` so the folder exists in a clone
   but its contents never do.
+- **Use cases split by time scale** into `use_cases/day/`, `use_cases/month/` and
+  `use_cases/year/`, each with a `README.md` saying what its scripts answer, what they
+  write and how long they take, indexed by `use_cases/README.md`. The scale is not a
+  filing detail — it changes what can be asked: a day is checkable against eleven real
+  ones, a month only means something as an ensemble, a year is produced rather than
+  checked. The scripts needed no changes: their `sys.path` bootstrap searches upward for
+  `examples/` rather than counting parents, and output names already carry `day_` /
+  `month_` / `year_` prefixes, so one flat `examples/output/` still works.
 - **Five use cases on an 11-year Heraklion record (2010–2020, PVGIS).**
-  `day_envelope_pv/temp/wind.py` draw 200 synthetic 21 Mays each and report shape,
-  spread and daily-aggregate against the eleven observed ones; `synthetic_year.py` writes
-  an 8760-hour series of all three attributes; `monthly_statistics.py` reports an ensemble
-  of twelve synthetic Mays against the observed years (level, spread, P50/P90).
+  `day/day_envelope_pv|temp|wind.py` draw 200 synthetic 21 Mays each and report shape,
+  spread and daily-aggregate against the eleven observed ones; `year/synthetic_year.py`
+  writes an 8760-hour series of all three attributes; `month/monthly_statistics.py`
+  reports an ensemble of twelve synthetic Mays against the observed years (level, spread,
+  P50/P90).
+- **An opt-in year heatmap** on `year/synthetic_year.py` — day of year across, hour of
+  day down, one panel per attribute. Off by default (`PLOT_HEATMAP = False`), because
+  that script exists to produce a file; matplotlib is imported only if it is switched on.
+  It shows what the monthly summary table cannot: the seasonal envelope, and the summer
+  day widening at both ends rather than merely getting brighter.
 - **`examples/tools/`** — `site_data.py` (sites, cached records, output paths),
   `envelope.py` (observed-vs-synthetic comparison and figures), `fetch_site_data.py`
   (runnable cache priming).
@@ -47,6 +61,27 @@ Two project-specific conventions:
 - **`TODOs.md` regrouped** into Fixes / Performance & internals / Features / Direction /
   Housekeeping, with stable IDs (`FIX-1`, `PERF-2`, …) so cross-references survive
   re-ordering. Completed items moved into this file; stale ones removed.
+- **`TODOs.md` inbox triaged and emptied.** `INBOX-1` … `INBOX-7` were costed and
+  classified: two landed (this entry), one merged into `FIX-3`, and the rest graduated to
+  `FEAT-3` (chained series between two dates, shape settled as `end=(month, day)`),
+  `FEAT-4` (downloads cache by default), `FEAT-5` (`MetDataProcessor.metadata`), `CHORE-3`
+  (document the on-disk format) and `CHORE-4` (realign `docs/source/`). The file gained an
+  **Order of work** section recording the sequence and, more usefully, the couplings —
+  `CHORE-1` folds into `FIX-1` because they are the same experiment, and `PERF-1` follows
+  `FIX-1` because a precomputed CDF grid must encode whatever boundary correction lands.
+
+### Removed
+
+- **Two concept scripts that duplicated a use case.**
+  `concepts/example_markov_generation.py` (a month subset, ten profiles, no comparison)
+  is superseded by the `day_envelope_*` scripts, which ask the same question against real
+  observations; `EnvSeriesGenerator` on a month subset is still demonstrated by
+  `concepts/example_rolling_window.py`, which contrasts it with the window and is the
+  point of that script. `concepts/example_synthetic_year.py` is superseded by
+  `use_cases/year/synthetic_year.py`; its year heatmap — the one thing it had that the use
+  case did not — moved across as the opt-in plot above.
+  `concepts/example_exploratory_analysis.py` stays month-based: it is the only runnable
+  demonstration of `sup_plot_lib`, and that is what it is for.
 
 ---
 

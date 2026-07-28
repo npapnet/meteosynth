@@ -4,7 +4,7 @@
 
 | Folder | What lives there |
 | :--- | :--- |
-| `examples/use_cases/` | Applied workflows that produce data — generate, check against the record, write to disk. Heraklion 2010–2020. |
+| `examples/use_cases/` | Applied workflows that produce data — generate, check against the record, write to disk. Heraklion 2010–2020. Split by time scale into `day/`, `month/` and `year/`, each with its own README. |
 | `examples/concepts/` | How the package behaves — training windows, leap days, the Markov engine, exploratory plots. Paris 2011–2012. |
 | `examples/tools/` | Shared helpers the scripts import, plus a runnable cache-priming script. Not part of the package. |
 
@@ -17,18 +17,16 @@ uv run python examples/tools/fetch_site_data.py
 
 # Concepts
 uv run python examples/concepts/example_exploratory_analysis.py
-uv run python examples/concepts/example_markov_generation.py
 uv run python examples/concepts/example_rolling_window.py
-uv run --extra examples python examples/concepts/example_synthetic_year.py   # ~80 s
 uv run python examples/concepts/example_leap_year_windows.py                 # no PVGIS needed
 
 # Use cases
-uv run --extra examples python examples/use_cases/day_envelope_pv.py         # also _temp, _wind
-uv run --extra examples python examples/use_cases/synthetic_year.py          # ~4 min
-uv run --extra examples python examples/use_cases/monthly_statistics.py      # ~3 min
+uv run --extra examples python examples/use_cases/day/day_envelope_pv.py     # also _temp, _wind
+uv run --extra examples python examples/use_cases/month/monthly_statistics.py  # ~3 min
+uv run --extra examples python examples/use_cases/year/synthetic_year.py     # ~4 min
 ```
 
-Sections 1–6 below walk through the concept scripts; section 7 covers the use
+Sections 1–4 below walk through the concept scripts; section 5 covers the use
 cases.
 
 ## 1. Exploratory analysis
@@ -51,32 +49,7 @@ wide = mdp.get_monthly_attribute_wide_format(     # days x hours
 spl.plot_2d_kde_sns(month_data, value_str="poa_direct")
 ```
 
-## 2. Synthetic generation
-
-`examples/concepts/example_markov_generation.py` builds an `EnvSeriesGenerator` for
-plane-of-array direct irradiance and plots several synthetic daily profiles.
-
-```{mermaid}
-flowchart LR
-    L["load_or_fetch_data()"] --> M["MetDataProcessor"]
-    M --> May["get_month_subset(5)"]
-    May --> G["EnvSeriesGenerator(attr_str='poa_direct')"]
-    G --> P["gen_day() &times; 10"]
-    P --> Plot["plot 24-hour profiles"]
-```
-
-```python
-from meteosynth import MetDataProcessor, EnvSeriesGenerator
-
-mdp = MetDataProcessor(df)
-may = mdp.get_month_subset(5)
-
-generator = EnvSeriesGenerator(may, attr_str="poa_direct")
-rng = np.random.default_rng(42)
-profiles = [generator.gen_day(rng=rng) for _ in range(10)]
-```
-
-## 3. Rolling day windows
+## 2. Rolling day windows
 
 `examples/concepts/example_rolling_window.py` contrasts the two training strategies. A
 month subset is *off-centre* — a May 1 model trained on all of May inherits May
@@ -108,54 +81,7 @@ With only two years of data both strategies pool ~62 days, so the window buys
 *centring* and *smoothness*, not sample size. See `docs/design/completed/rolling-day-window.md`.
 ```
 
-## 4. A full synthetic year
-
-`examples/concepts/example_synthetic_year.py` walks a 365-day non-leap calendar and draws
-one synthetic day per date for both `poa_direct` and `wind_speed`, writing an
-8760-hour series to `examples/output/concepts_synthetic_year_paris.csv`.
-
-Walking a real non-leap year means Feb 29 is simply never requested — there is no
-filtering or exclusion list. `DayWindowGenerator` fits each day on demand behind
-a small LRU cache, so the year holds a few hundred KB rather than the ~126 MB all
-366 fitted generators would cost.
-
-```python
-import pandas as pd
-from meteosynth import MetDataProcessor, DayWindowGenerator
-
-mdp = MetDataProcessor(df)
-generator = DayWindowGenerator(mdp, attr_str="wind_speed", n_days=15, cache_size=4)
-
-# One call. Day 1 starts from pi(x0); every later midnight uses that day's own
-# cross-midnight model. include_feb29 defaults to False, giving a 365-day year.
-year = generator.generate_series(start=(1, 1), n_days=365, seed=42)   # (365, 24)
-```
-
-```{note}
-`generate_series` replaces what used to be a hand-rolled loop in this example:
-walk the calendar, pass the previous day's 23:00 as `start_value`, repeat. Day 1 now
-starts from the fitted initial distribution π(x₀) instead of a guessed seed, and each
-midnight uses that day's own cross-midnight model — fitted from real consecutive-day
-pairs, rather than the hour-0 transition that actually paired midnight with 23:00 of
-the *same* day.
-```
-
-The script checks itself against the data it learned from. On the shipped
-2011–2012 Paris record the seasonal shape tracks closely (correlation 0.95 for
-`poa_direct`, peak month May in both), while absolute irradiance overshoots by
-~14%.
-
-```{note}
-That overshoot is a known open issue (see `TODOs.md`), and it is not the rolling
-window — a month-based generator overshoots by the same margin. Nor is it simply
-the bandwidth: the bias survives every bandwidth, including Scott's rule.
-Irradiance piles against a hard floor at zero, and a symmetric kernel
-renormalised onto a `[0, max]` domain pushes mass upward. Treat absolute
-magnitudes as uncalibrated for zero-floored variables; the seasonal shape is
-sound.
-```
-
-## 5. Leap years and the end of February
+## 3. Leap years and the end of February
 
 `examples/concepts/example_leap_year_windows.py` answers two questions the shipped record
 cannot demonstrate, because it spans only 2011–2012 and holds one leap day. It
@@ -189,7 +115,7 @@ The script also prints exactly where the leap day enters and leaves a window as
 `n_days` grows, and the non-leap deficit. See {doc}`theory` for the `all_leap`
 calendar behind it.
 
-## 6. A Monte-Carlo sketch for energy output
+## 4. A Monte-Carlo sketch for energy output
 
 Putting it together for the target use case — turning synthetic irradiance days
 into a distribution of daily energy yield:
@@ -220,15 +146,19 @@ print(f"P10 daily yield : {np.percentile(daily_wh, 10):8.1f} Wh")
 The percentile spread across the ensemble is exactly the quantity an energy
 Monte-Carlo consumes: a distribution of outcomes rather than a single number.
 
-## 7. Use cases
+## 5. Use cases
 
 `examples/use_cases/` runs the sketch above for real, on eleven full years of
 Heraklion, Crete data (2010–2020, PVGIS). Each script writes what it generates to
 the git-ignored `examples/output/`.
 
+They are grouped by the **time scale of the question** — `day/`, `month/`, `year/` —
+because the scale changes what can be asked, and each folder carries a README saying
+what its scripts answer, what they write and how long they take.
+
 ### Does a synthetic day look like a real one?
 
-`day_envelope_pv.py`, `day_envelope_temp.py` and `day_envelope_wind.py` each draw
+`day/day_envelope_pv.py`, `day_envelope_temp.py` and `day_envelope_wind.py` each draw
 200 independent synthetic 21 Mays and hold them against the eleven observed
 21 Mays plus the percentile envelope of the surrounding fortnight. Three checks,
 because a generator can pass one and fail another:
@@ -261,13 +191,41 @@ where a small bias in mean speed becomes a larger one in power.
 
 ### A whole synthetic year
 
-`synthetic_year.py` writes an 8760-hour series of all three attributes and checks
-the generated climatology against the observed one — monthly means, seasonal
-shape correlation, annual totals. No plots; the point is the file.
+`year/synthetic_year.py` writes an 8760-hour series of all three attributes and checks
+the generated climatology against the observed one — monthly means, seasonal shape
+correlation, annual totals. The point is the file, so plots are off by default; set
+`PLOT_HEATMAP = True` for a year-at-a-glance figure.
+
+```python
+import pandas as pd
+from meteosynth import MetDataProcessor, DayWindowGenerator
+
+mdp = MetDataProcessor(df)
+generator = DayWindowGenerator(mdp, attr_str="wind_speed", n_days=15, cache_size=8)
+
+# One call. Day 1 starts from pi(x0); every later midnight uses that day's own
+# cross-midnight model. include_feb29 defaults to False, giving a 365-day year.
+year = generator.generate_series(start=(1, 1), n_days=365, seed=42)   # (365, 24)
+```
+
+Walking a 365-day year means Feb 29 is simply never requested — there is no filtering
+step and no exclusion list. `DayWindowGenerator` fits each day on demand behind a small
+LRU cache, so the walk holds a few hundred KB rather than the ~126 MB all 366 fitted
+generators would cost.
+
+```{note}
+Seasonal shape tracks the observed record closely, while absolute irradiance
+overshoots. That overshoot is a known open issue (`FIX-1` in `TODOs.md`), and it is not
+the rolling window — a month-based generator overshoots by the same margin. Nor is it
+simply the bandwidth: the bias survives every bandwidth, including Scott's rule.
+Irradiance piles against a hard floor at zero, and a symmetric kernel renormalised onto
+a `[0, max]` domain pushes mass upward. Treat absolute magnitudes as uncalibrated for
+zero-floored variables; the seasonal shape is sound.
+```
 
 ### An ensemble of months
 
-`monthly_statistics.py` generates 12 synthetic Mays and reports them against the
+`month/monthly_statistics.py` generates 12 synthetic Mays and reports them against the
 eleven observed ones: level, spread, P50/P90 (energy-finance convention — the
 value *exceeded* in that share of cases), and the diurnal shape.
 

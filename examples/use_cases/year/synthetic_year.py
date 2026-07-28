@@ -4,9 +4,13 @@ Use case: generate a complete synthetic year and write it to disk.
 
 One 8760-hour series per attribute for Heraklion, chained day by day across midnight,
 trained on the +/-15 day rolling window around each calendar day of the 2010-2020
-record. No plots -- this script exists to *produce data*: the file it writes is the
-input to whatever comes next (a PV yield model, a battery sizing run, a demand
-simulation).
+record. This script exists to *produce data*: the file it writes is the input to
+whatever comes next (a PV yield model, a battery sizing run, a demand simulation).
+
+Plots are **off by default** for that reason. Set ``PLOT_HEATMAP = True`` for a
+year-at-a-glance figure -- day of year across, hour of day down, one panel per
+attribute -- which is the quickest way to see that the seasonal envelope and the
+lengthening summer day are both there.
 
 What the output is, and is not:
 
@@ -32,11 +36,12 @@ Mechanics worth knowing while it runs:
   the previous day's 23:00 value.
 
 Output lands in ``examples/output/`` (git-ignored): one CSV per realisation, plus a
-monthly summary table checking the generated climatology against the observed one.
+monthly summary table checking the generated climatology against the observed one, and
+the heatmap if it was asked for.
 
 Run with::
 
-    uv run --extra examples python examples/use_cases/synthetic_year.py
+    uv run --extra examples python examples/use_cases/year/synthetic_year.py
 
 Runtime: ~4 min per realisation for all three attributes.
 """
@@ -55,7 +60,7 @@ _EXAMPLES = next(p for c in (_HERE, *_HERE.parents) for p in (c, c / "examples")
 sys.path.insert(0, str(_EXAMPLES))
 
 from meteosynth import DayWindowGenerator, MetDataProcessor
-from tools.site_data import HERAKLION, HERAKLION_YEARS, load_site, save_frame
+from tools.site_data import HERAKLION, HERAKLION_YEARS, load_site, save_figure, save_frame
 
 ATTRS = ["poa_global", "temp_air", "wind_speed"]
 REFERENCE_YEAR = 2023     # a non-leap calendar to hang timestamps on
@@ -63,6 +68,7 @@ N_REALISATIONS = 1
 WINDOW_DAYS = 15
 CACHE_SIZE = 8            # raise towards 366 to make extra realisations cheap
 SEED = 2026
+PLOT_HEATMAP = False      # True writes year_<site>_<year>_heatmap.png alongside the CSV
 
 MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
           "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
@@ -137,6 +143,28 @@ def print_summary(summary: pd.DataFrame, frame: pd.DataFrame, observed: pd.DataF
     print("  overshoots observed daily totals (see TODOs.md); the seasonal shape is sound.")
 
 
+def plot_year(frame: pd.DataFrame):
+    """A heatmap per attribute: day of year across, hour of day down.
+
+    The whole year on one axis, which the monthly table cannot show: the seasonal
+    envelope, and the summer day widening at both ends rather than just getting
+    brighter. Imported lazily so the default data-only run needs no matplotlib.
+    """
+    import matplotlib.pyplot as plt
+
+    fig, axes = plt.subplots(len(ATTRS), 1, figsize=(13, 3 * len(ATTRS)), squeeze=False)
+    for ax, attr in zip(axes.ravel(), ATTRS):
+        grid = frame[attr].to_numpy().reshape(-1, 24).T          # (24 hours, 365 days)
+        image = ax.imshow(grid, aspect="auto", origin="lower", cmap="viridis",
+                          extent=[1, grid.shape[1], 0, 24])
+        ax.set_ylabel("Hour of day")
+        ax.set_title(f"Synthetic {REFERENCE_YEAR} (non-leap), {HERAKLION.name}: {attr}")
+        fig.colorbar(image, ax=ax, label=attr)
+    axes.ravel()[-1].set_xlabel("Day of year")
+    fig.tight_layout()
+    return fig
+
+
 def main():
     df = load_site(HERAKLION, *HERAKLION_YEARS)
     mdp = MetDataProcessor(df)
@@ -164,6 +192,9 @@ def main():
             summary = monthly_summary(frame, mdp.met_data)
             print_summary(summary, frame, mdp.met_data)
             save_frame(summary, f"year_{HERAKLION.key}_monthly_summary.csv", index=False)
+            if PLOT_HEATMAP:
+                save_figure(plot_year(frame),
+                            f"year_{HERAKLION.key}_{REFERENCE_YEAR}_heatmap.png")
 
     print(f"\n  Feb 29 present in the output: "
           f"{((index.month == 2) & (index.day == 29)).any()}")

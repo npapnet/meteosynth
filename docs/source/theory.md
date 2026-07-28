@@ -337,5 +337,6 @@ chronological "±n days by timestamp" design would fail outright, since January 
   for a 2D density. Prefer more years over a wider $n$ where you have them.
 - **Hour 0 looks backwards.** `hour_prev = (hour - 1) % 24` makes hour 0's
   *previous* value hour 23 of the **same** day rather than 23:00 the night
-  before. Chaining each generated day from the previous day's final value (as
-  `examples/concepts/example_synthetic_year.py` does) is the practical workaround.
+  before. `generate_series` is what avoids it: every later day's hour 0 comes
+  from that day's own cross-midnight model, conditioned on the previous day's
+  23:00 value (see `examples/use_cases/year/synthetic_year.py`).

@@ -144,22 +144,20 @@ for the full index.
 # Optional: download the two records the examples use, once, up front
 uv run python examples/tools/fetch_site_data.py
 
-# Use cases: Heraklion 2010-2020, one synthetic 21 May against eleven real ones
-uv run --extra examples python examples/use_cases/day_envelope_pv.py
-uv run --extra examples python examples/use_cases/day_envelope_temp.py
-uv run --extra examples python examples/use_cases/day_envelope_wind.py
-
-# A complete 8760-hour synthetic year of all three attributes, written to CSV (~4 min)
-uv run --extra examples python examples/use_cases/synthetic_year.py
+# Use cases: Heraklion 2010-2020, grouped by time scale (day / month / year)
+uv run --extra examples python examples/use_cases/day/day_envelope_pv.py
+uv run --extra examples python examples/use_cases/day/day_envelope_temp.py
+uv run --extra examples python examples/use_cases/day/day_envelope_wind.py
 
 # An ensemble of synthetic Mays, reported as statistics against the observed years (~3 min)
-uv run --extra examples python examples/use_cases/monthly_statistics.py
+uv run --extra examples python examples/use_cases/month/monthly_statistics.py
 
-# Concepts: exploratory plots, the Markov engine, rolling windows, leap days
+# A complete 8760-hour synthetic year of all three attributes, written to CSV (~4 min)
+uv run --extra examples python examples/use_cases/year/synthetic_year.py
+
+# Concepts: exploratory plots, rolling windows, leap days
 uv run python examples/concepts/example_exploratory_analysis.py
-uv run python examples/concepts/example_markov_generation.py
 uv run python examples/concepts/example_rolling_window.py
-uv run --extra examples python examples/concepts/example_synthetic_year.py   # ~80 s
 uv run python examples/concepts/example_leap_year_windows.py                 # no PVGIS needed
 ```
 

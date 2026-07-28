@@ -99,15 +99,20 @@ meteosynth/
 │   ├── concepts/            # How the package behaves (Paris 2011-2012)
 │   │   ├── example_exploratory_analysis.py
 │   │   ├── example_leap_year_windows.py
-│   │   ├── example_markov_generation.py
-│   │   ├── example_rolling_window.py
-│   │   └── example_synthetic_year.py
+│   │   └── example_rolling_window.py
 │   └── use_cases/           # Applied workflows (Heraklion 2010-2020)
-│       ├── day_envelope_pv.py      # One synthetic 21 May vs eleven real ones
-│       ├── day_envelope_temp.py
-│       ├── day_envelope_wind.py
-│       ├── synthetic_year.py       # 8760 hours x 3 attributes, written to CSV
-│       └── monthly_statistics.py   # Ensemble of synthetic Mays, reported as statistics
+│       ├── README.md               # Index over the three time scales
+│       ├── day/                    # Does a synthetic day look like a real one?
+│       │   ├── README.md
+│       │   ├── day_envelope_pv.py  # One synthetic 21 May vs eleven real ones
+│       │   ├── day_envelope_temp.py
+│       │   └── day_envelope_wind.py
+│       ├── month/                  # Does an ensemble vary like the real months?
+│       │   ├── README.md
+│       │   └── monthly_statistics.py  # Ensemble of synthetic Mays, as statistics
+│       └── year/                   # Produce a full series for downstream use
+│           ├── README.md
+│           └── synthetic_year.py   # 8760 hours x 3 attributes, written to CSV
 ├── src/
 │   └── meteosynth/          # Core Python library package
 │       ├── __init__.py      # Package public API exports

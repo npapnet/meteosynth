@@ -1,7 +1,7 @@
 """
 Compare a synthetic day against the cloud of days actually observed on that date.
 
-The three ``use_cases/day_envelope_*.py`` scripts ask the same question of three
+The three ``use_cases/day/day_envelope_*.py`` scripts ask the same question of three
 different quantities -- *does a synthetic 21 May look like a real 21 May?* -- so the
 machinery for answering it lives here and each script keeps only what is specific to
 its variable.

@@ -78,10 +78,10 @@ wrong one is the most common way to get a plausible-looking but meaningless answ
 | Days are | independent of each other | linked in order |
 | Answers | "What can a 21 May look like?" | "What does a whole May / year look like, in sequence?" |
 | Use it for | single-day questions, distributions of a daily quantity | anything where **order** matters: battery state, streaks of cloudy days, monthly and annual totals |
-| Example script | `use_cases/day_envelope_*.py` | `use_cases/synthetic_year.py` |
+| Example script | `use_cases/day/day_envelope_*.py` | `use_cases/year/synthetic_year.py` |
 
 You can also have an **ensemble of chained series** — call `generate_series` twelve times
-and you have twelve synthetic Mays (`use_cases/monthly_statistics.py`), or a hundred times
+and you have twelve synthetic Mays (`use_cases/month/monthly_statistics.py`), or a hundred times
 for a hundred synthetic years. That is the shape a real Monte-Carlo study takes.
 
 ```{note}
@@ -152,7 +152,7 @@ days" is `generate_series(..., n_days=1)` called 500 times, *not* one call with
 
 ## Reading an envelope figure
 
-The `use_cases/day_envelope_*.py` scripts all produce the same picture, so it is worth
+The `use_cases/day/day_envelope_*.py` scripts all produce the same picture, so it is worth
 learning once:
 
 | What you see | What it is |

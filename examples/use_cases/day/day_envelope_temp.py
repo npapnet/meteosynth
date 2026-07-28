@@ -28,7 +28,7 @@ The ensemble is written to ``examples/output/`` (git-ignored).
 
 Run with::
 
-    uv run --extra examples python examples/use_cases/day_envelope_temp.py
+    uv run --extra examples python examples/use_cases/day/day_envelope_temp.py
 
 Runtime: ~60 s on a warm cache.
 """
