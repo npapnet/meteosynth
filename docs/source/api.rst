@@ -45,7 +45,12 @@ Data Processing
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: meteosynth.metdata_pvgis
+.. automodule:: meteosynth.variables
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: meteosynth.adapters
    :members:
    :undoc-members:
    :show-inheritance:

@@ -18,6 +18,17 @@ a required step, so there is no on-disk schema to design or version, and no meta
 sidecar: the **column name is the provenance**. ``poa_global`` and ``poa_direct`` are
 different columns, and a frame always says which one it holds.
 
+Two PVGIS entry points
+----------------------
+:func:`fetch_pvgis` collects a real multi-year hourly record on the **plane of array**;
+:func:`fetch_pvgis_tmy` collects a Typical Meteorological Year on the **horizontal**.
+They are not interchangeable, and again the column names say so -- ``poa_global`` from
+one, ``ghi`` / ``dni`` / ``dhi`` from the other.
+
+Note that a TMY is what this package is an alternative *to*: it is built to be typical,
+so it has no bad years in it and offers one profile and one answer. It is here as a
+baseline to generate against, not as an input the generator is meant to be trained on.
+
 Provider naming
 ---------------
 ``SOURCE_RENAMES`` maps a provider's column names onto canonical ones. It is keyed
@@ -41,7 +52,13 @@ import pandas as pd
 from .constants import INDEX_COLS
 from .variables import get_spec, registered
 
-__all__ = ["SOURCE_RENAMES", "normalise", "validate_support", "fetch_pvgis"]
+__all__ = [
+    "SOURCE_RENAMES",
+    "normalise",
+    "validate_support",
+    "fetch_pvgis",
+    "fetch_pvgis_tmy",
+]
 
 #: Provider column name -> canonical name, keyed by source.
 #:
@@ -233,7 +250,10 @@ def fetch_pvgis(
         "Fetching PVGIS hourly data for (%.4f, %.4f), %d-%d, irradiance=%s",
         latitude, longitude, start, end, irradiance,
     )
-    data, _ = get_pvgis_hourly(
+    # Index rather than unpack, for the same reason fetch_pvgis_tmy does: pvlib has
+    # changed the arity of this reader across versions, and `data, _ = ...` silently
+    # pins us to whichever one is installed today.
+    result = get_pvgis_hourly(
         latitude=latitude,
         longitude=longitude,
         start=start,
@@ -241,6 +261,7 @@ def fetch_pvgis(
         components=needs_components,
         **kwargs,
     )
+    data = result[0]
 
     frame = normalise(_add_index_cols(data), source="pvgis")
 
@@ -261,6 +282,118 @@ def fetch_pvgis(
     if cache is not None:
         _write_cache(frame, cache)
         logging.info("Cached PVGIS data to %s", cache)
+
+    return frame
+
+
+def fetch_pvgis_tmy(
+    latitude: float,
+    longitude: float,
+    coerce_year: Optional[int] = None,
+    cache: Optional[Union[str, pathlib.Path]] = None,
+    **kwargs,
+) -> pd.DataFrame:
+    """
+    Fetch a PVGIS Typical Meteorological Year as a canonical frame.
+
+    Parameters
+    ----------
+    latitude, longitude : float
+        Site coordinates.
+    coerce_year : int, optional
+        Force every timestamp into this year. Defaults to ``None``, matching
+        ``pvlib`` -- see the note below on what that means for the ``year`` column.
+    cache : str or Path, optional
+        If given and the file exists, read from it instead of the network. If given and
+        it does not, write the fetched frame there.
+    **kwargs
+        Forwarded to :func:`pvlib.iotools.get_pvgis_tmy`.
+
+    Returns
+    -------
+    pd.DataFrame
+        Canonical frame with :data:`~meteosynth.constants.INDEX_COLS` and every
+        *registered* column PVGIS supplied -- ordinarily ``ghi``, ``dni``, ``dhi``,
+        ``temp_air`` and ``wind_speed``.
+
+    Raises
+    ------
+    ValueError
+        If the fetched data violates a spec's support.
+
+    Notes
+    -----
+    **The irradiance is horizontal, not plane-of-array.** TMY supplies ``ghi`` / ``dni``
+    / ``dhi``, which is a different quantity from the ``poa_*`` columns
+    :func:`fetch_pvgis` returns -- they differ by however much the array is tilted.
+    Transposing onto a plane is the caller's job; this function does not do it, and the
+    column names are what keep the two from being confused.
+
+    **A TMY has no single year, and ``coerce_year`` is not applied for you.** Each month
+    is taken from a different real year, so with the default ``coerce_year=None`` the
+    ``year`` column jumps between months. Measured on Heraklion (35.34, 25.14), the
+    twelve months came from nine distinct years::
+
+        month  1     2     3     4     5     6     7     8     9    10    11    12
+        year  2019  2015  2017  2008  2014  2020  2010  2006  2020  2017  2014  2009
+
+    That is harmless for the rolling-window training this package does -- it pools by
+    month and day, never by year -- but it makes
+    :meth:`~meteosynth.MetDataProcessor.describe_time_range` report a span that looks
+    wrong. Pass a year for a clean single-year calendar.
+
+    Rewriting the year silently was considered and rejected: it would destroy the record
+    of which real year each month came from, and this package declares rather than
+    infers.
+
+    Unlike :func:`fetch_pvgis` there is no component flag to choose -- TMY returns all
+    three irradiance columns at once, so every registered column is kept and PVGIS's
+    unregistered extras (``pressure``, ``wind_direction``, ``IR(h)``, …) fall out by
+    rule.
+
+    Requires ``pvlib``, imported lazily so the rest of the package does not depend on it.
+    """
+    if cache is not None:
+        cache = pathlib.Path(cache)
+        if cache.exists():
+            logging.info("Reading cached PVGIS TMY from %s", cache)
+            frame = _read_cache(cache)
+            validate_support(frame)
+            return frame
+
+    from pvlib.iotools import get_pvgis_tmy
+
+    logging.info(
+        "Fetching PVGIS TMY for (%.4f, %.4f), coerce_year=%s",
+        latitude, longitude, coerce_year,
+    )
+    # Index rather than unpack. pvlib has returned (data, months, inputs, metadata),
+    # (data, inputs, metadata) and (data, metadata) across versions; indexing works
+    # against every one of them and needs no version check.
+    result = get_pvgis_tmy(
+        latitude=latitude,
+        longitude=longitude,
+        coerce_year=coerce_year,
+        **kwargs,
+    )
+    data = result[0]
+
+    frame = normalise(_add_index_cols(data), source="pvgis")
+
+    keep = [col for col in frame.columns if col in registered()]
+    if not keep:
+        raise ValueError(
+            f"PVGIS TMY returned no registered columns (got {list(frame.columns)}). "
+            f"Registered: {registered()}."
+        )
+
+    # Drop the DatetimeIndex for the same reason fetch_pvgis does: the calendar is
+    # carried by INDEX_COLS, and an index-dependent frame would not survive a CSV cache.
+    frame = frame.loc[:, [*keep, *INDEX_COLS]].reset_index(drop=True)
+
+    if cache is not None:
+        _write_cache(frame, cache)
+        logging.info("Cached PVGIS TMY to %s", cache)
 
     return frame
 

@@ -18,8 +18,9 @@ Its primary target is **Monte-Carlo simulation of energy-project output and requ
   - Two selectable training strategies: by calendar month (`get_month_subset`) or by a **rolling ±n-day window** centred on a target day (`get_day_window_subset`).
 - **Seasonal day windows** (`meteosynth.day_window`):
   - A circular `all_leap` (CF-conventions `366_day`) calendar, so windows wrap across New Year and **Feb 29 is an ordinary day** — never discarded, and requestable as a generation target.
-- **PVGIS Integration**:
-  - Retrieve hourly or Typical Meteorological Year (TMY) data directly using the `pvlib` API (`meteosynth.metdata_pvgis`).
+- **PVGIS Integration** (`meteosynth.adapters`):
+  - `fetch_pvgis` retrieves a real multi-year hourly record on the plane of array; `fetch_pvgis_tmy` retrieves a Typical Meteorological Year on the horizontal. Both normalise to the canonical schema, validate against each column's physical support, and optionally cache to disk.
+  - Adapters are optional. The contract with the rest of the package is an ordinary DataFrame, so a user who already has data never goes through one.
 
 ---
 
@@ -121,14 +122,26 @@ year = dwg.generate_series(start=(1, 1), n_days=365, seed=1)   # (365, 24)
 > window buys *centring* and *smoothness*, not sample size. See
 > [`docs/design/completed/rolling-day-window.md`](docs/design/completed/rolling-day-window.md).
 
-Fetch real data from PVGIS with `meteosynth.metdata_pvgis`:
+Fetch real data from PVGIS with `meteosynth.adapters`:
 
 ```python
-from meteosynth.metdata_pvgis import fetch_pvgis_hourly, SITE_PARIS, save_hourly
+from meteosynth import MetDataProcessor
+from meteosynth.adapters import fetch_pvgis
 
-df = fetch_pvgis_hourly(start_year=2011, end_year=2012, **SITE_PARIS)
-save_hourly(df)   # caches to data/pvgis_hourly_data.xlsx
+# Paris, 2011-2012. Pass `cache=` and the file is written on the first call and
+# read on every later one -- collection is slow and networked, modelling is not.
+df = fetch_pvgis(48.8566, 2.3522, 2011, 2012, cache="data/paris_2011_2012.csv")
+mdp = MetDataProcessor(df)
 ```
+
+The frame comes back canonical: the four calendar columns plus `poa_global`, `temp_air`
+and `wind_speed`, validated against each column's physical support. Ask for a different
+irradiance component with `irradiance="direct"` — the emitted column keeps its specific
+name, so **the name records the choice** and no metadata sidecar is needed.
+
+A Typical Meteorological Year is `fetch_pvgis_tmy(48.8566, 2.3522, coerce_year=2023)`.
+Note it supplies *horizontal* irradiance (`ghi`, `dni`, `dhi`), not plane-of-array — a
+different quantity, which is why it gets different column names.
 
 ---
 

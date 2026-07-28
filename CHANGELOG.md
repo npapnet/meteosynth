@@ -53,6 +53,21 @@ Two project-specific conventions:
 - **`docs/source/concepts.md`** — foundational terminology in plain language (ensemble,
   realisation, envelope, coverage, P50/P90, support, π(x₀), …), first in the
   getting-started toctree.
+- **`adapters.fetch_pvgis_tmy`** — fetches a PVGIS Typical Meteorological Year as a
+  canonical frame, through the same normalise / validate / cache path as its hourly
+  sibling. Its irradiance is **horizontal** (`ghi`, `dni`, `dhi`), not plane-of-array, and
+  the column names are what keep the two from being confused. `coerce_year` is passed
+  through rather than defaulted: a TMY stitches each month from a different real year, and
+  silently rewriting that would destroy which year each month came from.
+- **`IRRADIANCE_HORIZONTAL`**, with `ghi`, `dni` and `dhi` registered against it. A
+  distinct spec object from `IRRADIANCE` despite identical support and units, because
+  `long_name` is quoted back to the user by `validate_support` — naming a horizontal
+  quantity "plane-of-array" would misinform exactly when someone is debugging where their
+  numbers came from. Without the registration a TMY frame would have passed the boundary
+  check unvalidated and then lost its irradiance entirely at ingestion, since
+  `MetDataProcessor` trims to the registered set.
+- **`meteosynth.adapters` and `meteosynth.variables` in the API docs.** Neither had an
+  `automodule` entry, so the collection helpers and the spec registry were undocumented.
 
 ### Changed
 
@@ -70,8 +85,34 @@ Two project-specific conventions:
   `CHORE-1` folds into `FIX-1` because they are the same experiment, and `PERF-1` follows
   `FIX-1` because a precomputed CDF grid must encode whatever boundary correction lands.
 
+### Fixed
+
+- **PVGIS fetching worked in neither module.** `pvlib` changed the arity of its PVGIS
+  readers; `metdata_pvgis.fetch_pvgis_hourly` unpacked three values and
+  `fetch_pvgis_tmy` four, against the two that pvlib 0.15.2 returns, so both raised
+  `ValueError` on every call. Nothing in the package depended on them, which is why the
+  suite stayed green — but `README.md` and `docs/source/quickstart.md` both taught the
+  broken call, so a new user's first contact with real data failed.
+
+  `adapters.fetch_pvgis` turned out to share the fragility in weaker form: `data, _ = ...`
+  unpacks exactly two, which happens to match the installed pvlib and would break on the
+  next change. Both fetchers now **index rather than unpack**, which is arity-agnostic and
+  needs no version check.
+
+  Guarded by a parametrised test that stubs pvlib returning 2-, 3- and 4-tuples and
+  asserts both fetchers work against all three. That tests the property directly, with no
+  recorded response to rot and no network dependency.
+
 ### Removed
 
+- **`metdata_pvgis.py`.** It overlapped `adapters.fetch_pvgis`, which is the newer,
+  spec-aware path — it normalises, validates against `support`, emits a canonical frame,
+  and imports pvlib lazily rather than at module import. Everything the module held is
+  covered elsewhere: `fetch_pvgis_hourly` → `adapters.fetch_pvgis`; `add_time_columns` →
+  `adapters._add_index_cols`; `save_hourly` → `adapters._write_cache`;
+  `SITE_CRETE`/`SITE_PARIS` → `examples/tools/site_data.py`; `fetch_pvgis_tmy` → the new
+  adapter function above. Its `DATA_DIR`/`XLSX_FNAME` pointed at a pre-move cache path and
+  went with it.
 - **Two concept scripts that duplicated a use case.**
   `concepts/example_markov_generation.py` (a month subset, ten profiles, no comparison)
   is superseded by the `day_envelope_*` scripts, which ask the same question against real

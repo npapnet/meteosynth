@@ -34,7 +34,7 @@ The primary application of `meteosynth` is **Monte-Carlo simulation for renewabl
   - **Decoupled Variable Specs**: Physical constraints (`support`, `units`, `long_name`) are registered centrally in `meteosynth.variables` independently of dataset-specific column names.
   - **Date-Indexed Pair Alignment**: Daily wide-format restructuring keys transition pairs on calendar dates, eliminating silent mispairing bugs caused by dataset re-sorting.
   - **Lazy LRU-Cached Generators**: `DayWindowGenerator` dynamically instantiates daily models behind an LRU cache, permitting full-year simulations without excessive memory consumption.
-  - **PVGIS API Integration**: Built-in wrappers (`meteosynth.metdata_pvgis`) interface with `pvlib.iotools` for direct fetching and caching of hourly and TMY meteorological data.
+  - **PVGIS API Integration**: `meteosynth.adapters` interfaces with `pvlib.iotools` to fetch hourly (`fetch_pvgis`, plane-of-array) and TMY (`fetch_pvgis_tmy`, horizontal) data, normalising each to the canonical schema and validating against registered support before it reaches the core. Adapters are an optional convenience, not a required layer.
 
 ---
 
@@ -43,9 +43,9 @@ The primary application of `meteosynth` is **Monte-Carlo simulation for renewabl
 ```mermaid
 flowchart TD
     subgraph Data Source & Ingestion
-        A[PVGIS Web API / File] -->|pvlib.iotools| B[metdata_pvgis]
-        C[Custom DataFrame / CSV] -->|adapters.py| D[Standardized Long DataFrame]
-        B --> D
+        A[PVGIS Web API / File] -->|pvlib.iotools| B["adapters.fetch_pvgis<br/>adapters.fetch_pvgis_tmy"]
+        C[Custom DataFrame / CSV] -->|adapters.normalise| D[Standardized Long DataFrame]
+        B -->|validate_support| D
     end
 
     subgraph Data Processing & Windowing
@@ -125,7 +125,7 @@ meteosynth/
 │       │   ├── markov_chain_simulator_continuous.py # Binned 1D KDE simulator
 │       │   └── markov_chain_simulator_discrete.py   # Discrete transition matrix simulator
 │       ├── met_data_processor.py # DataFrame restructuring & window slicing
-│       ├── metdata_pvgis.py # PVGIS data fetching & local Excel/parquet caching
+│       ├── variables.py    # VariableSpec registry: support, units, long names
 │       ├── py.typed          # PEP 561 static type marker
 │       ├── sup_plot_lib.py  # Visual diagnostics & KDE surface plotting
 │       └── variables.py     # VariableSpec registry & physical support bounds
@@ -156,8 +156,8 @@ meteosynth/
 | [`generators.py`](../../src/meteosynth/generators.py) | High-level daily series orchestration. `EnvSeriesGenerator` manages 23 hourly transition simulators + 1 initial distribution. `DayWindowGenerator` manages rolling window generation with an LRU cache. Also builds date-aligned transition pairs (`build_transition_pairs`, `build_cross_midnight_pairs`). |
 | [`day_window.py`](../../src/meteosynth/day_window.py) | Pure-function circular 366-day `all_leap` calendar arithmetic (`day_slot`, `window_slots`, `circular_delta`, `slot_to_month_day`). Enables New Year wrapping and leap-year treatment without pandas timestamp overhead. |
 | [`met_data_processor.py`](../../src/meteosynth/met_data_processor.py) | Handles ingestion validation (`validate_columns`), wide-format pivot (`convert_to_daily_wide`), and training data slicing by calendar month (`get_month_subset`) or centered day windows (`get_day_window_subset`). |
-| [`metdata_pvgis.py`](../../src/meteosynth/metdata_pvgis.py) | Interfaces with `pvlib.iotools` to fetch hourly or TMY solar/weather data for specified latitude/longitude coordinates, with local file caching (`save_hourly`, `load_hourly`). |
-| [`adapters.py`](../../src/meteosynth/adapters.py) | Input source adapters converting external datasets into standardized `meteosynth` long frames. |
+| [`adapters.py`](../../src/meteosynth/adapters.py) | Optional collection helpers. `fetch_pvgis` (hourly, plane-of-array) and `fetch_pvgis_tmy` (TMY, horizontal) call `pvlib.iotools` and cache by file extension; `normalise` maps provider column names to canonical ones per source; `validate_support` turns unit-confusion bugs into an error at the boundary. |
+| [`variables.py`](../../src/meteosynth/variables.py) | The spec registry: `VariableSpec` (support, units, long_name) and the shipped registrations. A column is modellable if and only if it has a spec, which is what makes the package variable-agnostic. |
 | [`constants.py`](../../src/meteosynth/constants.py) | Package constants including index column names (`year`, `month`, `day`, `hour`) and shipped attribute sets. |
 | [`sup_plot_lib.py`](../../src/meteosynth/sup_plot_lib.py) | Visual diagnostic functions for plotting fitted 2D KDE surfaces, conditional CDFs, and synthetic time-series comparisons. |
 | [`markov_implementations/`](../../src/meteosynth/markov_implementations) | Alternative Markov models: `ContinuousMarkovChainSimulator` (binned 1D KDE) and `MarkovChainSimulatorDiscrete` (binned matrix transitions). |

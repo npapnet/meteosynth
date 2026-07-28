@@ -41,10 +41,16 @@ def modelled_attrs() -> tuple[str, ...]:
 #: nothing**: :func:`meteosynth.variables.registered` is what generators validate
 #: against, and it grows when a user calls :func:`meteosynth.variables.register`.
 SHIPPED_ATTRS: tuple[str, ...] = (
+    # Plane-of-array, as PVGIS hourly supplies it.
     "poa_global",
     "poa_direct",
     "poa_sky_diffuse",
     "poa_ground_diffuse",
+    # Horizontal, as PVGIS TMY and most reanalysis products supply it. Same physical
+    # quantity on a different surface, so the names -- and the specs -- stay distinct.
+    "ghi",
+    "dni",
+    "dhi",
     "temp_air",
     "wind_speed",
 )

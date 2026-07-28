@@ -2,6 +2,7 @@ from meteosynth import adapters
 from meteosynth.constants import INDEX_COLS, SHIPPED_ATTRS, modelled_attrs
 from meteosynth.variables import (
     IRRADIANCE,
+    IRRADIANCE_HORIZONTAL,
     TEMP_AIR,
     WIND_SPEED,
     VariableSpec,
@@ -43,6 +44,7 @@ __all__ = [
     "modelled_attrs",
     "VariableSpec",
     "IRRADIANCE",
+    "IRRADIANCE_HORIZONTAL",
     "TEMP_AIR",
     "WIND_SPEED",
     "get_spec",

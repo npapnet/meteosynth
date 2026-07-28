@@ -12,7 +12,13 @@ import pandas as pd
 import pytest
 
 from meteosynth import adapters
-from meteosynth.adapters import SOURCE_RENAMES, fetch_pvgis, normalise, validate_support
+from meteosynth.adapters import (
+    SOURCE_RENAMES,
+    fetch_pvgis,
+    fetch_pvgis_tmy,
+    normalise,
+    validate_support,
+)
 
 
 def _canonical_frame(n=48, **overrides):
@@ -123,10 +129,18 @@ def test_irradiance_choice_is_validated():
         fetch_pvgis(48.86, 2.35, 2011, 2012, irradiance="infrared")
 
 
-@pytest.fixture
-def stub_pvlib(monkeypatch):
-    """A fake pvlib.iotools returning either global or components, as PVGIS does."""
+def _install_stub_pvlib(monkeypatch, arity=2):
+    """Install a fake ``pvlib.iotools`` whose readers return ``arity`` values.
+
+    ``arity`` is a parameter because that is exactly what broke: pvlib has returned
+    4-, 3- and 2-tuples from its PVGIS readers across versions, and the deleted
+    ``metdata_pvgis`` module unpacked fixed shapes. The data is always ``result[0]``.
+    """
     calls = {}
+
+    def _pad(data):
+        """Return ``data`` plus (arity - 1) trailing metadata values."""
+        return (data, *({} for _ in range(arity - 1)))
 
     def get_pvgis_hourly(latitude, longitude, start, end, components=True, **kwargs):
         calls["components"] = components
@@ -140,15 +154,37 @@ def stub_pvlib(monkeypatch):
             data["poa_ground_diffuse"] = np.zeros(len(index))
         else:
             data["poa_global"] = np.clip(np.linspace(0, 800, len(index)), 0, None)
-        return data, {}
+        return _pad(data)
+
+    def get_pvgis_tmy(latitude, longitude, coerce_year=None, **kwargs):
+        calls["coerce_year"] = coerce_year
+        year = coerce_year if coerce_year is not None else 2005
+        index = pd.date_range(f"{year}-01-01", periods=8760, freq="h")
+        data = pd.DataFrame(index=index)
+        # Horizontal, not plane-of-array -- what PVGIS TMY actually supplies.
+        data["ghi"] = np.clip(np.linspace(0, 900, len(index)), 0, None)
+        data["dni"] = np.clip(np.linspace(0, 800, len(index)), 0, None)
+        data["dhi"] = np.clip(np.linspace(0, 200, len(index)), 0, None)
+        data["temp_air"] = np.linspace(5, 30, len(index))
+        data["wind_speed"] = np.linspace(1, 9, len(index))
+        # An unregistered extra, to prove trimming happens by rule.
+        data["pressure"] = np.full(len(index), 101325.0)
+        return _pad(data)
 
     module = types.ModuleType("pvlib.iotools")
     module.get_pvgis_hourly = get_pvgis_hourly
+    module.get_pvgis_tmy = get_pvgis_tmy
     parent = types.ModuleType("pvlib")
     parent.iotools = module
     monkeypatch.setitem(sys.modules, "pvlib", parent)
     monkeypatch.setitem(sys.modules, "pvlib.iotools", module)
     return calls
+
+
+@pytest.fixture
+def stub_pvlib(monkeypatch):
+    """A fake pvlib.iotools returning either global or components, as PVGIS does."""
+    return _install_stub_pvlib(monkeypatch)
 
 
 def test_default_collects_global_irradiance(stub_pvlib):
@@ -223,3 +259,112 @@ def test_adapters_are_optional(synthetic_mdp):
     """Use case B: the user already has data and no adapter is involved at all."""
     assert synthetic_mdp.met_data is not None
     assert "temp_air" in synthetic_mdp.met_data.columns
+
+
+# --- arity independence -------------------------------------------------------------
+#
+# The defect this guards against: pvlib changed how many values its PVGIS readers
+# return, and the old metdata_pvgis module unpacked fixed shapes, so both of its fetch
+# functions raised on every call. Nothing depended on them, so the suite stayed green
+# and it went unnoticed until someone followed the README.
+#
+# Testing the *property* -- that the data is result[0] whatever else comes back -- beats
+# testing against a recorded response: there is no fixture to rot and no network.
+
+@pytest.mark.parametrize("arity", [2, 3, 4])
+def test_hourly_survives_any_pvlib_return_arity(monkeypatch, arity):
+    _install_stub_pvlib(monkeypatch, arity=arity)
+
+    frame = fetch_pvgis(48.86, 2.35, 2011, 2011)
+
+    assert "poa_global" in frame.columns
+    assert len(frame) == 72
+
+
+@pytest.mark.parametrize("arity", [2, 3, 4])
+def test_tmy_survives_any_pvlib_return_arity(monkeypatch, arity):
+    _install_stub_pvlib(monkeypatch, arity=arity)
+
+    frame = fetch_pvgis_tmy(35.34, 25.14)
+
+    assert "ghi" in frame.columns
+    assert len(frame) == 8760
+
+
+# --- TMY ----------------------------------------------------------------------------
+
+def test_tmy_irradiance_is_horizontal_not_plane_of_array(stub_pvlib):
+    """Different quantity, different names -- they differ by however much a panel tilts.
+
+    Silently interchanging them is the factor-of-two error the naming scheme exists to
+    prevent, in the plane dimension rather than the component one.
+    """
+    frame = fetch_pvgis_tmy(35.34, 25.14)
+
+    assert {"ghi", "dni", "dhi"} <= set(frame.columns)
+    assert not any(col.startswith("poa_") for col in frame.columns)
+
+
+def test_tmy_drops_unregistered_columns_by_rule(stub_pvlib):
+    """PVGIS supplies pressure and friends; a column is kept iff it has a spec."""
+    frame = fetch_pvgis_tmy(35.34, 25.14)
+
+    assert "pressure" not in frame.columns
+    assert set(frame.columns) == {"ghi", "dni", "dhi", "temp_air", "wind_speed",
+                                  "year", "month", "day", "hour"}
+
+
+def test_tmy_frame_is_canonical_and_ingestible(stub_pvlib):
+    """The whole point of registering ghi/dni/dhi: the irradiance survives ingestion."""
+    from meteosynth.met_data_processor import MetDataProcessor
+
+    frame = fetch_pvgis_tmy(35.34, 25.14, coerce_year=2023)
+    for col in ("year", "month", "day", "hour"):
+        assert col in frame.columns
+
+    mdp = MetDataProcessor(frame)
+    assert "ghi" in mdp.met_data.columns
+
+
+def test_tmy_coerce_year_is_passed_through_not_applied_for_you(stub_pvlib):
+    """Rewriting the year silently would destroy which real year each month came from."""
+    fetch_pvgis_tmy(35.34, 25.14)
+    assert stub_pvlib["coerce_year"] is None
+
+    fetch_pvgis_tmy(35.34, 25.14, coerce_year=2023)
+    assert stub_pvlib["coerce_year"] == 2023
+
+
+def test_tmy_cache_round_trips(stub_pvlib, tmp_path):
+    cache = tmp_path / "tmy.csv"
+
+    first = fetch_pvgis_tmy(35.34, 25.14, cache=cache)
+    assert cache.exists()
+
+    stub_pvlib.clear()
+    second = fetch_pvgis_tmy(35.34, 25.14, cache=cache)
+
+    assert "coerce_year" not in stub_pvlib      # the network path was not taken
+    pd.testing.assert_frame_equal(first, second, check_dtype=False)
+
+
+def test_horizontal_irradiance_is_actually_validated(stub_pvlib, tmp_path):
+    """Before ghi was registered this slipped through unchecked, which is the bug.
+
+    validate_support skips unregistered columns, so a TMY frame used to carry its
+    irradiance past the boundary with no check at all -- and then lose it entirely at
+    ingestion, since MetDataProcessor trims to the registered set.
+    """
+    cache = tmp_path / "tmy.csv"
+    fetch_pvgis_tmy(35.34, 25.14, cache=cache)
+
+    corrupted = pd.read_csv(cache)
+    corrupted.loc[0, "ghi"] = -50.0
+    corrupted.to_csv(cache, index=False)
+
+    with pytest.raises(ValueError, match="below its physical lower bound") as excinfo:
+        fetch_pvgis_tmy(35.34, 25.14, cache=cache)
+
+    message = str(excinfo.value)
+    assert "ghi" in message
+    assert "Horizontal-plane irradiance" in message    # the honest long_name, not POA

@@ -12,8 +12,7 @@ use; within a group, most significant first.
 | ID | Item | Status |
 | :--- | :--- | :--- |
 | [FIX-1](#fix-1--generated-irradiance-is-systematically-too-high) | Generated irradiance is systematically too high | open |
-| [FIX-2](#fix-2--degeneracy-detection-uses-an-exact-float-comparison) | Degeneracy detection uses an exact float comparison | open · blocks VISION-1 |
-| [FIX-3](#fix-3--metdata_pvgis-unpacks-pvlib-return-values-that-no-longer-exist) | `metdata_pvgis` unpacks stale `pvlib` return values | open · **start here** |
+| [FIX-2](#fix-2--degeneracy-detection-uses-an-exact-float-comparison) | Degeneracy detection uses an exact float comparison | open · **start here** · blocks VISION-1 |
 | [PERF-1](#perf-1--sampling-re-evaluates-the-kde-on-every-call) | Sampling re-evaluates the KDE on every call | open |
 | [PERF-2](#perf-2--four-copies-of-the-same-data-in-every-simulator) | Four copies of the same data in every simulator | open · low priority |
 | [PERF-3](#perf-3--fitted-generators-cannot-be-pickled-at-the-default-bandwidth) | Fitted generators cannot be pickled | open · low priority |
@@ -29,26 +28,28 @@ use; within a group, most significant first.
 | [CHORE-4](#chore-4--bring-docssource-back-in-line-with-the-repo) | Bring `docs/source/` back in line with the repo | open · do last |
 
 The [Inbox](#inbox--not-yet-triaged) is empty. `INBOX-1` … `INBOX-7` were triaged on
-2026-07-27: two landed (see [`CHANGELOG.md`](CHANGELOG.md)), one merged into `FIX-3`,
-the rest became `FEAT-3`, `FEAT-4`, `FEAT-5`, `CHORE-3` and `CHORE-4`.
+2026-07-27: two landed (see [`CHANGELOG.md`](CHANGELOG.md)), one merged into the former
+`FIX-3`, the rest became `FEAT-3`, `FEAT-4`, `FEAT-5`, `CHORE-3` and `CHORE-4`.
 
 ## Order of work
 
 Groups are ordered by how much they block real use; this is the order to *take them in*,
 which is not the same thing.
 
-1. **FIX-3** — the package's documented path for fetching real data raises on every
-   call, and `quickstart.md` teaches it. Broken in the first thing a new user does.
-2. **FIX-2** — silent NaN, bounded fix, unblocks VISION-1.
-3. **FIX-1 with CHORE-1 folded in** — one investigation, not two: the Paris-vs-Heraklion
+1. **FIX-2** — silent NaN, bounded fix, unblocks VISION-1.
+2. **FIX-1 with CHORE-1 folded in** — one investigation, not two: the Paris-vs-Heraklion
    gap *is* the sample-size question CHORE-1 asks. Land the calibration test first, or
    no attempted fix is measurable.
-4. **PERF-1** — after FIX-1, not before: a precomputed CDF grid has to encode whatever
+3. **PERF-1** — after FIX-1, not before: a precomputed CDF grid has to encode whatever
    boundary correction FIX-1 lands, so doing it first means doing it twice.
-5. **FEAT-2 (1)**, then **FEAT-1**, then **FEAT-4** and **FEAT-5**, which both need it.
-6. **CHORE-3**, then **CHORE-4** last, so the docs pass is one edit rather than three.
+4. **FEAT-2 (1)**, then **FEAT-1**, then **FEAT-4** and **FEAT-5**, which both need it.
+5. **CHORE-3**, then **CHORE-4** last, so the docs pass is one edit rather than three.
 
 **FEAT-3** is independent of all of it and can slot in anywhere.
+
+*`FIX-3` (stale `pvlib` unpacking) landed 2026-07-28 and is folded into
+[`CHANGELOG.md`](CHANGELOG.md). `CHORE-4` shrank as a result — the broken quickstart
+snippet went with it.*
 
 ---
 
@@ -183,59 +184,6 @@ the output is finite.
 
 Guard separately against the underlying `0/0`: if the joint density sums to ~0 that is
 unrecoverable and should raise with a clear message rather than return NaN.
-
----
-
-## FIX-3 — `metdata_pvgis` unpacks `pvlib` return values that no longer exist
-
-**Status:** open · **Impact:** both fetch functions raise on every call, and the
-documentation teaches one of them · **Effort:** one line each, plus a docs snippet
-
-`pvlib` changed the arity of its PVGIS readers. `src/meteosynth/metdata_pvgis.py` still
-unpacks the old shapes, so with the pinned `pvlib` (0.15.2, verified 2026-07-27) neither
-function can run:
-
-| function | line | unpacks | `pvlib` 0.15.2 returns | result |
-|---|---|---|---|---|
-| `fetch_pvgis_hourly` | `metdata_pvgis.py:81` | `data, _inputs, _metadata` | `(data, meta)` | `ValueError: not enough values to unpack (expected 3, got 2)` |
-| `fetch_pvgis_tmy` | `metdata_pvgis.py:113` | `tmy_data, _months, _inputs, tmy_meta` | `(data, meta)` | same, expected 4 got 2 |
-
-Nothing in the package depends on either — which is why the test suite is green and this
-went unnoticed. `adapters.fetch_pvgis` already does it correctly (`data, _ = ...`,
-`adapters.py:236`), and `examples/tools/site_data.py` deliberately indexes `result[0]`
-rather than unpacking, so it works against either arity.
-
-**The documentation is the reason this is first in the order of work.**
-`docs/source/quickstart.md:144-151` — the section titled *"Fetching real data from
-PVGIS"* — teaches exactly the broken call, and points at the pre-move cache path
-`data/pvgis_hourly_data.xlsx`:
-
-```python
-from meteosynth.metdata_pvgis import fetch_pvgis_hourly, SITE_PARIS, save_hourly
-df = fetch_pvgis_hourly(start_year=2011, end_year=2012, **SITE_PARIS)
-save_hourly(df)   # caches to data/pvgis_hourly_data.xlsx
-```
-
-So a new user's first contact with real data fails. That snippet is fixed here rather
-than in CHORE-4, because it is the same defect and should not wait for a docs pass.
-*(Was INBOX-3's first defect, merged 2026-07-27.)*
-
-### Fix
-
-Index instead of unpacking (`result = get_pvgis_hourly(...); data = result[0]`), matching
-`site_data.py`. That is arity-agnostic and needs no version check. Add a smoke test
-calling both functions against a recorded response, so a future `pvlib` change is caught
-by CI rather than by a user.
-
-Then repoint `quickstart.md:144-151` at whatever survives that decision, and at a cache
-path that exists.
-
-Worth deciding at the same time: **whether `metdata_pvgis` should exist at all.** It
-overlaps `adapters.fetch_pvgis`, which is the newer, spec-aware path (it normalises,
-validates against `support`, and emits a canonical frame). If the module stays it should
-delegate to the adapter rather than call `pvlib` a second, differently-broken way.
-Deleting it is the cleaner answer and makes the quickstart fix a rewrite rather than a
-patch — decide before touching the docs, not after.
 
 ---
 
@@ -536,24 +484,27 @@ what FEAT-1 revisits, which is why this waits on it.
 
 ## CHORE-4 — Bring `docs/source/` back in line with the repo
 
-**Status:** open · **Do last**, after FIX-3, FEAT-1 and CHORE-3
+**Status:** open · **Do last**, after FEAT-1 and CHORE-3
 
-**Assessment.** Less drift than feared — `quickstart.md` and `workflow.md` already
-describe π(x₀), `generate_series` and the registry. What remains, after the 2026-07-27
-examples reorganisation repointed every stale path:
+**Assessment.** Less drift than feared, and less again now. `quickstart.md` and
+`workflow.md` already describe π(x₀), `generate_series` and the registry; the 2026-07-27
+examples reorganisation repointed every stale path; and the 2026-07-28 `FIX-3` work
+rewrote the PVGIS sections of `quickstart.md` and `README.md` and put `adapters` and
+`variables` into `api.rst`, neither of which had been in the API docs at all.
 
-- **The broken snippet moved to FIX-3**, where it belongs: `quickstart.md:144-151`
-  teaches `fetch_pvgis_hourly` / `save_hourly`, which raise on every call. It is a defect,
-  not drift, and should not wait for this pass.
+What is left:
+
 - **No page documents the on-disk format** (CHORE-3) — add one once CHORE-3 decides
   what it says.
 - **`examples.md` still carries the walk-through inline.** Now that every use-case
   folder has its own README, decide whether that page should summarise and link rather
   than duplicate — two places to update is how it drifted the first time.
+- **`workflow.md` has not been re-read** since the registry gained `ghi`/`dni`/`dhi`.
+  Check whether it still describes the shipped set correctly.
 
 Do this pass *after* the items it depends on, so it is one edit rather than three.
 
-*(Was INBOX-3, minus the quickstart defect merged into FIX-3.)*
+*(Was INBOX-3. The quickstart defect went to FIX-3 and landed with it.)*
 
 ---
 

@@ -144,10 +144,37 @@ With only two years of data both strategies pool ~62 days, so the window buys
 ## Fetching real data from PVGIS
 
 ```python
-from meteosynth.metdata_pvgis import fetch_pvgis_hourly, SITE_PARIS, save_hourly
+from meteosynth import MetDataProcessor
+from meteosynth.adapters import fetch_pvgis
 
-df = fetch_pvgis_hourly(start_year=2011, end_year=2012, **SITE_PARIS)
-save_hourly(df)   # caches to data/pvgis_hourly_data.xlsx
+# Paris, 2011-2012. The cache file is written on the first call and read on every
+# later one, so collection happens once.
+df = fetch_pvgis(48.8566, 2.3522, 2011, 2012, cache="data/paris_2011_2012.csv")
+mdp = MetDataProcessor(df)
+```
+
+You get a canonical frame — the four calendar columns plus `poa_global`, `temp_air` and
+`wind_speed` — already validated against each column's physical support, so a unit error
+at the boundary (kW/m² read as W/m², °F as °C) raises here rather than surfacing months
+later as a plausible-looking synthetic series.
+
+PVGIS returns *either* global plane-of-array irradiance *or* its three components, never
+both. `irradiance="global"` is the default; pass `"direct"`, `"sky_diffuse"` or
+`"ground_diffuse"` for a component. The emitted column keeps its specific name, so the
+name itself records what was collected.
+
+```{note}
+`fetch_pvgis_tmy` fetches a Typical Meteorological Year instead. Its irradiance is
+**horizontal** (`ghi`, `dni`, `dhi`), not plane-of-array — a different quantity, hence
+different column names. Pass `coerce_year=` for a clean single-year calendar; a TMY
+stitches each month from a different real year, so otherwise the `year` column jumps.
+```
+
+```{note}
+Adapters are optional. The contract with the rest of the package is an ordinary
+DataFrame, so if you already have data, hand it straight to `MetDataProcessor` and no
+adapter is involved at all. Register a spec for any column you want to model that the
+package does not ship — see {doc}`workflow`.
 ```
 
 ## Running the test suite
