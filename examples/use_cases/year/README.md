@@ -47,5 +47,7 @@ year_heraklion_2023_heatmap.png       only when PLOT_HEATMAP is True
 The monthly summary is the first thing to look at before using the file: individual
 months wander by a degree or two and should, since this is one draw and not a
 climatology. It is the **annual totals** and the **shape correlation** that have to hold
-up. Absolute irradiance magnitudes are uncalibrated — the generator overshoots observed
-daily totals (see `FIX-1` in `TODOs.md`); the seasonal shape is sound.
+up. Absolute irradiance magnitudes **are** calibrated — measured 2026-07-28, the mean daily
+total sits within 0.6 % of the pool the generator was fitted to. The known defect is the
+**overcast tail**, which is under-produced (see `FIX-1` in `TODOs.md`), so a synthetic year
+holds fewer very dark days than the record does.

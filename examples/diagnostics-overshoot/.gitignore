@@ -3,3 +3,7 @@
 results/raw/
 results/*.log
 figures/
+
+# The repo-root .gitignore excludes *.csv wholesale, which would silently swallow the
+# summary tables this folder exists to produce. Re-include them explicitly.
+!results/summary_*.csv

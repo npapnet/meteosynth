@@ -1,9 +1,9 @@
 """
 Step 2 -- run every configuration and write the raw numbers to disk.
 
-One configuration is *(training-set size k, year-subset draw, calendar day)*. For each,
-this fits a generator on that year subset, draws ``n`` synthetic days for the target
-date, collects the observed days the model was trained on, and writes both out.
+One configuration is *(calendar day, window half-width, bandwidth)*. For each, this fits
+a generator on the pooled window from the **full** record, draws ``n`` synthetic days,
+collects the observed days the model was trained on, and writes both out.
 
 Nothing is analysed here. Step 2 produces evidence; :mod:`step3_analyse` reads it back
 from disk and interprets it. Keeping the two apart means any check made by hand against
@@ -12,17 +12,19 @@ the CSVs is a check against exactly what the analysis saw.
 Run::
 
     uv run python examples/diagnostics-overshoot/step2_simulate.py
-    uv run python examples/diagnostics-overshoot/step2_simulate.py --n 500
+    uv run python examples/diagnostics-overshoot/step2_simulate.py --n 200
     uv run python examples/diagnostics-overshoot/step2_simulate.py --resume
 
 Design notes worth knowing when reading the output:
 
-* **Year subsets are nested.** For a given draw index the k=3 subset is a subset of the
-  k=9 one, which is a subset of the full record. The size effect is therefore a
-  *within-draw* comparison, not a comparison between unrelated year sets.
-* **Common random numbers.** The seed depends on (day, draw) but **not** on k, so the
-  same stochastic draws drive every size. Much of the Monte-Carlo noise cancels when
-  sizes are compared.
+* **The pooled window is both the training data and the reference.** The model is fitted
+  to exactly the observed days written to ``observed_daily.csv``, so the comparison target
+  is a known quantity rather than an estimate of one. There is no reference file, and no
+  detrending: run 1 needed three references because it was aiming at a calendar date the
+  training pool only approximates.
+* **One training set.** The whole record, every configuration. Run 1's k-sweep found no
+  dependence on record length, and the question here is how the shipped code behaves, not
+  how it degrades.
 """
 
 from __future__ import annotations
@@ -30,6 +32,7 @@ from __future__ import annotations
 import argparse
 import json
 import time
+from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -42,15 +45,16 @@ from meteosynth.variables import get_spec
 
 from tools.envelope import day_matrix  # noqa: E402  (needs cfg's sys.path insert)
 
+
 def signed_circular_delta(slots: np.ndarray, centre: int) -> np.ndarray:
     """
     **Signed** offset from the centre slot, negative before and positive after.
 
     ``meteosynth.day_window.circular_delta`` is deliberately *unsigned* -- it answers
-    "how far apart", which is what window selection needs. Detrending needs "which
-    side", because a quadratic fitted against ``|offset|`` cannot represent a seasonal
-    trend at all: it is symmetric by construction, so it folds a rising season and a
-    falling one onto the same curve. Hence this local helper rather than the library's.
+    "how far apart", which is what window selection needs. Anything fitting a trend
+    across the window needs "which side", because a curve fitted against ``|offset|``
+    folds a rising season and a falling one onto each other. Run 1 was bitten by exactly
+    that, so the helper stays, and the symmetry self-check below guards it.
     """
     half = DAYS_IN_YEAR // 2
     return np.mod(np.asarray(slots) - centre + half, DAYS_IN_YEAR) - half
@@ -58,11 +62,10 @@ def signed_circular_delta(slots: np.ndarray, centre: int) -> np.ndarray:
 
 RAW_FILES = {
     "config_index": "config_index.csv",
-    "observed_daily": "observed_daily_totals.csv",
-    "synthetic_daily": "synthetic_daily_totals.csv",
+    "observed_daily": "observed_daily.csv",
+    "synthetic_daily": "synthetic_daily.csv",
     "observed_hourly": "observed_hourly.csv",
     "synthetic_hourly": "synthetic_hourly.csv",
-    "references": "references.csv",
 }
 
 
@@ -71,97 +74,28 @@ RAW_FILES = {
 # ======================================================================================
 
 
-def build_configs(
-    years: list[int], days: list[tuple[int, int]], n_draws: int
-) -> list[dict]:
-    """
-    Enumerate every configuration, with its year subset and seed already resolved.
-
-    Year subsets are **nested within a draw**: one random permutation of the record's
-    years per draw index, then the first k of it. So draw 2's three-year subset sits
-    inside draw 2's nine-year subset, and the size comparison is paired.
-
-    The full record admits only one subset, so it is run once however many draws the
-    smaller sizes get.
-    """
-    sizes = cfg.training_sizes(len(years))
-    n_years = len(years)
-
-    # One permutation per draw, drawn from a stream that depends only on the draw index
-    # -- so the nesting is reproducible and independent of which sizes are run.
-    permutations = {
-        draw: np.random.default_rng(
-            np.random.SeedSequence(cfg.MASTER_SEED, spawn_key=(1, draw))
-        ).permutation(years)
-        for draw in range(n_draws)
-    }
-
+def build_configs() -> list[dict]:
+    """Enumerate every configuration, with its seed already resolved."""
     configs: list[dict] = []
-    for month, day in days:
-        day_index = cfg.DAYS.index((month, day)) if (month, day) in cfg.DAYS else 0
-        for k in sizes:
-            draws = [0] if k == n_years else list(range(n_draws))
-            for draw in draws:
-                subset = sorted(int(y) for y in permutations[draw][:k])
-                configs.append(
-                    {
-                        "config_id": cfg.config_id(k, draw, month, day),
-                        "k": k,
-                        "draw": draw,
-                        "month": month,
-                        "day": day,
-                        "years": subset,
-                        # Seed depends on (day, draw) but NOT on k: common random
-                        # numbers across sizes.
-                        "seed": int(
-                            np.random.SeedSequence(
-                                cfg.MASTER_SEED, spawn_key=(2, day_index, draw)
-                            ).generate_state(1)[0]
-                        ),
-                    }
-                )
+    for month, day, n_days, bandwidth in cfg.configurations():
+        # The seed depends on the cell's identity, so adding or removing a cell does not
+        # reshuffle the draws of the others.
+        key = (month, day, n_days, 0 if bandwidth is None else int(bandwidth * 1000))
+        seed = int(
+            np.random.SeedSequence(cfg.MASTER_SEED, spawn_key=key).generate_state(1)[0]
+        )
+        configs.append(
+            {
+                "config_id": cfg.config_id(month, day, n_days, bandwidth),
+                "month": month,
+                "day": day,
+                "n_days": n_days,
+                "bandwidth": bandwidth,
+                "seed": seed,
+                "is_anchor": (month, day, n_days, bandwidth) == cfg.ANCHOR,
+            }
+        )
     return configs
-
-
-# ======================================================================================
-# References
-# ======================================================================================
-
-
-def compute_references(observed: pd.DataFrame) -> dict[str, tuple[float, int]]:
-    """
-    The three reference estimates of the target day's mean daily total.
-
-    Returns ``{name: (value, m)}`` where ``m`` is how many observed values the estimate
-    rests on -- which is the number that matters when its uncertainty is propagated,
-    and which differs by an order of magnitude between the three.
-
-    * ``pool_mean`` -- mean over the whole +/-15-day window. Lowest variance, but
-      seasonally biased: the window is centred on the target, and where the seasonal
-      curve bends, its mean is not the centre day's mean.
-    * ``centre_mean`` -- mean over that exact calendar date only. Unbiased, but rests on
-      one value per year, so ``m == k``.
-    * ``detrended_centre`` -- quadratic fit of daily total against signed distance from
-      the centre, evaluated at zero. Targets the same quantity as ``centre_mean`` while
-      using every day in the window, so it is the low-variance estimator of it.
-    """
-    totals = observed["total_kwh_m2"].to_numpy(dtype=float)
-    offsets = observed["days_from_centre"].to_numpy(dtype=float)
-    centre = observed["is_centre"].to_numpy(dtype=bool)
-
-    pool_mean = float(np.mean(totals))
-    centre_mean = float(np.mean(totals[centre]))
-
-    # Degree 2 in the signed offset; the constant term is the value at the centre.
-    # Fitted on the window, so it uses 31x more data than centre_mean does.
-    fit = np.polynomial.Polynomial.fit(offsets, totals, deg=2)
-    detrended_centre = float(fit(0.0))
-
-    return {
-        "pool_mean": (pool_mean, int(totals.size)),
-        "centre_mean": (centre_mean, int(centre.sum())),
-        "detrended_centre": (detrended_centre, int(totals.size)),
-    }
 
 
 # ======================================================================================
@@ -170,10 +104,10 @@ def compute_references(observed: pd.DataFrame) -> dict[str, tuple[float, int]]:
 
 
 def _observed_frames(
-    mdp: MetDataProcessor, month: int, day: int, config_id: str
+    mdp: MetDataProcessor, month: int, day: int, n_days: int, config_id: str
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Observed daily totals and hourly values for the training window."""
-    window = day_matrix(mdp, cfg.ATTR, month, day, n_days=cfg.WINDOW_N_DAYS)
+    """Observed daily sums and maxima, and the hourly values behind them."""
+    window = day_matrix(mdp, cfg.ATTR, month, day, n_days=n_days)
 
     dates = pd.to_datetime(window.index, format="%Y%m%d")
     slots = day_slots(dates.month.to_numpy(), dates.day.to_numpy())
@@ -188,7 +122,8 @@ def _observed_frames(
             "day": dates.day,
             "slot": slots,
             "days_from_centre": signed_circular_delta(slots, centre_slot),
-            "total_kwh_m2": window.sum(axis=1).to_numpy() / 1000.0,
+            "sum_kwh_m2": window.sum(axis=1).to_numpy() / 1000.0,
+            "max_w_m2": window.max(axis=1).to_numpy(),
         }
     )
     daily["is_centre"] = daily["days_from_centre"] == 0
@@ -206,21 +141,17 @@ def _observed_frames(
 
 
 def _synthetic_frames(
-    ensemble: np.ndarray, references: dict[str, tuple[float, int]], config_id: str
+    ensemble: np.ndarray, config_id: str
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Synthetic daily totals -- with a deviation per reference -- and hourly values."""
-    totals = ensemble.sum(axis=1) / 1000.0
-
+    """Synthetic daily sums and maxima, and the hourly values behind them."""
     daily = pd.DataFrame(
         {
             "config_id": config_id,
             "realisation": np.arange(ensemble.shape[0]),
-            "total_kwh_m2": totals,
+            "sum_kwh_m2": ensemble.sum(axis=1) / 1000.0,
+            "max_w_m2": ensemble.max(axis=1),
         }
     )
-    for name in cfg.REFERENCES:
-        value, _ = references[name]
-        daily[f"dev_{name}"] = (totals - value) / value
 
     n, n_hours = ensemble.shape
     hourly = pd.DataFrame(
@@ -234,18 +165,14 @@ def _synthetic_frames(
     return daily, hourly
 
 
-def run_config(record: pd.DataFrame, spec: dict, n_realisations: int) -> dict:
+def run_config(mdp: MetDataProcessor, spec: dict, n_realisations: int) -> dict:
     """Fit, sample and collect one configuration. Returns one frame per raw file."""
-    subset = record[record["year"].isin(spec["years"])]
-    mdp = MetDataProcessor(subset)
-
     observed_daily, observed_hourly = _observed_frames(
-        mdp, spec["month"], spec["day"], spec["config_id"]
+        mdp, spec["month"], spec["day"], spec["n_days"], spec["config_id"]
     )
-    references = compute_references(observed_daily)
 
     generator = DayWindowGenerator(
-        mdp, cfg.ATTR, n_days=cfg.WINDOW_N_DAYS, bandwidth=cfg.BANDWIDTH
+        mdp, cfg.ATTR, n_days=spec["n_days"], bandwidth=spec["bandwidth"]
     )
     day_generator = generator.for_day(spec["month"], spec["day"])
 
@@ -254,38 +181,28 @@ def run_config(record: pd.DataFrame, spec: dict, n_realisations: int) -> dict:
     rng = np.random.default_rng(spec["seed"])
     ensemble = np.vstack([day_generator.gen_day(rng=rng) for _ in range(n_realisations)])
 
-    synthetic_daily, synthetic_hourly = _synthetic_frames(
-        ensemble, references, spec["config_id"]
-    )
+    synthetic_daily, synthetic_hourly = _synthetic_frames(ensemble, spec["config_id"])
 
-    reference_rows = pd.DataFrame(
-        [
-            {
-                "config_id": spec["config_id"],
-                "reference": name,
-                "value_kwh_m2": value,
-                "m": m,
-            }
-            for name, (value, m) in references.items()
-        ]
-    )
-
-    observed_totals = observed_daily["total_kwh_m2"]
+    observed_sums = observed_daily["sum_kwh_m2"]
     index_row = pd.DataFrame(
         [
             {
                 "config_id": spec["config_id"],
-                "k": spec["k"],
-                "draw": spec["draw"],
-                "years": ",".join(str(y) for y in spec["years"]),
                 "month": spec["month"],
                 "day": spec["day"],
+                "n_days": spec["n_days"],
+                "bandwidth": "scott" if spec["bandwidth"] is None else spec["bandwidth"],
+                "is_anchor": spec["is_anchor"],
                 "seed": spec["seed"],
                 "n": n_realisations,
-                "n_obs_window": len(observed_daily),
+                "m": len(observed_daily),
                 "n_obs_centre": int(observed_daily["is_centre"].sum()),
-                "obs_sd_kwh_m2": float(observed_totals.std(ddof=1)),
-                "obs_cv": float(observed_totals.std(ddof=1) / observed_totals.mean()),
+                "obs_mean_kwh_m2": float(observed_sums.mean()),
+                "obs_sd_kwh_m2": float(observed_sums.std(ddof=1)),
+                "obs_cv": float(observed_sums.std(ddof=1) / observed_sums.mean()),
+                # What Scott's rule actually chose, so the factor's two levels can be
+                # compared on a common scale rather than by name.
+                "kde_factor_h12": _kde_factor(day_generator),
             }
         ]
     )
@@ -296,8 +213,20 @@ def run_config(record: pd.DataFrame, spec: dict, n_realisations: int) -> dict:
         "synthetic_daily": synthetic_daily,
         "observed_hourly": observed_hourly,
         "synthetic_hourly": synthetic_hourly,
-        "references": reference_rows,
     }
+
+
+def _kde_factor(day_generator) -> Optional[float]:
+    """
+    The covariance multiplier the noon transition's KDE ended up using.
+
+    Recorded because ``bandwidth=None`` means "whatever Scott's rule picks for this
+    sample size", and comparing that level against a hand-set 0.1 needs the number it
+    actually picked. Noon is chosen because it is never degenerate.
+    """
+    simulator = day_generator.simulators.get(12)
+    kde = getattr(simulator, "joint_kde", None)
+    return float(kde.factor) if kde is not None else None
 
 
 # ======================================================================================
@@ -379,7 +308,7 @@ def _done_config_ids() -> set[str]:
 # ======================================================================================
 
 
-def sanity_checks(configs: list[dict]) -> bool:
+def sanity_checks(configs: list[dict], record_years: list[int]) -> bool:
     """
     Re-read what was written and assert it hangs together.
 
@@ -402,57 +331,61 @@ def sanity_checks(configs: list[dict]) -> bool:
     def check(label: str, ok: bool, detail: str = "") -> None:
         results.append((label, bool(ok), detail))
 
-    # 1. Hourly values reconcile with the daily totals they were summed into.
+    # 1. Hourly values reconcile with the daily sums and maxima taken from them.
     for label, hourly, daily, keys in (
         ("observed", obs_hourly, obs_daily, ["config_id", "date"]),
         ("synthetic", syn_hourly, syn_daily, ["config_id", "realisation"]),
     ):
-        recomputed = hourly.groupby(keys)[value_col].sum() / 1000.0
-        stated = daily.set_index(keys)["total_kwh_m2"]
-        aligned = recomputed.reindex(stated.index)
-        worst = float((aligned - stated).abs().max())
-        check(f"{label}: sum(hourly)/1000 == daily total", worst < 1e-9, f"max |diff| {worst:.3e}")
+        grouped = hourly.groupby(keys)[value_col]
+        stated = daily.set_index(keys)
+        worst_sum = float(
+            (grouped.sum().reindex(stated.index) / 1000.0 - stated["sum_kwh_m2"]).abs().max()
+        )
+        worst_max = float(
+            (grouped.max().reindex(stated.index) - stated["max_w_m2"]).abs().max()
+        )
+        check(f"{label}: sum(hourly)/1000 == daily sum", worst_sum < 1e-9, f"max |diff| {worst_sum:.3e}")
+        check(f"{label}: max(hourly) == daily max", worst_max < 1e-9, f"max |diff| {worst_max:.3e}")
 
-    # 2. Row counts follow from k: one centre day per year, 31 slots per year in window.
+    # 2. Row counts follow from the window: one centre day per year, (2n+1) slots a year.
     counts = obs_daily.groupby("config_id").agg(
-        n_window=("total_kwh_m2", "size"), n_centre=("is_centre", "sum")
+        n_window=("sum_kwh_m2", "size"), n_centre=("is_centre", "sum")
     )
     merged = index.set_index("config_id").join(counts)
+    n_years = len(record_years)
     check(
-        "observed: centre-day count == k",
-        bool((merged["n_centre"] == merged["k"]).all()),
-        f"{int((merged['n_centre'] != merged['k']).sum())} mismatched",
+        "observed: centre-day count == years in record",
+        bool((merged["n_centre"] == n_years).all()),
+        f"{int((merged['n_centre'] != n_years).sum())} mismatched, expected {n_years}",
     )
-    expected_window = merged["k"] * (2 * cfg.WINDOW_N_DAYS + 1)
+    expected_window = n_years * (2 * merged["n_days"] + 1)
     check(
-        "observed: window count == k x 31",
+        "observed: window count == years x (2n+1)",
         bool((merged["n_window"] == expected_window).all()),
         f"{int((merged['n_window'] != expected_window).sum())} mismatched",
     )
 
     # 2b. Offsets are signed and symmetric about the centre. An unsigned offset column
-    #     silently turns the detrending fit into something that cannot represent a
-    #     seasonal trend at all, and nothing else downstream would have complained.
-    offsets = obs_daily.groupby("config_id")["days_from_centre"]
+    #     silently folds the season's two sides together, and nothing downstream would
+    #     have complained -- run 1's first harness defect.
+    grouped_offsets = obs_daily.groupby("config_id")["days_from_centre"]
+    half_widths = index.set_index("config_id")["n_days"]
     check(
         "observed: days_from_centre is signed and symmetric",
         bool(
-            (offsets.min() == -cfg.WINDOW_N_DAYS).all()
-            and (offsets.max() == cfg.WINDOW_N_DAYS).all()
-            and offsets.mean().abs().max() < 1e-9
+            (grouped_offsets.min().reindex(half_widths.index) == -half_widths).all()
+            and (grouped_offsets.max().reindex(half_widths.index) == half_widths).all()
+            and grouped_offsets.mean().abs().max() < 1e-9
         ),
         f"range [{obs_daily['days_from_centre'].min()}, {obs_daily['days_from_centre'].max()}]",
     )
 
-    # 3. The year subsetting did what the index claims -- the direct test that a
-    #    configuration trained on the years it says it did.
-    declared = {
-        row.config_id: {int(y) for y in str(row.years).split(",")}
-        for row in index.itertuples()
-    }
+    # 3. Every configuration trained on the whole record. There is no year-subsetting in
+    #    this run, so a missing year is a data defect rather than a design choice.
+    declared = set(int(y) for y in record_years)
     actual = obs_daily.groupby("config_id")["year"].apply(lambda s: set(s.astype(int)))
-    leaked = {cid: actual[cid] - declared[cid] for cid in declared if actual[cid] - declared[cid]}
-    check("observed: no year outside the declared subset", not leaked, f"{len(leaked)} leaking")
+    missing = {cid: declared - years for cid, years in actual.items() if declared - years}
+    check("observed: every year of the record present", not missing, f"{len(missing)} short")
 
     # 4. Synthetic ensemble size.
     syn_counts = syn_daily.groupby("config_id").size()
@@ -475,20 +408,21 @@ def sanity_checks(configs: list[dict]) -> bool:
             f"[{values.min():.1f}, {values.max():.1f}] vs [{lower}, {upper}]",
         )
 
-    # 6. Daily totals plausible against the observed record. A soft check: a synthetic
-    #    day far above anything the site has ever recorded is a red flag, not proof of a
-    #    bug, so it warns rather than fails.
-    obs_max = obs_daily["total_kwh_m2"].max()
-    syn_max = syn_daily["total_kwh_m2"].max()
+    # 6. Daily sums plausible against the observed record. A soft check: a synthetic day
+    #    far above anything the site has recorded is a red flag, not proof of a bug.
+    per_config = syn_daily.groupby("config_id")["sum_kwh_m2"].max().to_dict()
+    obs_per_config = obs_daily.groupby("config_id")["sum_kwh_m2"].max().to_dict()
+    worst = max(
+        (per_config[cid] / obs_per_config[cid], cid) for cid in per_config
+    )
     check(
-        "synthetic: daily max within 1.5x the observed max",
-        syn_max <= 1.5 * obs_max,
-        f"synthetic {syn_max:.2f} vs observed {obs_max:.2f} {cfg.DAILY_UNIT}",
+        "synthetic: daily sum within 1.5x the observed max",
+        worst[0] <= 1.5,
+        f"worst {worst[1]} at {worst[0]:.2f}x",
     )
 
     # 7. Every configuration asked for is present, exactly once. A duplicate config_id
-    #    means two runs appended to the same files -- the output is interleaved from
-    #    two different simulations and cannot be interpreted.
+    #    means two runs appended to the same files -- run 1's second harness defect.
     duplicated = index["config_id"][index["config_id"].duplicated()].unique()
     check(
         "no duplicate configurations",
@@ -520,8 +454,6 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--n", type=int, default=cfg.N_REALISATIONS,
                         help=f"realisations per configuration (default {cfg.N_REALISATIONS})")
-    parser.add_argument("--draws", type=int, default=cfg.N_DRAWS,
-                        help=f"year-subset draws per size (default {cfg.N_DRAWS})")
     parser.add_argument("--resume", action="store_true",
                         help="skip configurations already present in the raw output")
     args = parser.parse_args()
@@ -532,14 +464,20 @@ def main() -> None:
     record = pd.read_csv(meta["cache"])
     years = [int(y) for y in meta["years"]]
 
-    configs = build_configs(years, cfg.DAYS, args.draws)
+    # Built once and shared: every configuration trains on the whole record, so there is
+    # nothing configuration-specific about the processor.
+    mdp = MetDataProcessor(record)
+
+    configs = build_configs()
     done = _done_config_ids() if args.resume else set()
     pending = [c for c in configs if c["config_id"] not in done]
 
     print(f"Record : {meta['site_name']} {meta['start_year']}-{meta['end_year']}, "
           f"{len(years)} years, {len(record):,} rows")
     print(f"Days   : {[f'{m:02d}-{d:02d}' for m, d in cfg.DAYS]}")
-    print(f"Sizes  : {cfg.training_sizes(len(years))} years")
+    print(f"Window : +/-{cfg.WINDOW_N_DAYS} days  ({len(years) * (2 * cfg.WINDOW_N_DAYS + 1)} pooled days)")
+    print(f"Bandw. : {[cfg.bandwidth_tag(b) for b in cfg.BANDWIDTHS]}  (+ anchor cell "
+          f"{cfg.config_id(*cfg.ANCHOR)})")
     print(f"Configs: {len(configs)}" + (f" ({len(done)} already done, {len(pending)} pending)" if done else ""))
     print(f"n      : {args.n} realisations per configuration\n")
 
@@ -548,7 +486,7 @@ def main() -> None:
     with RunLock(cfg.RAW_DIR / ".run_lock"):
         for i, spec in enumerate(pending, start=1):
             config_started = time.perf_counter()
-            frames = run_config(record, spec, args.n)
+            frames = run_config(mdp, spec, args.n)
             for name, frame in frames.items():
                 _append(name, frame, first=first)
             first = False
@@ -557,9 +495,8 @@ def main() -> None:
             if i == 1 and len(pending) > 1:
                 print(f"  first configuration took {elapsed:.1f} s -- "
                       f"estimated total {elapsed * len(pending) / 60:.1f} min\n", flush=True)
-            print(f"  [{i:2d}/{len(pending)}] {spec['config_id']}  "
-                  f"k={spec['k']:2d} draw={spec['draw']}  "
-                  f"years {spec['years'][0]}-{spec['years'][-1]}  ({elapsed:.1f} s)",
+            print(f"  [{i:2d}/{len(pending)}] {spec['config_id']}"
+                  f"{'  (anchor)' if spec['is_anchor'] else ''}  ({elapsed:.1f} s)",
                   flush=True)
 
     print(f"\nDone in {(time.perf_counter() - started) / 60:.1f} min. Wrote:")
@@ -568,7 +505,7 @@ def main() -> None:
         if path.exists():
             print(f"  {filename:<30} {len(pd.read_csv(path)):>8,} rows")
 
-    sanity_checks(configs)
+    sanity_checks(configs, years)
 
 
 if __name__ == "__main__":

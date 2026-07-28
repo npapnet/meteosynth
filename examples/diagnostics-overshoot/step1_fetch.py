@@ -119,7 +119,8 @@ def main() -> None:
     }
     cfg.RECORD_META.write_text(json.dumps(meta, indent=2), encoding="utf-8")
     print(f"\nWrote {cfg.RECORD_META}")
-    print(f"Training sizes for this record: {cfg.training_sizes(len(years))} years")
+    print(f"Pooled days per configuration: {len(years) * (2 * cfg.WINDOW_N_DAYS + 1)} "
+          f"(+/-{cfg.WINDOW_N_DAYS} days x {len(years)} years)")
 
 
 if __name__ == "__main__":

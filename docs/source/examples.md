@@ -214,13 +214,15 @@ LRU cache, so the walk holds a few hundred KB rather than the ~126 MB all 366 fi
 generators would cost.
 
 ```{note}
-Seasonal shape tracks the observed record closely, while absolute irradiance
-overshoots. That overshoot is a known open issue (`FIX-1` in `TODOs.md`), and it is not
-the rolling window — a month-based generator overshoots by the same margin. Nor is it
-simply the bandwidth: the bias survives every bandwidth, including Scott's rule.
-Irradiance piles against a hard floor at zero, and a symmetric kernel renormalised onto
-a `[0, max]` domain pushes mass upward. Treat absolute magnitudes as uncalibrated for
-zero-floored variables; the seasonal shape is sound.
+Seasonal shape tracks the observed record closely, and so do absolute magnitudes: measured
+against the pooled window the generator is fitted to, on a 19-year Heraklion record, the
+mean daily total comes out within 0.6 % of observed at four dates through the year.
+
+What *is* off is the **overcast tail** — the model produces too few heavily overcast days
+(`FIX-1` in `TODOs.md`). Irradiance piles against a hard floor at zero, and a symmetric
+kernel cannot put enough mass near the bound without putting some below it. Ensembles are
+therefore slightly under-dispersed at the dark end, which matters for P90-type questions
+more than for annual totals.
 ```
 
 ### An ensemble of months

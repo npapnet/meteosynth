@@ -1,5 +1,11 @@
-Status: **first run complete** · Date: 2026-07-28 · Serves: `FIX-1` with `CHORE-1` folded in
-· Design and pre-registered decision rule: [`PLAN.md`](PLAN.md)
+Status: **runs 1 and 2 complete** · Date: 2026-07-28 · Serves: `FIX-1` with `CHORE-1`
+folded in · Design: [`PLAN.md`](PLAN.md)
+
+> **[Run 2 is the current result](#findings--run-2-four-dates-two-bandwidths-heraklion-20052023)
+> and is at the end of this file.** Run 1 is kept below it, unedited, because run 2's
+> anchor cell reproduces it and the pair is the evidence that the rewritten harness
+> computes what the old one did. Where the two disagree in *framing* — three references
+> versus one, a k-sweep versus none — run 2's design is the one `PLAN.md` describes.
 
 # Findings — run 1: 21 March, Heraklion 2005–2023
 
@@ -69,9 +75,10 @@ artefact:
 
 `centre_mean` averages **one value per year**, so at k=2 it is the mean of two days drawn
 from a distribution with CV 35 % — a standard error near 25 %. The "trend" is that error
-growing. This is exactly the failure the two-sample bootstrap was adopted to expose
-(`PLAN.md` §2); with the reference held fixed it would have been reported as a confident
-model defect.
+growing. This is exactly the failure the two-sample bootstrap was adopted to expose; with
+the reference held fixed it would have been reported as a confident model defect. *(Run 2
+sidesteps it differently: the reference is the pooled training window itself, which the
+model was fitted to, so there is nothing left to estimate.)*
 
 **The choice of reference alone moves the answer by up to 16.7 %** (centre vs detrended at
 k=2), and by −3.6 % even on the full record. That is larger than the entire effect `FIX-1`
@@ -212,8 +219,10 @@ named draw**, so the original configuration is reproduced and then placed agains
 distribution of everything else. One caveat to keep honest: annual totals average over 365
 days, so their year-to-year CV is far below a single day's 35 % — the two-year *training*
 sample is the more likely source of the artefact than the annual aggregation, and separating
-those is what the run has to do. Planned as strand B in [`PLAN.md`](PLAN.md); it needs a
-chained-year mode, since run 1 exercises independent draws only.
+those is what the run has to do. **Not pursued.** Run 2 is scoped to how the current code
+behaves against its own training data; reproducing a pre-0.2.0 measurement is a question
+about the repo's history, not about the package. The provenance of `FIX-1`'s numbers is
+recorded in [`PLAN.md`](PLAN.md)'s appendix instead.
 
 ---
 
@@ -235,3 +244,197 @@ by any test — only by the self-checks and cross-checks:
 The first was caught because the pool-vs-centre gap was too large to be physical at an
 equinox; the second because a `config_id` appeared twice. Both are now assertions that
 fail loudly.
+
+---
+
+# Findings — run 2: four dates, two bandwidths, Heraklion 2005–2023
+
+Status: **complete**, 2026-07-28 · 9 configurations, 16.6 min, all 14 self-checks passing
+· Figures: `figures/` · Tables: `results/summary_*.csv`
+
+## In one paragraph
+
+Against the pooled window it was actually fitted to, the generator **does not overshoot at
+any of the four dates**: at the shipped `bandwidth=0.1` the mean of the daily total covers
+the observed mean everywhere (ratios 0.994–1.007, none excluding 1). `FIX-1`'s headline —
+generated irradiance systematically too high — **is not reproduced**. Two real defects are,
+both consistent across every date that can test them. First, **the overcast tail is missing**:
+where the record holds days below 1 kWh/m², the model produces 0.2 % against 1.4 % observed
+at 21 March and 12.7 % against 15.1 % at 21 December, confirming run 1's finding at a second
+date and a second threshold. Second, **the intended new default is worse than the one it
+would replace**: Scott's rule pulls the mean *down* by 1.3–5.6 % at all four dates and
+narrows the distribution (sd ratio 0.80–0.92). Both are consistent, signed, and outside their
+intervals.
+
+---
+
+## What was run
+
+| | |
+| :--- | :--- |
+| Record | Heraklion (35.34, 25.14), PVGIS 5.3 / SARAH3, 2005–2023 = **19 years**, 166 536 hourly rows |
+| Attribute | `poa_global` |
+| Window | **±7 days** — 285 pooled days per configuration (the shipped default is 15) |
+| Bandwidth | **factor**: Scott's rule and 0.1 |
+| Dates | 21 Mar · 21 Jun · 21 Sep · 21 Dec |
+| Realisations | **n = 1000** per configuration, independent `gen_day` draws |
+| Reference | **the pooled window itself** — one reference, known rather than estimated |
+| Anchor | one extra cell at ±15 / 0.1, 21 Mar, reproducing run 1 |
+| Cost | 9 configurations, **16.6 min** (~1.1 min each; the ±15 anchor took 3.8) |
+
+## Result 1 — no overshoot, at any date, at the shipped bandwidth
+
+Mean of the daily total, synthetic / observed:
+
+| date | bandwidth 0.1 | 95 % CI | Scott | 95 % CI |
+| :--- | --: | :--- | --: | :--- |
+| 21 Mar | 1.007 | [0.990, 1.025] | **0.967** | [0.950, 0.983] |
+| 21 Jun | 0.998 | [0.992, 1.003] | **0.987** | [0.982, 0.992] |
+| 21 Sep | 0.994 | [0.982, 1.006] | **0.978** | [0.967, 0.988] |
+| 21 Dec | 1.001 | [0.978, 1.025] | **0.944** | [0.924, 0.964] |
+
+At `0.1`, **0 of 4** dates exclude 1. The anchor cell agrees: 1.001 at ±15. The largest
+deviation anywhere at the shipped setting is 0.6 %, against an interval half a percent wide
+at 21 June — the sharpest cell in the design.
+
+**This is not a null result from lack of power.** The positive control recovers an injected
++10 % as a lift of **1.100**, detected in **9 of 9** configurations. The instrument sees a
+10 % effect everywhere; there is no 10 % effect to see.
+
+## Result 2 — Scott's rule is the wrong default, and in a legible way
+
+Every Scott cell is *below* 1 on the mean, and all four exclude — the only statistic in the
+run consistent across all four dates in both senses:
+
+| statistic | Scott, range over the four dates | dates excluding |
+| :--- | :--- | :--- |
+| mean of daily sum | 0.944 – 0.987 | **4/4 · consistent** |
+| P50 of daily sum | 0.890 – 0.979 | **4/4 · consistent** |
+| P90 of daily sum | 0.902 – 0.996 | **4/4 · consistent** |
+| sd of daily sum | 0.796 – 0.922 | 3/4 |
+| P10 of daily sum | 0.998 – 1.160 | 2/4 |
+
+The signature is over-smoothing, not a shift: P10 goes **up** while P50 and P90 go **down**,
+so the distribution is squeezed toward its centre and the mean falls with the long upper
+tail. That is what a 3.9× wider kernel does — Scott chooses a factor of **0.390** at this
+pool size against the hand-set **0.100**, and the two are the same kind of number, a
+multiplier on the data covariance.
+
+**`FIX-1`'s old bandwidth sweep pointed the right way for the wrong reason.** It recorded
+larger bandwidths making the bias *worse* and read that as boundary leakage inflating the
+mean. Here a wider kernel moves the mean the other way, which suggests what that sweep
+measured under the retired month-based estimator does not transfer.
+
+## Result 3 — the overcast tail is missing, and it reproduces
+
+Only two of the four dates can test this: 21 June and 21 September have **no observed days**
+below either threshold, so a deficit is not measurable there, and those cells are excluded
+rather than counted as agreement. On the two dates that can:
+
+| date · threshold | observed | synthetic, Scott | synthetic, 0.1 |
+| :--- | --: | --: | --: |
+| 21 Mar · < 1 kWh/m² | 1.40 % | **0.20 %** | **0.20 %** |
+| 21 Mar · < 0.25× median | 3.16 % | **1.00 %** | **1.10 %** |
+| 21 Dec · < 1 kWh/m² | 15.09 % | **10.80 %** | **12.70 %** |
+| 21 Dec · < 0.25× median | 1.75 % | **0.50 %** | **0.60 %** |
+
+**2/2 informative dates, both thresholds, both bandwidths, every interval excluding.** The
+deficit is ~7× at 21 March and ~1.2–1.4× at 21 December on the absolute threshold, and ~3× at
+both dates on the relative one — so the *relative* deficit is roughly constant while the
+absolute one is not, which is what a threshold that scales with the season should do.
+
+The anchor cell reproduces run 1: **0.40 % against 2.38 % observed** at ±15 on 21 March,
+where run 1 reported 0.60 % against 2.38 %.
+
+**A deficit of the darkest days is not what raises a mean.** Run 1 offered the missing low
+tail as a mechanism *for* `FIX-1`'s overshoot. Run 2 measures both in the same cells and they
+do not go together: the tail is missing at 21 March and 21 December, and the mean is right at
+both. Whatever the tail costs, it is not a mean bias at the shipped bandwidth.
+
+## Result 4 — mild under-dispersion, at both bandwidths
+
+sd of the daily total comes in at **0.891–1.001** at bandwidth 0.1 (2/4 dates excluding) and
+0.796–0.922 at Scott (3/4). Under this run's framing that is a real defect rather than an
+artefact: the model was fitted to the pool it is compared against, so it should reproduce the
+pool's spread. Run 1's "the model legitimately cannot reproduce a window's seasonal spread"
+argument does not apply here — that argument was about targeting a calendar date.
+
+The daily **maximum** behaves differently and is worth recording: its sd is *below* 1 at
+March, September and December but **above** it at June (1.187 at 0.1, 1.345 at Scott). June's
+observed maxima are nearly degenerate — sd 32.7 W/m² on a mean of 1006, because every June
+day is clear — and the KDE cannot represent a spike that narrow.
+
+## Result 5 — `CHORE-1`, measured at both window widths
+
+Share of the pooled window's variance explained by position within the window:
+
+| date | ±7 | ±15 |
+| :--- | --: | --: |
+| 21 Mar | **3.8 %** | **10.4 %** |
+| 21 Jun | 1.0 % | — |
+| 21 Sep | **19.3 %** | — |
+| 21 Dec | 0.4 % | — |
+
+Two things fall out. **Halving the window worked as predicted at 21 March** — 10.4 % → 3.8 %,
+close to the fourfold reduction a locally linear trend implies, and the ±15 figure reproduces
+run 1's exactly. But **21 September is 19.3 % at ±7**, worse than 21 March at twice the width.
+The seasonal slope is comparable at the two equinoxes; what differs is the noise it is
+measured against — September's day-to-day CV is 19.9 % against March's 31.8 %, so the same
+seasonal signal is a much larger share of a smaller variance.
+
+**`CHORE-1` cannot be answered with one number.** The cost of a window depends on the date,
+and it is worst where the record is *least* variable — the opposite of where intuition puts
+it.
+
+## Controls, and what they establish
+
+| control | result |
+| :--- | :--- |
+| **Null** — observed pool resampled in place of the synthetic sample | 88/90 statistics cover the observed value. The two that do not are 2.2 % of the family, against the 5 % a 95 % interval permits. |
+| **Positive** — synthetic sample inflated 10 % | lift recovered as **1.100**, detected in **9/9**. |
+| **Anchor** — run 1's configuration re-run | mean ratio 1.001 vs run 1's 1.011; sd 0.962 vs 0.915; tail share 0.40 % vs 0.60 %; seasonal share **10.4 % vs 10.4 %**. |
+
+The anchor is the load-bearing one: it says the rewritten harness — one reference instead of
+three, a different bootstrap, a different statistic set — returns run 1's numbers on run 1's
+settings.
+
+## Two harness corrections made during the run
+
+Recorded because both would have produced confidently wrong readings, and neither was caught
+by a test:
+
+1. **A bootstrap of zero events returns `[0, 0]`.** When the model produces no day below a
+   threshold, resampling it produces no day below the threshold every time, and the
+   degenerate interval "excludes" any observed share however small the sample. The upper
+   bound now falls back to the rule of three (`3/n`), which at n = 1000 is 0.3 % — still
+   comfortably below the 1.4 % and 15.1 % observed shares, so the finding stands, but on an
+   interval that means something.
+2. **An empty observed tail is not evidence.** June and September hold no days below either
+   threshold, so those cells were being counted as "did not confirm the deficit" and
+   diluting a 2/2 result into a 2/4 one. Informative cells are now identified explicitly, and
+   the consistency rule additionally requires the four dates to **agree in sign** — four
+   dates disagreeing about direction is not one effect measured four times.
+
+## What this does not establish
+
+- **One site, one variable, independent draws.** Chained series (`generate_series`) are not
+  exercised, so nothing here speaks to drift along a multi-day walk.
+- **Two dates carry the tail finding.** June and September cannot test it at all.
+- **The window comparison is two points on one date.** ±7 against ±15 at 21 March is not an
+  evaluation of the default.
+- **Nothing about `poa_direct`, Paris, or pre-0.2.0 code.** Out of scope by design.
+
+## What follows for `FIX-1` and `CHORE-1`
+
+1. **`FIX-1`'s headline does not survive.** No overshoot at the shipped bandwidth at any of
+   four dates, on a 19-year record, with an instrument demonstrated to detect 10 %. The
+   +14 % belongs in a provenance note, not cited as a live figure.
+2. **Restate it as the overcast deficit** — measured, reproduced at two dates and two
+   thresholds, with a mechanism (kernel smoothing across a bounded, skewed density) and an
+   existing set of candidate fixes that act on exactly it: reflection, a log or square-root
+   transform, beta kernels near the bound.
+3. **Do not adopt Scott's rule as the irradiance default** on this evidence. It is worse than
+   0.1 on the mean and the spread at every date tested. `PERF-3` — that only Scott pickles —
+   needs solving another way, most likely the custom `__reduce__` it already proposes.
+4. **`CHORE-1` gets numbers, not an answer**: 3.8 % at ±7 and 10.4 % at ±15 on 21 March, plus
+   the finding that the cost is date-dependent and worst at 21 September.
