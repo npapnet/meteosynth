@@ -10,7 +10,7 @@ ordered by how much they block real use; within a group, most significant first.
 
 ## ID allocation
 
-> **Next ID: 14.**
+> **Next ID: 15.**
 
 IDs come from **one counter shared by every category**. The prefix says what an item
 *is*; the number says *which* item it is. Only the number is the identity.
@@ -557,3 +557,9 @@ diagnostics or convenience function.
 ## INBOX-13 : make sure progress bar exists in example scripts and its functional 
 
 `tdqm` is now part of core dependencies. I need to make sure that the code is able to visualize the concepts. Check whether this package is ok to put this functionality of a higher level one. 
+
+
+## INBOX-14 : Implement cli
+
+This package could benefit from cli subcommands `meteosyn fetch ...`, `meteosyn train ...` (for training a new model), `meteosyn generate ...`. Blocked by location of data files. 
+
