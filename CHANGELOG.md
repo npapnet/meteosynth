@@ -19,7 +19,18 @@ Two project-specific conventions:
 
 ---
 
-## Current sprint (unreleased)
+## [0.3.0] — 2026-07-29
+
+**Breaking.** The training record is now an object with a format. `MetDataset` replaces
+`MetDataProcessor` as the package's core noun: source-agnostic, validated on
+construction, and round-trippable to disk without loss. Adapters construct one rather
+than returning a bare frame, so a cached file can be matched against the question being
+asked of it instead of trusted on its path. 314 tests passing (was 252). Design:
+[`docs/design/completed/FEAT-13-met-dataset-format.md`](docs/design/completed/FEAT-13-met-dataset-format.md).
+
+The sprint also carries the measurement work that preceded it: `PERF-1` made ensemble
+sampling ~8× faster, `FIX-1` was restated on measurement and deferred, and
+`examples/diagnostics-overshoot/` became the instrument those two were argued with.
 
 ### Added
 
@@ -61,24 +72,11 @@ Two project-specific conventions:
   recovering site and period from the filename — the only place the old format recorded
   them, and the weakness the new one removes. Measured on the shipped caches: 4.9 MB →
   0.6 MB, 4.3 MB → 0.5 MB, 0.8 MB → 0.1 MB.
-
-### Changed
-
-- **`MetDataProcessor` is now `MetDataset`, in `dataset.py`.** The name described a
-  processor; the thing is a dataset. Its slicing methods are unchanged in behaviour, and
-  the `mdp` abbreviation is retired throughout.
-- **`validate_support` is an opt-in hard check, not the ingestion rule.** Ingestion clips
-  and reports; callers who would rather be stopped than repaired call it directly. This
-  removes the asymmetry where adapter data was validated more strictly than a hand-built
-  frame — which was the actual hole: `MetDataProcessor` never called it at all, so
-  `poa_global = -500` ingested cleanly on the core path.
-- **`pyarrow` replaces `openpyxl` as a dependency.** XLSX support is gone: it existed to
-  serve a cache format that CSV export covers, while parquet is the only format that
-  round-trips. The `.parquet` branch of the old cache writer had never worked — `pyarrow`
-  was not installed, so it raised `ImportError` on that path.
-
-### Added (earlier this sprint)
-
+- **A progress bar on the day walk.** `generate_series(..., progress=True)` shows a
+  `tqdm` bar over the days, used by `year/synthetic_year.py` (outer bar over the run,
+  inner bar over each attribute's 365 days). Opt-in and non-persistent: an ensemble is
+  this method called hundreds of times, and hundreds of leftover bars would be worse than
+  none. Measured at ~2.7 days/s, so ~2 min per attribute on the 11-year record.
 - **`examples/` reorganised by purpose** into `use_cases/` (applied workflows),
   `concepts/` (how the package behaves) and `tools/` (shared helpers), with an index at
   `examples/README.md`. Downloads cache to `examples/data/`; everything generated goes to
@@ -142,6 +140,18 @@ Two project-specific conventions:
 
 ### Changed
 
+- **`MetDataProcessor` is now `MetDataset`, in `dataset.py`.** The name described a
+  processor; the thing is a dataset. Its slicing methods are unchanged in behaviour, and
+  the `mdp` abbreviation is retired throughout.
+- **`validate_support` is an opt-in hard check, not the ingestion rule.** Ingestion clips
+  and reports; callers who would rather be stopped than repaired call it directly. This
+  removes the asymmetry where adapter data was validated more strictly than a hand-built
+  frame — which was the actual hole: `MetDataProcessor` never called it at all, so
+  `poa_global = -500` ingested cleanly on the core path.
+- **`pyarrow` replaces `openpyxl` as a dependency.** XLSX support is gone: it existed to
+  serve a cache format that CSV export covers, while parquet is the only format that
+  round-trips. The `.parquet` branch of the old cache writer had never worked — `pyarrow`
+  was not installed, so it raised `ImportError` on that path.
 - **Sampling is ~8× faster for ensembles** (`PERF-1`). `get_next_state` used to evaluate a
   1000-point KDE grid on every call — ~97 % of generation runtime. A simulator that turns
   out to be sampled often now caches its conditional **inverse CDF** over 64 uniform
@@ -265,6 +275,65 @@ Two project-specific conventions:
   case did not — moved across as the opt-in plot above.
   `concepts/example_exploratory_analysis.py` stays month-based: it is the only runnable
   demonstration of `sup_plot_lib`, and that is what it is for.
+- **XLSX support, and `openpyxl` with it.** The cache no longer writes by file extension;
+  parquet is the canonical format and CSV the interchange one, and nothing else was
+  reading the spreadsheets.
+
+### Decisions
+
+- **A file is optional, and its format is still worth specifying.** `adapters.py` used to
+  reason that because a file is never a required step, *therefore* there is no on-disk
+  schema to design or version. That inference is what left provenance with nowhere to
+  live but a fetcher's cache, and validation with nowhere but a fetcher's boundary.
+  [Rationale](docs/design/completed/FEAT-13-met-dataset-format.md).
+- **Out-of-support values are repaired, not refused.** Structural defects raise;
+  physically impossible values are clipped and counted. Real records carry small negative
+  irradiance at night from sensor noise, and the check cannot catch the unit errors it was
+  written for anyway — 280 K and 20 °F both sit inside support, as the suite asserts.
+  [Rationale](docs/design/completed/FEAT-13-met-dataset-format.md).
+- **A mismatched cache raises rather than refetching.** The caller chooses the path, so a
+  mismatch is a mistake to surface rather than a stale entry to evict — and overwriting
+  would destroy a record that may have taken a long download. `force_refetch=True` is the
+  deliberate way to repurpose a path.
+  [Rationale](docs/design/completed/FEAT-13-met-dataset-format.md).
+- **The irradiance resolver refuses to reconstruct a total from components.** Resolution
+  is a lookup; summing components is a claim about the data, so it stays something a
+  caller does explicitly — `examples/tools/site_data.py` does exactly that, and records it
+  in provenance.
+  [Rationale](docs/design/completed/FEAT-13-met-dataset-format.md).
+- **`MetDataset` takes no `attr_str=None` "resolve it for me" default.** It would put the
+  solar quantity back at the centre of a package whose registry design makes it
+  variable-agnostic, and turn a missing argument into a guess.
+  [Rationale](docs/design/completed/FEAT-13-met-dataset-format.md).
+
+### Known at release
+
+- **The overcast-tail deficit is unfixed and deliberately so.** The model produces ~4×
+  too few heavily overcast days where a record holds any. Worth 0.12 % of an annual P90,
+  so yield work is unaffected; storage autonomy and worst-case-day work are not. Tracked
+  as `TODOs.md` **FIX-1**, with the limitation documented in `README.md` and the use-case
+  READMEs rather than left for a user to discover.
+- **`SOURCE_RENAMES["open_meteo"]` still maps `shortwave_radiation` onto `poa_global`**,
+  which is wrong — shortwave radiation is horizontal, so it should be `ghi`. Harmless
+  today because no Open-Meteo path is exercised, and the resolver's preference order would
+  amplify it once one is. First task of `VISION-1`.
+- **Nothing pins what the sampler produces distributionally.** The suite tests properties,
+  not calibration, so `PERF-1`'s entirely new sampling path passed 271 tests unmodified.
+  Raised for a decision as `TODOs.md` **CHORE-12**.
+- **No schema migration exists.** `MetDataset.load` refuses a future `schema_version`
+  rather than guessing, but there is nothing to migrate *from* yet. The first v1→v2 change
+  is when that becomes real.
+
+### Commits
+
+`16aea3f` use-case examples and examples reorganisation · `c2525fe` concepts ·
+`eecf5d5` retire `metdata_pvgis` · `4f04f80` scale-aware degeneracy (`FIX-2`) ·
+`ec983f5` architecture spec · `94bd229`, `dd41c25`, `a44a428`, `436142b` overshoot
+diagnostic and `FIX-1` restatement · `ea2ef89`, `479ba6c` cached conditional quantiles
+(`PERF-1`) · `1ae1f13`, `960954c`, `256b25e`, `84d98ac` 0.2.1 · `e5e87ca` design-doc
+archive · `7a33b76` single-source version in the docs · `5b99851` `FEAT-13` planning ·
+`6a8d30f` `MetDataset` · `7106b81`, `f540ac3` progress bar · `4545624` finish
+decoupling-ingestion-gen.
 
 ---
 
