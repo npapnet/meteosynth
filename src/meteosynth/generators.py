@@ -609,6 +609,7 @@ class DayWindowGenerator:
         rng=None,
         seed: Optional[int] = None,
         include_feb29: bool = False,
+        progress: bool = False,
     ) -> np.ndarray:
         """
         Generate a continuous synthetic series, chained across midnight.
@@ -640,6 +641,13 @@ class DayWindowGenerator:
             year: the series then steps 28 Feb 23:00 -> 1 Mar 00:00 using 1 March's
             cross-midnight model, which is fitted from real 1 March dates whose actual
             predecessor was 29 Feb in leap years and 28 Feb otherwise.
+        progress : bool, optional
+            Show a ``tqdm`` progress bar over the day walk. Defaults to ``False``.
+
+            Worth it for a year (~4 minutes, since each new calendar day has to fit its
+            own generators) and pointless for a single day. The bar does not persist
+            once the walk finishes: an ensemble is this method called hundreds of times,
+            and hundreds of leftover bars would be worse than none.
 
         Returns
         -------
@@ -664,7 +672,18 @@ class DayWindowGenerator:
             )
 
         out = np.empty((n_days, HOURS_PER_DAY))
-        for i in range(n_days):
+        days = range(n_days)
+        if progress:
+            from tqdm.auto import tqdm
+
+            days = tqdm(
+                days,
+                desc=f"generating {self.attr_str}",
+                unit="day",
+                leave=False,
+            )
+
+        for i in days:
             generator = self.for_slot(slot)
             if i == 0:
                 out[i] = generator.gen_day(rng=rng)
