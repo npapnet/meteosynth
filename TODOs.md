@@ -10,7 +10,7 @@ ordered by how much they block real use; within a group, most significant first.
 
 ## ID allocation
 
-> **Next ID: 13.**
+> **Next ID: 14.**
 
 IDs come from **one counter shared by every category**. The prefix says what an item
 *is*; the number says *which* item it is. Only the number is the identity.
@@ -31,23 +31,24 @@ IDs come from **one counter shared by every category**. The prefix says what an 
    number alone is unambiguous.
 
 **Retired numbers:** `FIX-2`, `FIX-3` → [`CHANGELOG.md`](CHANGELOG.md) 0.2.0 ·
+`FEAT-1` → superseded 2026-07-29 by `FEAT-13` ·
 `INBOX-1` … `INBOX-7` → [triaged 2026-07-27](#archived-items-from-todosmd).
 
 | ID                                                                              | Item                                            | Status                |
 | :------------------------------------------------------------------------------ | :---------------------------------------------- | :-------------------- |
+| [FEAT-13](#feat-13--metdataset-a-strict-source-agnostic-training-format)        | `MetDataset`: a strict training format          | **planned · next**    |
 | [PERF-2](#perf-2--four-copies-of-the-same-data-in-every-simulator)              | Four copies of the same data in every simulator | open · low priority   |
 | [PERF-3](#perf-3--fitted-generators-cannot-be-pickled-at-the-default-bandwidth) | Fitted generators cannot be pickled             | open · low priority   |
 | [PERF-11](#perf-11--grid-node-spacing-may-want-to-depend-on-the-variable)       | Grid node spacing may want to be per-variable   | open · low priority   |
 | [FIX-1](#fix-1--the-overcast-tail-is-under-produced)                            | The overcast tail is under-produced             | open · **deferred**   |
-| [FEAT-1](#feat-1--cached-data-metadata-and-cache-match-check)                   | Cached data metadata and cache-match check      | open                  |
-| [FEAT-2](#feat-2--irradiance-pick-one-column-by-availability)                   | Irradiance: pick one column by availability     | decision partly taken |
+| [FEAT-2](#feat-2--irradiance-pick-one-column-by-availability)                   | Irradiance: pick one column by availability     | (1) → FEAT-13         |
 | [FEAT-3](#feat-3--chained-series-between-two-dates)                             | Chained series between two dates                | open · shape decided  |
-| [FEAT-4](#feat-4--downloads-cache-by-default-keyed-by-sourcesiteperiod)         | Downloads cache by default                      | open · needs FEAT-1   |
-| [FEAT-5](#feat-5--metdataprocessor-metadata-dict)                               | `MetDataProcessor` metadata dict                | open · needs FEAT-1   |
+| [FEAT-4](#feat-4--downloads-cache-by-default-keyed-by-sourcesiteperiod)         | Downloads cache by default                      | open · needs FEAT-13  |
+| [FEAT-5](#feat-5--metdataprocessor-metadata-dict)                               | `MetDataProcessor` metadata dict                | absorbed by FEAT-13   |
 | [VISION-1](#vision-1--ingest-sources-other-than-pvgis)                          | Ingest sources other than PVGIS                 | future                |
 | [CHORE-1](#chore-1--default-window-half-width-needs-a-real-evaluation)          | Default window half-width needs evaluating      | open                  |
 | [CHORE-2](#chore-2--date_id-is-not-zero-padded)                                 | `date_id` is not zero-padded                    | open · breaking       |
-| [CHORE-3](#chore-3--document-the-on-disk-format)                                | Document the on-disk format                     | open · needs FEAT-1   |
+| [CHORE-3](#chore-3--document-the-on-disk-format)                                | Document the on-disk format                     | absorbed by FEAT-13   |
 | [CHORE-4](#chore-4--bring-docssource-back-in-line-with-the-repo)                | Bring `docs/source/` back in line with the repo | open · do last        |
 | [CHORE-12](#chore-12--nothing-pins-what-the-sampler-produces)                   | Nothing pins what the sampler produces          | open · **for review** |
 
@@ -56,8 +57,9 @@ IDs come from **one counter shared by every category**. The prefix says what an 
 Groups are ordered by how much they block real use; this is the order to *take them in*,
 which is not the same thing.
 
-1. **FEAT-2 (1)**, then **FEAT-1**, then **FEAT-4** and **FEAT-5**, which both need it.
-2. **CHORE-3**, then **CHORE-4** last, so the docs pass is one edit rather than three.
+1. **FEAT-13**, which carries `FEAT-2 (1)`, `FEAT-5` and `CHORE-3` with it. **FEAT-4**
+   follows, needing only its location decision.
+2. **CHORE-4** last, so the docs pass is one edit rather than three.
 3. **FIX-1**, whenever the cost is worth paying — the tail deficit is real, measured and
    documented, and it does not affect any quantity the package currently advertises.
    **CHORE-1** stands on its own rather than folded into it; half of it is measured.
@@ -262,35 +264,44 @@ The padding is gone from both the 1D and 2D paths.
 
 # Features — planned work
 
-## FEAT-1 — Cached data metadata and cache-match check
+## FEAT-13 — `MetDataset`: a strict, source-agnostic training format
 
-**Status:** open · **Plan proposed 2026-07-29** · **Impact:** prevents redundant network
-fetches and cached-file mismatches
+**Status:** planned 2026-07-29 · **next** · **Supersedes** `FEAT-1` · **Absorbs**
+`FEAT-2 (1)`, `FEAT-5`, `CHORE-3`
 
-Design: [`FEAT-2-FEAT-1-column-resolution-and-provenance.md`](docs/design/FEAT-2-FEAT-1-column-resolution-and-provenance.md).
+Design: [`FEAT-13-met-dataset-format.md`](docs/design/FEAT-13-met-dataset-format.md).
 
-Saved datasets carry no embedded metadata identifying their origin, so a warm cache can
-silently answer a question it was not asked.
+The core business is generating synthetic series from a training dataset; sourcing is
+auxiliary. No object currently *is* that dataset — there is a processor wrapping a frame,
+and a fetcher whose cache was the only place provenance could live. `FEAT-13` makes the
+dataset the core noun: strict schema, validation at construction, provenance as a field,
+and lossless round-trip to disk.
 
-- **Metadata tracking** — record the source provider (`"PVGIS"`), coordinates
-  (`latitude`, `longitude`), period (`start_year`, `end_year`), and (per FEAT-2) which
-  irradiance form was fetched.
-- **Automatic cache-match check** — on fetch, use an existing cached file only if it
-  matches the requested site, period and source; otherwise fetch.
-- **Force flag** — a `force_refetch` / `override` parameter so a fresh request can be
-  demanded explicitly.
+**Measured 2026-07-29** — three correctness holes on the **core** path, not the adapter one:
 
-Note the examples currently encode site and period in the *filename*
-(`pvgis_hourly_heraklion_2010_2020.csv`), which is a working stopgap and not a substitute:
-it cannot express which irradiance form the file holds.
+| Claim | Result |
+| :--- | :--- |
+| `MetDataProcessor` validates physical support | **No** — only `adapters.py` calls `validate_support`; `poa_global = -500` ingests cleanly |
+| Duplicate calendar rows are caught | **No** — accepted, then fails inside `pivot` |
+| `month = 13` is caught at ingestion | **No** — accepted, then fails inside `day_slot` |
+| The `.parquet` cache branch works | **No** — `pyarrow` is not installed; that branch raises today |
+| CSV round-trips a frame | **No** — `float32→float64`, `int8→int64` (hence `check_dtype=False` in the suite) |
+| Parquet round-trips frame **and** metadata | **Yes** — dtypes exact, `attrs` intact |
+
+Settled: `MetDataset` replaces `MetDataProcessor`; parquet is canonical with CSV as an
+explicit lossy export; structural defects raise at construction while out-of-support values
+are clipped and reported; irradiance resolution is one ordered constant, not a `role` field.
 
 ---
 
 ## FEAT-2 — Irradiance: pick one column by availability
 
-**Status:** decision partly taken · **Needed before VISION-1** · **(1) planned 2026-07-29**
+**Status:** decision partly taken · **Needed before VISION-1** · **(1) and (2) → FEAT-13**
 
-Design for (1): [`FEAT-2-FEAT-1-column-resolution-and-provenance.md`](docs/design/FEAT-2-FEAT-1-column-resolution-and-provenance.md).
+Question (1) — selection by availability — is planned in
+[`FEAT-13-met-dataset-format.md`](docs/design/FEAT-13-met-dataset-format.md) as one ordered
+constant, `IRRADIANCE_COLUMNS = ("poa_global", "ghi")`. Question (2) — what a cache holds —
+is answered by `MetDataset.provenance`. **(3) and (4) below remain open.**
 
 > **Settled: one irradiance column is modelled, chosen by what the source supplies.**
 > Components are *not* modelled separately and summed. What remains is **selection and
@@ -338,12 +349,12 @@ one-attribute-at-a-time engine, not a bug.
    first, as the quantity a plane actually receives), erroring only when none is present
    and naming what it looked for. It must **not** silently substitute a different quantity
    when one *was* named — preference order applies only when nothing was asked for.
-2. **What does a cache hold?** One PVGIS fetch cannot carry both forms. Feeds FEAT-1.
+2. **What does a cache hold?** Answered by `MetDataset.provenance` (FEAT-13).
 3. **Is a derived column distinguishable from a fetched one?** Today it is not.
    `adapters.py` states the position — *"the column name is the provenance… no metadata
    sidecar"* — and a summed `poa_global` sits byte-for-byte alongside a fetched one.
    Options: a `source` field on the frame (`DataFrame.attrs`, lost on CSV round-trip), a
-   sidecar keyed to the cache file (FEAT-1), a naming convention, or accepting that the
+   the provenance record (FEAT-13), a naming convention, or accepting that the
    summation is exact enough for PVGIS. It will matter for a provider where the identity
    does not hold exactly.
 4. **What does a saved synthetic series carry?** Whatever answers (1) and (3) for observed
@@ -384,19 +395,19 @@ Three things the implementation has to settle, all visible in that loop:
 
 ## FEAT-4 — Downloads cache by default, keyed by source/site/period
 
-**Status:** open · **Needs:** FEAT-1 · **Impact:** the user-facing half of caching
+**Status:** open · **Needs:** FEAT-13 · **Impact:** the user-facing half of caching
 
-FEAT-1 is the *record* — what a cached file says about itself, and the match predicate.
-This is the **policy**: for any fetch, not only the examples,
+FEAT-13 is the *record* — what a saved dataset says about itself. This is the **policy**:
+for any fetch, not only the examples,
 
 - write to a cache subfolder **by default**, rather than only when handed an explicit
   path,
 - **skip the download** when a matching file already exists,
-- unless a `force_refetch` / `override` says otherwise.
+- unless a `force_refetch` says otherwise.
 
-Tracked separately from FEAT-1 because the two fail differently: a wrong record is a
-correctness bug, a wrong default location is an ergonomics one, and they can land in
-either order once FEAT-1 defines the match.
+Tracked separately because the two fail differently: a wrong record is a correctness bug,
+a wrong default location is an ergonomics one. Once FEAT-13 lands, only the location
+question below is left.
 
 **Assessment.** Only the examples cache by default today (`examples/tools/site_data.py`,
 keyed by filename via `Site.cache_path`). `adapters.fetch_pvgis` caches solely when
@@ -407,35 +418,27 @@ checking the file answers the question asked.
 **Question, still open:** default location — `./data/<source>/` relative to the working
 directory (matches the examples, visible, easy to git-ignore) or a user-level cache
 directory (survives moving between projects, but invisible from any of them)? **Decide
-this before FEAT-1 starts**, since it shapes the API surface both share.
+this before FEAT-4 starts**; FEAT-13 does not settle it.
 
 ---
 
 ## FEAT-5 — `MetDataProcessor` metadata dict
 
-**Status:** open · **Needs:** FEAT-1 for the provenance half
+**Status:** **absorbed by FEAT-13** as `MetDataset.describe()`
 
-Add a `.metadata` dict reporting what the processor can see: row count, years covered,
-date range, columns kept and dropped, non-null count per attribute — plus provenance
-(source, coordinates, period) when an adapter can supply it.
+Report what the dataset can see: row count, years covered, date range, columns kept and
+dropped, non-null count per attribute, plus provenance.
 
-> **Settled: derived fields, plus an optional provenance passthrough the adapter fills.**
-> Derived-only would mean the one thing a user most wants to audit — where did this come
-> from — is the one thing the dict cannot say.
+Both original cautions survive into FEAT-13:
 
-Two cautions:
-
-1. **"Size of training set" has two meanings, in two homes.** The processor holds the
-   *whole record*; the actual training subset is per calendar day and belongs on
-   `DayWindowGenerator` / `EnvSeriesGenerator` — e.g. 341 pooled days for a ±15-day
-   window on the 11-year record, against 96 432 rows in the record itself. Report both,
-   each where it is true.
-2. **Provenance cannot be invented.** A hand-built DataFrame has none, and `adapters.py`
-   deliberately supports that path (case B in its module docstring). The field must be
-   optional and **absent, never an error**.
-
-The derived half needs nothing from FEAT-1 and could land first; the passthrough needs
-FEAT-1 to have defined what provenance *is*.
+1. **"Size of training set" has two meanings, in two homes.** The dataset holds the *whole
+   record*; the actual training subset is per calendar day and belongs on
+   `DayWindowGenerator` / `EnvSeriesGenerator` — e.g. 341 pooled days for a ±15-day window
+   on the 11-year record, against 96 432 rows in the record itself. Report both, each where
+   it is true. **This half is still open** — FEAT-13 covers only the dataset side.
+2. **Provenance cannot be invented.** Answered rather than dropped: FEAT-13 gives a
+   hand-built frame `Provenance(source="user")` with everything else absent, which invents
+   nothing and spares every caller an `Optional` branch.
 
 ---
 
@@ -443,7 +446,7 @@ FEAT-1 to have defined what provenance *is*.
 
 ## VISION-1 — Ingest sources other than PVGIS
 
-**Status:** future · **Unblocked** · **Shapes:** FEAT-1, FEAT-2
+**Status:** future · **Unblocked** · **Shapes:** FEAT-13, FEAT-2
 
 Support other providers (Open-Meteo, ERA5, local station data) via a thin **adapter
 layer** that normalises each source into the canonical schema the core consumes
@@ -502,26 +505,20 @@ grouping on `date_id`.
 
 ## CHORE-3 — Document the on-disk format
 
-**Status:** open · **Needs:** FEAT-1 to settle provenance first
+**Status:** **absorbed by FEAT-13** — the schema becomes a real, versioned artefact rather
+than a description of whatever `_write_cache` happened to emit
 
-**Assessment, checked `adapters._write_cache`.** The shape is **already
-source-agnostic**: one irradiance column plus `temp_air`, `wind_speed` and the four
-`INDEX_COLS`, written by file extension — csv / xlsx / parquet, `adapters.py:277-285`.
-No redesign is needed. Two gaps:
+FEAT-13 defines schema v1 (columns, dtypes, row identity, ranges, ordering, completeness)
+and the parquet container that carries it. What is left here is **writing it into
+`docs/source/`**, which belongs with CHORE-4.
 
-- The calendar is four integer columns, not a timestamp. `INDEX_COLS` is what the core
-  validates on, so a timestamp would be an *addition* for the file's sake, not a
-  replacement. **Decide whether to add one.**
-- Nothing records which source, or which irradiance form the file holds (FEAT-2, FEAT-1).
-
-**To do:** write the schema into the docs — columns, dtypes, units, calendar convention,
-and what is deliberately absent, with the reasoning already in `adapters.py`'s module
-docstring (*"the column name is the provenance… no metadata sidecar"*). That position is
-what FEAT-1 revisits, which is why this waits on it.
+One question FEAT-13 does not answer: **the calendar is four integer columns, not a
+timestamp.** `INDEX_COLS` is what the core validates on, so a timestamp would be an
+*addition* for the file's sake, not a replacement. Still to decide.
 
 ## CHORE-4 — Bring `docs/source/` back in line with the repo
 
-**Status:** open · **Do last**, after FEAT-1 and CHORE-3
+**Status:** open · **Do last**, after FEAT-13
 
 **Assessment.** Less drift than feared. `quickstart.md` and `workflow.md` already describe
 π(x₀), `generate_series` and the registry; every stale example path has been repointed;

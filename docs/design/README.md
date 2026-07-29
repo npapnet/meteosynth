@@ -47,7 +47,8 @@ Active / Architecture reference:
 | document | type | description |
 |---|---|---|
 | [architecture.md](architecture.md) | architecture reference | Concise overview of package essence, current state (v0.2.0), mathematical foundation, repository tree structure, module responsibilities, and developer/agent onboarding guide. |
-| [FEAT-2-FEAT-1-column-resolution-and-provenance.md](FEAT-2-FEAT-1-column-resolution-and-provenance.md) | design spec | `FEAT-2 (1)` + `FEAT-1`: a resolver that picks the one irradiance column to model from what a frame actually holds, and a provenance record — site, period, columns — carried on `DataFrame.attrs` in memory and a JSON sidecar on disk, so a warm cache can no longer answer a question it was not asked. Records what `attrs` survives, measured. |
+| [FEAT-13-met-dataset-format.md](FEAT-13-met-dataset-format.md) | design spec | `FEAT-13`: `MetDataset` as the package's core noun — a strict, versioned, source-agnostic training format with validation at construction, provenance as a field, and lossless parquet round-trip. Supersedes `FEAT-1`; absorbs `FEAT-2 (1)`, `FEAT-5` and `CHORE-3`. Records three measured correctness holes on the core ingestion path. |
+| [FEAT-2-FEAT-1-column-resolution-and-provenance.md](FEAT-2-FEAT-1-column-resolution-and-provenance.md) | **superseded** · record only | Superseded by `FEAT-13` the same day, never implemented. Reduced to why the approach was backwards — provenance in the adapter's cache makes a dataset traceable only if you used the fetcher — plus the `DataFrame.attrs` propagation measurements, which `FEAT-13` no longer relies on and which are recorded nowhere else. **Not a live specification.** |
 
 
 
