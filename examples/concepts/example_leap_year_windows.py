@@ -27,7 +27,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from meteosynth import DayWindowGenerator, MetDataProcessor, day_slot
+from meteosynth import DayWindowGenerator, MetDataset, day_slot
 
 LEAP_RECORD = (2011, 2020)      # leap years: 2012, 2016, 2020
 LEAPFREE_RECORD = (2021, 2023)  # leap years: none
@@ -35,7 +35,7 @@ N_DAYS = 15
 
 #%%
 
-def synthetic_record(start_year: int, end_year: int, seed: int = 0) -> MetDataProcessor:
+def synthetic_record(start_year: int, end_year: int, seed: int = 0) -> MetDataset:
     """An hourly record with a realistic diurnal cycle and exactly-zero nights.
 
     Night values are *exactly* zero, as PVGIS supplies them. `np.sin(np.pi)` is 1.22e-16
@@ -56,14 +56,20 @@ def synthetic_record(start_year: int, end_year: int, seed: int = 0) -> MetDataPr
     df = pd.DataFrame(
         {"year": index.year, "month": index.month, "day": index.day, "hour": hour}
     )
-    df["poa_direct"] = 800 * daylight * seasonal + rng.normal(0, 5, len(index)) * daylight
-    df["poa_sky_diffuse"] = 100 * daylight + rng.normal(0, 2, len(index)) * daylight
+    # Clipped at zero: irradiance cannot be negative, and MetDataset would otherwise
+    # repair these on ingestion and say so.
+    df["poa_direct"] = np.clip(
+        800 * daylight * seasonal + rng.normal(0, 5, len(index)) * daylight, 0, None
+    )
+    df["poa_sky_diffuse"] = np.clip(
+        100 * daylight + rng.normal(0, 2, len(index)) * daylight, 0, None
+    )
     df["poa_ground_diffuse"] = 0.0
     df["solar_elevation"] = 60 * daylight
     df["temp_air"] = 15 + 10 * seasonal + rng.normal(0, 1, len(index))
     df["wind_speed"] = np.abs(rng.normal(4, 1.5, len(index)))
     df["Int"] = 0
-    return MetDataProcessor(df)
+    return MetDataset(df)
 
 
 def _years_by_day(subset):
@@ -73,14 +79,14 @@ def _years_by_day(subset):
     return out
 
 
-def question_1(mdp: MetDataProcessor):
+def question_1(ds: MetDataset):
     """Feb 28 window on a record that has leap years."""
     print("\n" + "=" * 74)
     print("Q1: 10-year record (2011-2020). Ask for Feb 28, +/- 2 days.")
     print("    Does it pick up Feb 29 from the leap years, and Mar 1 from all of them?")
     print("=" * 74)
 
-    by_day = _years_by_day(mdp.get_day_window_subset(2, 28, n_days=2))
+    by_day = _years_by_day(ds.get_day_window_subset(2, 28, n_days=2))
     print(f"\n  {'day':7} {'slot':>5} {'years':>6}   contributing years")
     print("  " + "-" * 66)
     for (month, day) in sorted(by_day):
@@ -93,14 +99,14 @@ def question_1(mdp: MetDataProcessor):
     print("  from all 10. Mar 1 is reached because it is simply the next slot (61).")
 
 
-def question_2(mdp: MetDataProcessor):
+def question_2(ds: MetDataset):
     """Feb 29 target on a record with no leap years."""
     print("\n" + "=" * 74)
     print("Q2: leap-free record (2021-2023). Ask for Feb 29 itself.")
     print("    With no observed Feb 29 anywhere, can we still build a generator?")
     print("=" * 74)
 
-    subset = mdp.get_day_window_subset(2, 29, n_days=N_DAYS)
+    subset = ds.get_day_window_subset(2, 29, n_days=N_DAYS)
     days = sorted({(m, d) for m, d in zip(subset["month"], subset["day"])})
     has_real_leap_day = (2, 29) in days
 
@@ -113,7 +119,7 @@ def question_2(mdp: MetDataProcessor):
 
     print("\n  Generating a synthetic Feb 29 anyway:")
     for attr in ("poa_direct", "wind_speed", "temp_air"):
-        generator = DayWindowGenerator(mdp, attr_str=attr, n_days=N_DAYS)
+        generator = DayWindowGenerator(ds, attr_str=attr, n_days=N_DAYS)
         # No start value to supply: hour 0 comes from this day's own pi(x0), fitted
         # from the neighbouring days the window pooled.
         profile = generator.gen_day(2, 29, seed=1)
@@ -124,7 +130,7 @@ def question_2(mdp: MetDataProcessor):
     print("  Feb 14 - Mar 15. That is the intended behaviour, not a fallback.")
 
 
-def the_boundary(mdp: MetDataProcessor):
+def the_boundary(ds: MetDataset):
     """Exactly when does the leap day enter a window?"""
     print("\n" + "=" * 74)
     print("Where the leap day enters and leaves a window (10-year record)")
@@ -134,24 +140,24 @@ def the_boundary(mdp: MetDataProcessor):
     print("  " + "-" * 50)
     for month, day, n in [(2, 27, 1), (2, 27, 2), (2, 28, 0), (2, 28, 1),
                           (3, 1, 1), (3, 2, 1), (3, 2, 2), (6, 15, 15)]:
-        subset = mdp.get_day_window_subset(month, day, n_days=n)
+        subset = ds.get_day_window_subset(month, day, n_days=n)
         centre = day_slot(month, day)
         present = (2, 29) in {(m, d) for m, d in zip(subset["month"], subset["day"])}
         print(f"  {month:02d}-{day:02d}    {n:3d} {centre - n:5d}..{centre + n:<5d}   "
               f"{'yes' if present else 'no'}")
 
 
-def the_deficit(leap_mdp: MetDataProcessor, free_mdp: MetDataProcessor):
+def the_deficit(leap_mdp: MetDataset, free_mdp: MetDataset):
     """Non-leap years contribute one day fewer to any window spanning slot 60."""
     print("\n" + "=" * 74)
     print("The non-leap deficit: why a late-February window pools fewer days")
     print("=" * 74)
     print(f"\n  {'record':12} {'target':8} {'slots':>6} {'days':>6}   note")
     print("  " + "-" * 62)
-    for label, mdp, n_years in [("2011-2020", leap_mdp, 10), ("2021-2023", free_mdp, 3)]:
+    for label, ds, n_years in [("2011-2020", leap_mdp, 10), ("2021-2023", free_mdp, 3)]:
         for month, day, note in [(6, 15, "unaffected (nowhere near slot 60)"),
                                  (2, 29, "spans slot 60")]:
-            subset = mdp.get_day_window_subset(month, day, n_days=N_DAYS)
+            subset = ds.get_day_window_subset(month, day, n_days=N_DAYS)
             slots = subset["day_slot"].nunique()
             days = subset["date_id"].nunique()
             print(f"  {label:12} {month:02d}-{day:02d}    {slots:6d} {days:6d}   {note}")
@@ -178,12 +184,12 @@ def plot_window_membership(leap_mdp, free_mdp):
     """Which (year, calendar-day) cells feed a Feb 29 generator?"""
     fig, axes = plt.subplots(1, 2, figsize=(13, 5), sharex=True)
 
-    for ax, (mdp, label, years) in zip(
+    for ax, (ds, label, years) in zip(
         axes,
         [(leap_mdp, "2011-2020 (leap: 2012, 2016, 2020)", range(2011, 2021)),
          (free_mdp, "2021-2023 (no leap years)", range(2021, 2024))],
     ):
-        subset = mdp.get_day_window_subset(2, 29, n_days=N_DAYS)
+        subset = ds.get_day_window_subset(2, 29, n_days=N_DAYS)
         present = {(y, s) for y, s in zip(subset["year"], subset["day_slot"])}
         slots = range(day_slot(2, 29) - N_DAYS, day_slot(2, 29) + N_DAYS + 1)
 

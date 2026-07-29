@@ -53,7 +53,7 @@ _EXAMPLES = next(p for c in (_HERE, *_HERE.parents) for p in (c, c / "examples")
                  if (p / "tools" / "site_data.py").is_file())
 sys.path.insert(0, str(_EXAMPLES))
 
-from meteosynth import DayWindowGenerator, MetDataProcessor
+from meteosynth import DayWindowGenerator, MetDataset
 from tools.site_data import HERAKLION, HERAKLION_YEARS, load_site, save_frame
 
 MONTH = 5                 # May
@@ -85,12 +85,12 @@ def month_index(year: int, month: int) -> pd.DatetimeIndex:
     return pd.date_range(f"{year}-{month:02d}-01", periods=n_days * 24, freq="h")
 
 
-def generate_months(mdp: MetDataProcessor, n_days: int) -> dict[str, np.ndarray]:
+def generate_months(ds: MetDataset, n_days: int) -> dict[str, np.ndarray]:
     """Generate the ensemble: ``{attr: array of shape (N_REALISATIONS, n_days * 24)}``."""
     out = {}
     for attr in ATTRS:
         generator = DayWindowGenerator(
-            mdp, attr_str=attr, n_days=WINDOW_DAYS, cache_size=CACHE_SIZE
+            ds, attr_str=attr, n_days=WINDOW_DAYS, cache_size=CACHE_SIZE
         )
         started = time.perf_counter()
         # One RNG stream across realisations: each call still redraws pi(x0), so the
@@ -132,10 +132,10 @@ def describe(values: np.ndarray) -> dict:
     }
 
 
-def observed_months(mdp: MetDataProcessor, attr: str) -> pd.Series:
+def observed_months(ds: MetDataset, attr: str) -> pd.Series:
     """One aggregated value per observed year -- the eleven real Mays."""
     how, scale, _ = AGGREGATION[attr]
-    subset = mdp.met_data[mdp.met_data["month"] == MONTH]
+    subset = ds.met_data[ds.met_data["month"] == MONTH]
     return subset.groupby("year")[attr].agg(how) * scale
 
 
@@ -144,15 +144,15 @@ def diurnal_shape(hourly: np.ndarray) -> np.ndarray:
     return hourly.reshape(-1, 24).mean(axis=0)
 
 
-def report(mdp: MetDataProcessor, ensemble: dict[str, np.ndarray]) -> pd.DataFrame:
+def report(ds: MetDataset, ensemble: dict[str, np.ndarray]) -> pd.DataFrame:
     """Print the statistics table and return it as a frame."""
     rows = []
     month_name = calendar.month_name[MONTH]
-    n_years = mdp.met_data["year"].nunique()
+    n_years = ds.met_data["year"].nunique()
 
     for attr in ATTRS:
         how, scale, unit = AGGREGATION[attr]
-        observed = observed_months(mdp, attr)
+        observed = observed_months(ds, attr)
         synthetic = _aggregate(ensemble[attr], how, scale)
 
         obs_stats = describe(observed.to_numpy())
@@ -170,7 +170,7 @@ def report(mdp: MetDataProcessor, ensemble: dict[str, np.ndarray]) -> pd.DataFra
 
         level_bias = syn_stats["mean"] / obs_stats["mean"] - 1
         spread_ratio = syn_stats["sd"] / obs_stats["sd"] if obs_stats["sd"] else np.nan
-        obs_shape = (mdp.met_data[mdp.met_data["month"] == MONTH]
+        obs_shape = (ds.met_data[ds.met_data["month"] == MONTH]
                      .groupby("hour")[attr].mean().to_numpy())
         syn_shape = diurnal_shape(ensemble[attr])
         shape_corr = float(np.corrcoef(obs_shape, syn_shape)[0, 1])
@@ -217,17 +217,16 @@ def long_frame(ensemble: dict[str, np.ndarray], index: pd.DatetimeIndex) -> pd.D
 
 
 def main():
-    df = load_site(HERAKLION, *HERAKLION_YEARS)
-    mdp = MetDataProcessor(df)
-    print(mdp.describe_time_range())
+    ds = load_site(HERAKLION, *HERAKLION_YEARS)
+    print(ds.describe_time_range())
 
     index = month_index(REFERENCE_YEAR, MONTH)
     n_days = len(index) // 24
     print(f"\nGenerating {N_REALISATIONS} synthetic {calendar.month_name[MONTH]}s "
           f"({n_days} days, {len(index)} hours each) for {HERAKLION.name}:")
-    ensemble = generate_months(mdp, n_days)
+    ensemble = generate_months(ds, n_days)
 
-    stats = report(mdp, ensemble)
+    stats = report(ds, ensemble)
 
     print("\nSaving...")
     save_frame(long_frame(ensemble, index),

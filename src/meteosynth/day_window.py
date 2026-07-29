@@ -1,9 +1,9 @@
 """Canonical calendar helpers for rolling day-of-year windows.
 
 Transition models can be trained either on a calendar-month subset
-(:meth:`~meteosynth.met_data_processor.MetDataProcessor.get_month_subset`) or on a
+(:meth:`~meteosynth.dataset.MetDataset.get_month_subset`) or on a
 rolling window of +/- n days centred on a target day
-(:meth:`~meteosynth.met_data_processor.MetDataProcessor.get_day_window_subset`). This
+(:meth:`~meteosynth.dataset.MetDataset.get_day_window_subset`). This
 module provides the calendar arithmetic the latter needs, as pure functions over
 ``(month, day)`` pairs with no pandas dependency.
 

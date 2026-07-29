@@ -39,7 +39,7 @@ from tqdm import tqdm
 
 import config as cfg
 
-from meteosynth import DayWindowGenerator, MetDataProcessor
+from meteosynth import DayWindowGenerator, MetDataset
 from meteosynth.day_window import DAYS_IN_YEAR, day_slot, day_slots
 from meteosynth.variables import get_spec
 
@@ -104,10 +104,10 @@ def build_configs() -> list[dict]:
 
 
 def _observed_frames(
-    mdp: MetDataProcessor, month: int, day: int, n_days: int, config_id: str
+    ds: MetDataset, month: int, day: int, n_days: int, config_id: str
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Observed daily sums and maxima, and the hourly values behind them."""
-    window = day_matrix(mdp, cfg.ATTR, month, day, n_days=n_days)
+    window = day_matrix(ds, cfg.ATTR, month, day, n_days=n_days)
 
     dates = pd.to_datetime(window.index, format="%Y%m%d")
     slots = day_slots(dates.month.to_numpy(), dates.day.to_numpy())
@@ -165,14 +165,14 @@ def _synthetic_frames(
     return daily, hourly
 
 
-def run_config(mdp: MetDataProcessor, spec: dict, n_realisations: int) -> dict:
+def run_config(ds: MetDataset, spec: dict, n_realisations: int) -> dict:
     """Fit, sample and collect one configuration. Returns one frame per raw file."""
     observed_daily, observed_hourly = _observed_frames(
-        mdp, spec["month"], spec["day"], spec["n_days"], spec["config_id"]
+        ds, spec["month"], spec["day"], spec["n_days"], spec["config_id"]
     )
 
     generator = DayWindowGenerator(
-        mdp, cfg.ATTR, n_days=spec["n_days"], bandwidth=spec["bandwidth"]
+        ds, cfg.ATTR, n_days=spec["n_days"], bandwidth=spec["bandwidth"]
     )
     day_generator = generator.for_day(spec["month"], spec["day"])
 
@@ -480,7 +480,7 @@ def run(n_realisations: int = cfg.N_REALISATIONS, resume: bool = False) -> bool:
 
     # Built once and shared: every configuration trains on the whole record, so there is
     # nothing configuration-specific about the processor.
-    mdp = MetDataProcessor(record)
+    ds = MetDataset(record)
 
     configs = build_configs()
     done = _done_config_ids() if resume else set()
@@ -504,7 +504,7 @@ def run(n_realisations: int = cfg.N_REALISATIONS, resume: bool = False) -> bool:
             outer.set_postfix_str(
                 spec["config_id"] + (" (anchor)" if spec["is_anchor"] else "")
             )
-            frames = run_config(mdp, spec, n_realisations)
+            frames = run_config(ds, spec, n_realisations)
             for name, frame in frames.items():
                 _append(name, frame, first=first)
             first = False

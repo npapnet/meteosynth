@@ -98,7 +98,7 @@ flowchart TD
     end
 
     subgraph Data Processing & Windowing
-        D -->|MetDataProcessor| E[convert_to_daily_wide]
+        D -->|MetDataset| E[convert_to_daily_wide]
         E --> F[Wide Days x Hours Frame]
         F -->|get_day_window_subset| G[Circular Day Window Slices]
         G -->|day_window.py| H[all_leap 366-day Calendar]
@@ -184,7 +184,8 @@ meteosynth/
 │       ├── markov_implementations/         # Alternative Markov simulators
 │       │   ├── markov_chain_simulator_continuous.py # Binned 1D KDE simulator
 │       │   └── markov_chain_simulator_discrete.py   # Discrete transition matrix simulator
-│       ├── met_data_processor.py # DataFrame restructuring & window slicing
+│       ├── dataset.py       # MetDataset: schema, validation, parquet I/O, slicing
+│       ├── provenance.py    # Provenance: source, site, period -- what a name cannot say
 │       ├── py.typed          # PEP 561 static type marker
 │       ├── sup_plot_lib.py  # Visual diagnostics & KDE surface plotting
 │       └── variables.py     # VariableSpec registry: support, units, long names
@@ -209,13 +210,14 @@ meteosynth/
 
 | Module | Core Responsibility |
 | :--- | :--- |
-| [`__init__.py`](../../src/meteosynth/__init__.py) | Exposes top-level public API symbols (`MetDataProcessor`, `MarkovChainSimulator2dKDE`, `EnvSeriesGenerator`, `DayWindowGenerator`, `VariableSpec`, `register`, etc.). |
+| [`__init__.py`](../../src/meteosynth/__init__.py) | Exposes top-level public API symbols (`MetDataset`, `MarkovChainSimulator2dKDE`, `EnvSeriesGenerator`, `DayWindowGenerator`, `VariableSpec`, `register`, etc.). |
 | [`variables.py`](../../src/meteosynth/variables.py) | Defines `VariableSpec` dataclass (`support`, `units`, `long_name`), domain clamping logic (`clamp_domain`), and the global variable registry (`register`, `get_spec`). Pre-registers `IRRADIANCE` (plane-of-array), `IRRADIANCE_HORIZONTAL` (`ghi`/`dni`/`dhi`), `TEMP_AIR` and `WIND_SPEED`. A column is modellable if and only if it has a spec, which is what makes the package variable-agnostic. |
 | [`markov_chain_simulator_kde2d.py`](../../src/meteosynth/markov_chain_simulator_kde2d.py) | Main stochastic engine (`MarkovChainSimulator2dKDE`). Fits 2D Gaussian KDE over $(X_{h-1}, X_h)$ pairs, constructs cumulative conditional distributions $P(X_h \mid X_{h-1} = x)$, truncates evaluation grids to physical support, and handles degenerate data via `Kind.KDE_2D`, `Kind.KDE_1D`, and `Kind.CONSTANT`. **Two sampling paths**: a direct KDE evaluation, and a cached conditional-quantile grid built lazily once a simulator proves hot (`precompute_grid`, `has_quantile_grid`). |
 | [`generators.py`](../../src/meteosynth/generators.py) | High-level daily series orchestration. `EnvSeriesGenerator` manages 23 hourly transition simulators + 1 initial distribution. `DayWindowGenerator` manages rolling window generation with an LRU cache. Also builds date-aligned transition pairs (`build_transition_pairs`, `build_cross_midnight_pairs`). |
 | [`day_window.py`](../../src/meteosynth/day_window.py) | Pure-function circular 366-day `all_leap` calendar arithmetic (`day_slot`, `window_slots`, `circular_delta`, `slot_to_month_day`). Enables New Year wrapping and leap-year treatment without pandas timestamp overhead. |
-| [`met_data_processor.py`](../../src/meteosynth/met_data_processor.py) | Handles ingestion validation (`validate_columns`), wide-format pivot (`convert_to_daily_wide`), and training data slicing by calendar month (`get_month_subset`) or centered day windows (`get_day_window_subset`). |
-| [`adapters.py`](../../src/meteosynth/adapters.py) | Optional collection helpers. `fetch_pvgis` (hourly, plane-of-array) and `fetch_pvgis_tmy` (TMY, horizontal) call `pvlib.iotools` and cache by file extension; `normalise` maps provider column names to canonical ones per source; `validate_support` turns unit-confusion bugs into an error at the boundary. |
+| [`dataset.py`](../../src/meteosynth/dataset.py) | **The core noun.** `MetDataset` owns schema v1 — canonical dtypes, calendar validity, unique `(year, month, day, hour)`, sorted order — enforced on construction whatever route the data arrived by. Structural defects raise; out-of-support values are clipped and counted. Lossless parquet `save`/`load` with provenance embedded as key-value metadata, plus `read_csv`/`to_csv` as explicitly lossy interchange. Also carries the wide-format pivot (`convert_to_daily_wide`) and the training slices (`get_month_subset`, `get_day_window_subset`). |
+| [`provenance.py`](../../src/meteosynth/provenance.py) | `Provenance`: source, site, coordinates, period, fetch date. Always present (`source="user"` when nobody claimed one). `from_dict` tolerates unknown keys so a newer writer cannot strand a reader — the opposite of `schema_version`, which refuses a future file rather than guessing. |
+| [`adapters.py`](../../src/meteosynth/adapters.py) | Optional collection helpers, returning a `MetDataset` with provenance filled in. `fetch_pvgis` (hourly, plane-of-array) and `fetch_pvgis_tmy` (TMY, horizontal) call `pvlib.iotools` and cache to parquet, matching an existing cache against the request rather than trusting its path — a mismatch is `CacheMismatchError`, not a silent wrong answer. `normalise` maps provider columns to canonical names per source; `validate_support` remains as an opt-in hard check for callers who would rather be stopped than repaired. |
 | [`constants.py`](../../src/meteosynth/constants.py) | Package constants including index column names (`year`, `month`, `day`, `hour`) and shipped attribute sets. |
 | [`sup_plot_lib.py`](../../src/meteosynth/sup_plot_lib.py) | Visual diagnostic functions for plotting fitted 2D KDE surfaces, conditional CDFs, and synthetic time-series comparisons. |
 | [`markov_implementations/`](../../src/meteosynth/markov_implementations) | Alternative Markov models: `ContinuousMarkovChainSimulator` (binned 1D KDE) and `MarkovChainSimulatorDiscrete` (binned matrix transitions). |
@@ -317,7 +319,7 @@ MPLBACKEND=Agg uv run pytest              # Linux / macOS
   meteosynth.register("rel_humidity", meteosynth.VariableSpec(support=(0.0, 100.0), units="%", long_name="Relative Humidity"))
   ```
 - **Custom Data Ingestion**:
-  Pass custom DataFrames into `MetDataProcessor(df)`, ensuring required index columns (`year`, `month`, `day`, `hour`) are present.
+  Pass custom DataFrames into `MetDataset(df)`, ensuring required index columns (`year`, `month`, `day`, `hour`) are present.
 
 ### 4. Documentation Build
 ```bash

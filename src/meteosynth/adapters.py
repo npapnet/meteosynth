@@ -1,22 +1,33 @@
 """
 Optional helpers for collecting data from providers.
 
-Adapters are an **auxiliary tool for getting data in easily**, not a required layer.
-The contract between them and the rest of the package is an ordinary canonical
-DataFrame, which serves both use cases without forcing either through the other's path::
+Adapters are an **auxiliary tool for getting data in easily**, not a required layer. The
+contract between them and the rest of the package is a
+:class:`~meteosynth.dataset.MetDataset`, which serves both use cases without forcing
+either through the other's path::
 
     # A -- no data for the site; fetch it.
-    df  = fetch_pvgis(48.86, 2.35, 2011, 2012, cache="data/paris.csv")
-    mdp = MetDataProcessor(df)
+    ds = fetch_pvgis(48.86, 2.35, 2011, 2012, cache="data/paris.parquet")
 
     # B -- the user already has data. No adapter involved at all.
     register("rel_humidity", VariableSpec((0.0, 100.0), "%"))
-    mdp = MetDataProcessor(my_df)
+    ds = MetDataset(my_df)
 
-A file is a convenience for case A, where collection is slow and networked. It is never
-a required step, so there is no on-disk schema to design or version, and no metadata
-sidecar: the **column name is the provenance**. ``poa_global`` and ``poa_direct`` are
-different columns, and a frame always says which one it holds.
+Both routes produce the same object, validated the same way. That is the point: a fetched
+record is no more trustworthy than a hand-built one, so the schema checks live in the
+dataset rather than here, and apply however the data arrived.
+
+What a column name says, and what it cannot
+-------------------------------------------
+``poa_global`` and ``poa_direct`` are different columns, and a frame always says which one
+it holds: **the column name is the quantity**, which is why nothing here records an
+"irradiance form". What a name cannot say is *which site*, *which years*, and *which of a
+provider's mutually exclusive fetch modes* produced the record -- so each fetch stamps a
+:class:`~meteosynth.provenance.Provenance` onto the dataset it returns, and
+:meth:`~meteosynth.dataset.MetDataset.save` carries it into the file.
+
+That is what lets a warm cache answer *"are you the answer to what I am asking?"* instead
+of being trusted on the strength of its path alone.
 
 Two PVGIS entry points
 ----------------------
@@ -43,17 +54,21 @@ providers ``pvlib`` does not cover.
 
 from __future__ import annotations
 
+import datetime as _dt
 import logging
 import pathlib
-from typing import Optional, Union
+from typing import List, Optional, Union
 
 import pandas as pd
 
 from .constants import INDEX_COLS
+from .dataset import MetDataset
+from .provenance import Provenance
 from .variables import get_spec, registered
 
 __all__ = [
     "SOURCE_RENAMES",
+    "CacheMismatchError",
     "normalise",
     "validate_support",
     "fetch_pvgis",
@@ -84,14 +99,26 @@ _PVGIS_IRRADIANCE = {
     "ground_diffuse": ("poa_ground_diffuse", True),
 }
 
+#: Decimal places coordinates are compared to when matching a cache. ~11 m: finer than
+#: any provider's grid, coarser than float noise, so 35.3387 and 35.33870000001 are the
+#: same site. A false miss is not a correctness bug, but it does cost a silent
+#: re-download.
+_COORD_DP = 4
+
+
+class CacheMismatchError(Exception):
+    """A cached dataset does not answer the request that was made of it.
+
+    Raised rather than silently refetching, because the caller chose the path: a mismatch
+    means a Paris request was pointed at a Heraklion file, which is a mistake to surface,
+    not a stale entry to evict. Overwriting would destroy a record that may have taken a
+    long download to produce -- so repurposing a path is spelled ``force_refetch=True``.
+    """
+
 
 def validate_support(met_data: pd.DataFrame) -> None:
     """
     Check every registered column lies inside its spec's physical support.
-
-    This is what turns a class of silent ingestion bug -- kW/m2 read as W/m2, kelvin
-    read as degC -- into an error at the boundary rather than a plausible-looking
-    synthetic series months later.
 
     Parameters
     ----------
@@ -105,10 +132,16 @@ def validate_support(met_data: pd.DataFrame) -> None:
 
     Notes
     -----
-    Validation is **one-sided by nature**: support is a necessary condition, not a
-    sufficient one. 20 degC mislabelled from 20 degF is 20 either way and passes
-    cleanly. This catches the gross errors, which are the ones that reach production;
-    it is not a unit check, and unit *conversion* is deliberately not attempted here.
+    **This is an opt-in hard check, not the ingestion rule.**
+    :class:`~meteosynth.dataset.MetDataset` *clips* out-of-support values and reports the
+    count instead, because real station records routinely carry small negative irradiance
+    at night from sensor noise, and refusing a 19-year record over four of them blocks
+    real work. Call this when you would rather be stopped than repaired.
+
+    Validation is **one-sided by nature** either way: support is a necessary condition,
+    not a sufficient one. 20 degC mislabelled from 20 degF is 20 either way and passes
+    cleanly. This catches gross errors that happen to cross a bound; it is not a unit
+    check, and unit *conversion* is deliberately not attempted here.
     """
     for col in met_data.columns:
         if col not in registered():
@@ -135,7 +168,7 @@ def validate_support(met_data: pd.DataFrame) -> None:
 
 def normalise(met_data: pd.DataFrame, source: str) -> pd.DataFrame:
     """
-    Rename a provider's columns to canonical names, then validate the result.
+    Rename a provider's columns to canonical names.
 
     Parameters
     ----------
@@ -147,26 +180,22 @@ def normalise(met_data: pd.DataFrame, source: str) -> pd.DataFrame:
     Returns
     -------
     pd.DataFrame
-        A renamed copy. Column *selection* is left to
-        :class:`~meteosynth.met_data_processor.MetDataProcessor`, which trims to the
-        registered set on ingestion.
+        A renamed copy. Column *selection* and schema validation are left to
+        :class:`~meteosynth.dataset.MetDataset`, which trims to the registered set and
+        enforces the schema on construction -- for every route in, not only this one.
 
     Raises
     ------
     KeyError
         If ``source`` is unknown. An unknown source is an error rather than a silent
         no-op, since passing data through unrenamed would look like it worked.
-    ValueError
-        If the renamed data violates a spec's support.
     """
     if source not in SOURCE_RENAMES:
         raise KeyError(
             f"unknown source {source!r}. Known: {tuple(sorted(SOURCE_RENAMES))}."
         )
 
-    renamed = met_data.rename(columns=SOURCE_RENAMES[source])
-    validate_support(renamed)
-    return renamed
+    return met_data.rename(columns=SOURCE_RENAMES[source])
 
 
 def _add_index_cols(data: pd.DataFrame) -> pd.DataFrame:
@@ -179,6 +208,87 @@ def _add_index_cols(data: pd.DataFrame) -> pd.DataFrame:
     return data
 
 
+def _today() -> str:
+    """Today's date in UTC, ISO-8601."""
+    return _dt.datetime.now(_dt.timezone.utc).date().isoformat()
+
+
+def _package_version() -> Optional[str]:
+    from . import __version__
+
+    return __version__
+
+
+def _check_cache_path(cache: Union[str, pathlib.Path]) -> pathlib.Path:
+    """A cache is parquet, because only parquet carries provenance and exact dtypes."""
+    cache = pathlib.Path(cache)
+    if cache.suffix.lower() != ".parquet":
+        raise ValueError(
+            f"cache must be a .parquet path, got {cache.name!r}. A cache has to carry "
+            f"provenance and exact dtypes so a later request can be matched against it, "
+            f"and CSV carries neither -- use MetDataset.to_csv() for interchange."
+        )
+    return cache
+
+
+def _mismatches(cached: Provenance, wanted: Provenance) -> List[str]:
+    """Every field on which a cached record fails to answer the request."""
+    reasons: List[str] = []
+
+    if cached.source != wanted.source:
+        reasons.append(f"  source    {cached.source!r} != requested {wanted.source!r}")
+
+    def _coord(value):
+        return None if value is None else round(float(value), _COORD_DP)
+
+    if (_coord(cached.latitude), _coord(cached.longitude)) != (
+        _coord(wanted.latitude),
+        _coord(wanted.longitude),
+    ):
+        reasons.append(
+            f"  site      ({cached.latitude}, {cached.longitude}) != requested "
+            f"({wanted.latitude}, {wanted.longitude})"
+        )
+
+    if (cached.start_year, cached.end_year) != (wanted.start_year, wanted.end_year):
+        reasons.append(
+            f"  period    {cached.start_year}-{cached.end_year} != requested "
+            f"{wanted.start_year}-{wanted.end_year}"
+        )
+
+    return reasons
+
+
+def _use_cache(
+    cache: pathlib.Path, wanted: Provenance, column: Optional[str]
+) -> Optional[MetDataset]:
+    """Return the cached dataset if it answers this request, else raise.
+
+    ``None`` means "there is no cache to consider". Anything present either matches or is
+    an error: a file the caller pointed at is an assertion about what they want.
+    """
+    if not cache.exists():
+        return None
+
+    dataset = MetDataset.load(cache)
+    reasons = _mismatches(dataset.provenance, wanted)
+
+    if column is not None and column not in dataset.met_data.columns:
+        reasons.append(
+            f"  columns   {list(dataset.variables)} does not hold requested {column!r}"
+        )
+
+    if reasons:
+        raise CacheMismatchError(
+            f"{cache} does not answer this request:\n"
+            + "\n".join(reasons)
+            + "\nPass force_refetch=True to overwrite it, or use a different path."
+        )
+
+    logging.info("Reading cached dataset from %s", cache)
+    return dataset
+
+
 def fetch_pvgis(
     latitude: float,
     longitude: float,
@@ -186,10 +296,12 @@ def fetch_pvgis(
     end: int,
     irradiance: str = "global",
     cache: Optional[Union[str, pathlib.Path]] = None,
+    force_refetch: bool = False,
+    site: Optional[str] = None,
     **kwargs,
-) -> pd.DataFrame:
+) -> MetDataset:
     """
-    Fetch hourly PVGIS data as a canonical frame.
+    Fetch hourly PVGIS data as a :class:`~meteosynth.dataset.MetDataset`.
 
     Parameters
     ----------
@@ -204,26 +316,34 @@ def fetch_pvgis(
         components are opted into.
 
         The emitted column keeps its specific name -- ``poa_global`` or ``poa_direct``
-        -- so **the name records the choice** and no metadata is needed to know what a
-        frame holds.
+        -- so **the name records the choice**.
     cache : str or Path, optional
-        If given and the file exists, read from it instead of the network. If given and
-        it does not, write the fetched frame there. Collection is slow and networked;
-        modelling is not, and the two are often run at different times.
+        A ``.parquet`` path. If it exists and its provenance matches this request it is
+        read instead of the network; if it exists and does not match,
+        :exc:`CacheMismatchError` is raised. Collection is slow and networked; modelling
+        is not, and the two are often run at different times.
+    force_refetch : bool, optional
+        Ignore any existing cache, fetch, and overwrite it. The explicit way to repurpose
+        a cache path.
+    site : str, optional
+        Free label recorded in provenance, e.g. ``"heraklion"``. Never inferred from the
+        coordinates.
     **kwargs
         Forwarded to :func:`pvlib.iotools.get_pvgis_hourly`.
 
     Returns
     -------
-    pd.DataFrame
-        Canonical frame with :data:`~meteosynth.constants.INDEX_COLS`, the chosen
-        irradiance column, ``temp_air`` and ``wind_speed``.
+    MetDataset
+        Carrying :data:`~meteosynth.constants.INDEX_COLS`, the chosen irradiance column,
+        ``temp_air`` and ``wind_speed``, with provenance filled in.
 
     Raises
     ------
     ValueError
-        If ``irradiance`` is not one of the four components, or the fetched data
-        violates a spec's support.
+        If ``irradiance`` is not one of the four components, or ``cache`` is not a
+        ``.parquet`` path.
+    CacheMismatchError
+        If a cache exists at ``cache`` but holds a different site, period or source.
 
     Notes
     -----
@@ -236,13 +356,23 @@ def fetch_pvgis(
         )
     column, needs_components = _PVGIS_IRRADIANCE[irradiance]
 
+    wanted = Provenance(
+        source="pvgis_hourly",
+        site=site,
+        latitude=latitude,
+        longitude=longitude,
+        start_year=start,
+        end_year=end,
+        fetched=_today(),
+        meteosynth_version=_package_version(),
+    )
+
     if cache is not None:
-        cache = pathlib.Path(cache)
-        if cache.exists():
-            logging.info("Reading cached PVGIS data from %s", cache)
-            frame = _read_cache(cache)
-            validate_support(frame)
-            return frame
+        cache = _check_cache_path(cache)
+        if not force_refetch:
+            cached = _use_cache(cache, wanted, column)
+            if cached is not None:
+                return cached
 
     from pvlib.iotools import get_pvgis_hourly
 
@@ -273,17 +403,18 @@ def fetch_pvgis(
         )
 
     # Drop the DatetimeIndex: the calendar is carried by INDEX_COLS, and a canonical
-    # frame that also depended on its index would not survive a cache round-trip
-    # through CSV.
+    # record that also depended on its index would not survive a round-trip to disk.
     frame = frame.loc[:, [column, "temp_air", "wind_speed", *INDEX_COLS]].reset_index(
         drop=True
     )
 
-    if cache is not None:
-        _write_cache(frame, cache)
-        logging.info("Cached PVGIS data to %s", cache)
+    dataset = MetDataset(frame, provenance=wanted)
 
-    return frame
+    if cache is not None:
+        dataset.save(cache)
+        logging.info("Cached dataset to %s", cache)
+
+    return dataset
 
 
 def fetch_pvgis_tmy(
@@ -291,10 +422,13 @@ def fetch_pvgis_tmy(
     longitude: float,
     coerce_year: Optional[int] = None,
     cache: Optional[Union[str, pathlib.Path]] = None,
+    force_refetch: bool = False,
+    site: Optional[str] = None,
     **kwargs,
-) -> pd.DataFrame:
+) -> MetDataset:
     """
-    Fetch a PVGIS Typical Meteorological Year as a canonical frame.
+    Fetch a PVGIS Typical Meteorological Year as a
+    :class:`~meteosynth.dataset.MetDataset`.
 
     Parameters
     ----------
@@ -304,22 +438,29 @@ def fetch_pvgis_tmy(
         Force every timestamp into this year. Defaults to ``None``, matching
         ``pvlib`` -- see the note below on what that means for the ``year`` column.
     cache : str or Path, optional
-        If given and the file exists, read from it instead of the network. If given and
-        it does not, write the fetched frame there.
+        A ``.parquet`` path, matched against this request exactly as in
+        :func:`fetch_pvgis`.
+    force_refetch : bool, optional
+        Ignore any existing cache, fetch, and overwrite it.
+    site : str, optional
+        Free label recorded in provenance.
     **kwargs
         Forwarded to :func:`pvlib.iotools.get_pvgis_tmy`.
 
     Returns
     -------
-    pd.DataFrame
-        Canonical frame with :data:`~meteosynth.constants.INDEX_COLS` and every
-        *registered* column PVGIS supplied -- ordinarily ``ghi``, ``dni``, ``dhi``,
-        ``temp_air`` and ``wind_speed``.
+    MetDataset
+        Carrying :data:`~meteosynth.constants.INDEX_COLS` and every *registered* column
+        PVGIS supplied -- ordinarily ``ghi``, ``dni``, ``dhi``, ``temp_air`` and
+        ``wind_speed``.
 
     Raises
     ------
     ValueError
-        If the fetched data violates a spec's support.
+        If the provider returns no registered column, or ``cache`` is not a ``.parquet``
+        path.
+    CacheMismatchError
+        If a cache exists at ``cache`` but holds a different site or source.
 
     Notes
     -----
@@ -329,17 +470,17 @@ def fetch_pvgis_tmy(
     Transposing onto a plane is the caller's job; this function does not do it, and the
     column names are what keep the two from being confused.
 
-    **A TMY has no single year, and ``coerce_year`` is not applied for you.** Each month
-    is taken from a different real year, so with the default ``coerce_year=None`` the
-    ``year`` column jumps between months. Measured on Heraklion (35.34, 25.14), the
-    twelve months came from nine distinct years::
+    **A TMY has no single year**, so its provenance records no period at all rather than
+    a fabricated one. Each month is taken from a different real year, so with the default
+    ``coerce_year=None`` the ``year`` column jumps between months. Measured on Heraklion
+    (35.34, 25.14), the twelve months came from nine distinct years::
 
         month  1     2     3     4     5     6     7     8     9    10    11    12
         year  2019  2015  2017  2008  2014  2020  2010  2006  2020  2017  2014  2009
 
     That is harmless for the rolling-window training this package does -- it pools by
     month and day, never by year -- but it makes
-    :meth:`~meteosynth.MetDataProcessor.describe_time_range` report a span that looks
+    :meth:`~meteosynth.dataset.MetDataset.describe_time_range` report a span that looks
     wrong. Pass a year for a clean single-year calendar.
 
     Rewriting the year silently was considered and rejected: it would destroy the record
@@ -348,18 +489,26 @@ def fetch_pvgis_tmy(
 
     Unlike :func:`fetch_pvgis` there is no component flag to choose -- TMY returns all
     three irradiance columns at once, so every registered column is kept and PVGIS's
-    unregistered extras (``pressure``, ``wind_direction``, ``IR(h)``, …) fall out by
+    unregistered extras (``pressure``, ``wind_direction``, ``IR(h)``, ...) fall out by
     rule.
 
     Requires ``pvlib``, imported lazily so the rest of the package does not depend on it.
     """
+    wanted = Provenance(
+        source="pvgis_tmy",
+        site=site,
+        latitude=latitude,
+        longitude=longitude,
+        fetched=_today(),
+        meteosynth_version=_package_version(),
+    )
+
     if cache is not None:
-        cache = pathlib.Path(cache)
-        if cache.exists():
-            logging.info("Reading cached PVGIS TMY from %s", cache)
-            frame = _read_cache(cache)
-            validate_support(frame)
-            return frame
+        cache = _check_cache_path(cache)
+        if not force_refetch:
+            cached = _use_cache(cache, wanted, column=None)
+            if cached is not None:
+                return cached
 
     from pvlib.iotools import get_pvgis_tmy
 
@@ -387,32 +536,12 @@ def fetch_pvgis_tmy(
             f"Registered: {registered()}."
         )
 
-    # Drop the DatetimeIndex for the same reason fetch_pvgis does: the calendar is
-    # carried by INDEX_COLS, and an index-dependent frame would not survive a CSV cache.
     frame = frame.loc[:, [*keep, *INDEX_COLS]].reset_index(drop=True)
 
+    dataset = MetDataset(frame, provenance=wanted)
+
     if cache is not None:
-        _write_cache(frame, cache)
-        logging.info("Cached PVGIS TMY to %s", cache)
+        dataset.save(cache)
+        logging.info("Cached TMY dataset to %s", cache)
 
-    return frame
-
-
-def _read_cache(path: pathlib.Path) -> pd.DataFrame:
-    """Read a cached canonical frame, by extension."""
-    if path.suffix.lower() in {".xlsx", ".xls"}:
-        return pd.read_excel(path)
-    if path.suffix.lower() == ".parquet":
-        return pd.read_parquet(path)
-    return pd.read_csv(path)
-
-
-def _write_cache(frame: pd.DataFrame, path: pathlib.Path) -> None:
-    """Write a canonical frame, by extension."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if path.suffix.lower() in {".xlsx", ".xls"}:
-        frame.to_excel(path, index=False)
-    elif path.suffix.lower() == ".parquet":
-        frame.to_parquet(path, index=False)
-    else:
-        frame.to_csv(path, index=False)
+    return dataset

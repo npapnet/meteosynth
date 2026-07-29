@@ -3,7 +3,7 @@
 Example: Exploratory Analysis of Meteorological Data
 
 This script demonstrates how to fetch weather data from PVGIS, process it using
-the `MetDataProcessor` from `meteosynth`, and visualize it using the plotting
+the `MetDataset` from `meteosynth`, and visualize it using the plotting
 functions in `sup_plot_lib`.
 """
 
@@ -19,29 +19,29 @@ _EXAMPLES = next(p for c in (_HERE, *_HERE.parents) for p in (c, c / "examples")
 sys.path.insert(0, str(_EXAMPLES))
 
 # Import from our package (assuming installed in editable/dev mode)
-from meteosynth.met_data_processor import MetDataProcessor
+from meteosynth.dataset import MetDataset
 import meteosynth.sup_plot_lib as spl
 from tools.site_data import load_paris_demo
 #%%
 
 def main():
-    # 1. Load Data (Paris 2011-2012, cached under examples/data/)
-    df = load_paris_demo()
+    # 1. Load Data (Paris 2011-2012, cached under examples/data/). load_site returns a
+    #    validated MetDataset, so there is nothing left to construct.
+    ds = load_paris_demo()
     print("Preview of PVGIS weather data:")
-    print(df.head())
+    print(ds.met_data.head())
+    print(f"Provenance: {ds.provenance.source}, site={ds.provenance.site}")
 
-    # 2. Initialize MetDataProcessor
-    mdp = MetDataProcessor(df)
     print("\nData time range description:")
-    print(mdp.describe_time_range())
+    print(ds.describe_time_range())
 
     # 3. Get subset of data for May (Month = 5)
     month_ind = 5
-    month_data = mdp.get_month_subset(month_ind)
+    month_data = ds.get_month_subset(month_ind)
     print(f"\nSubset for May contains {len(month_data)} hourly records.")
 
     # 4. Generate daily wide format (days as rows, hours 0-23 as columns)
-    wide_df = mdp.get_monthly_attribute_wide_format(value_col='poa_direct', month_id=month_ind)
+    wide_df = ds.get_monthly_attribute_wide_format(value_col='poa_direct', month_id=month_ind)
     print("\nMay 'poa_direct' daily wide format preview:")
     print(wide_df.head())
 
@@ -62,7 +62,7 @@ def main():
     
     # Faceted monthly line plot by year using Seaborn
     print("- Creating Seaborn faceted line plot...")
-    g = spl.plot_month_by_year_sns(mdp, month_ind=month_ind, value_col='poa_direct')
+    g = spl.plot_month_by_year_sns(ds, month_ind=month_ind, value_col='poa_direct')
     plt.show()
 
     print("\nAnalysis complete.")

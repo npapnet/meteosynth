@@ -21,9 +21,9 @@ from meteosynth.variables import get_spec
 
 
 @pytest.mark.parametrize("attr", ["temp_air", "wind_speed", "poa_direct"])
-def test_a_long_series_stays_finite_and_in_support(real_mdp, attr):
+def test_a_long_series_stays_finite_and_in_support(real_ds, attr):
     """The guarantee. Nothing else in this file is an assertion about magnitude."""
-    generator = DayWindowGenerator(real_mdp, attr_str=attr, n_days=15)
+    generator = DayWindowGenerator(real_ds, attr_str=attr, n_days=15)
     series = generator.generate_series((1, 1), 365, seed=1)
 
     lower = get_spec(attr).support[0]
@@ -31,7 +31,7 @@ def test_a_long_series_stays_finite_and_in_support(real_mdp, attr):
     assert series.min() >= lower, f"{attr} left its support"
 
 
-def test_boundary_conditioning_values_land_inside_the_next_days_domain(real_mdp, capsys):
+def test_boundary_conditioning_values_land_inside_the_next_days_domain(real_ds, capsys):
     """Record what fraction of 23:00 values fall outside the next day's fitted range.
 
     The conditioning value is day d's generated 23:00; the model it is fed to is day
@@ -39,7 +39,7 @@ def test_boundary_conditioning_values_land_inside_the_next_days_domain(real_mdp,
     sample. Where they disagree, the KDE is being asked to extrapolate.
     """
     attr = "temp_air"
-    generator = DayWindowGenerator(real_mdp, attr_str=attr, n_days=15, cache_size=400)
+    generator = DayWindowGenerator(real_ds, attr_str=attr, n_days=15, cache_size=400)
     series = generator.generate_series((1, 1), 365, seed=1)
 
     outside = 0
@@ -72,13 +72,13 @@ def test_boundary_conditioning_values_land_inside_the_next_days_domain(real_mdp,
     )
 
 
-def test_extrapolated_boundaries_still_produce_in_support_values(real_mdp):
+def test_extrapolated_boundaries_still_produce_in_support_values(real_ds):
     """Even where the conditioning value is out of range, truncation must hold.
 
     This is the interaction that used to crash: an out-of-domain conditioning value gave
     an all-zero density, 0/0 -> NaN, and the next hour died.
     """
-    generator = DayWindowGenerator(real_mdp, attr_str="wind_speed", n_days=15)
+    generator = DayWindowGenerator(real_ds, attr_str="wind_speed", n_days=15)
     day = generator.for_day(6, 15)
     fitted = day.cross_midnight.previous_values
 

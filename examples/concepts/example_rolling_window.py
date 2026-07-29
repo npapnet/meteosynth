@@ -5,8 +5,8 @@ Example: Rolling Day Windows vs. Calendar-Month Subsets
 Transition models need a training subset. `meteosynth` offers two strategies, and this
 script contrasts them:
 
-* `MetDataProcessor.get_month_subset(5)`      -- every day in May.
-* `MetDataProcessor.get_day_window_subset(5, 1, n_days=15)` -- every day within 15 days
+* `MetDataset.get_month_subset(5)`      -- every day in May.
+* `MetDataset.get_day_window_subset(5, 1, n_days=15)` -- every day within 15 days
   of May 1, pooled across all years.
 
 The month split has two defects the window fixes. It is **off-centre**: a model for
@@ -29,7 +29,7 @@ import numpy as np
 from meteosynth import (
     DayWindowGenerator,
     EnvSeriesGenerator,
-    MetDataProcessor,
+    MetDataset,
     convert_to_daily_wide,
     day_slot,
 )
@@ -50,13 +50,13 @@ def _observed_daily_total(subset) -> float:
     return convert_to_daily_wide(subset, ATTR).sum(axis=1).mean() / 1000
 
 
-def compare_subsets(mdp: MetDataProcessor):
+def compare_subsets(ds: MetDataset):
     """Show that a month subset is really centred on the middle of the month."""
     print("\n1. Centring: both pool the same number of days, around different centres")
 
-    month_data = mdp.get_month_subset(5)
-    may01 = mdp.get_day_window_subset(5, 1, n_days=15)
-    may16 = mdp.get_day_window_subset(5, 16, n_days=15)
+    month_data = ds.get_month_subset(5)
+    may01 = ds.get_day_window_subset(5, 1, n_days=15)
+    may16 = ds.get_day_window_subset(5, 16, n_days=15)
 
     print(f"   get_month_subset(5)                    -> {month_data['date_id'].nunique():3d} days, all of May")
     print(f"   get_day_window_subset(5, 1, n_days=15) -> {may01['date_id'].nunique():3d} days, Apr 16 - May 16")
@@ -70,52 +70,52 @@ def compare_subsets(mdp: MetDataProcessor):
     print("   a May 16 one.")
 
 
-def show_year_boundary_wrap(mdp: MetDataProcessor):
+def show_year_boundary_wrap(ds: MetDataset):
     """The window wraps across New Year; a month subset cannot."""
     print("\n2. The year boundary wraps, with no special-casing")
 
     for month, day in [(1, 2), (12, 30)]:
-        subset = mdp.get_day_window_subset(month, day, n_days=4)
+        subset = ds.get_day_window_subset(month, day, n_days=4)
         days = sorted({(m, d) for m, d in zip(subset["month"], subset["day"])})
         pretty = ", ".join(f"{m:02d}-{d:02d}" for m, d in days)
         print(f"   target {month:02d}-{day:02d}, n_days=4 -> {pretty}")
 
 
-def show_leap_day(mdp: MetDataProcessor):
+def show_leap_day(ds: MetDataset):
     """Feb 29 is an ordinary day: pooled into neighbours, and requestable itself."""
     print("\n3. Feb 29 needs no special handling")
 
-    nearby = mdp.get_day_window_subset(2, 27, n_days=3)
+    nearby = ds.get_day_window_subset(2, 27, n_days=3)
     print(f"   Feb 29's data is pooled into the Feb 27 window: "
           f"{'2012-2-29' in set(nearby['date_id'])}")
 
-    leap = mdp.get_day_window_subset(2, 29, n_days=15)
+    leap = ds.get_day_window_subset(2, 29, n_days=15)
     print(f"   Feb 29 is requestable as a target -> {leap['date_id'].nunique()} days pooled "
           f"(slot {day_slot(2, 29)})")
     print("   (61 not 62: only 2012 has a real leap day to contribute)")
 
 
-def show_smoothness(mdp: MetDataProcessor):
+def show_smoothness(ds: MetDataset):
     """The month boundary discontinuity, and its absence."""
     print("\n4. Smoothness across a month boundary")
 
-    may31 = mdp.get_day_window_subset(5, 31, n_days=15)
-    jun01 = mdp.get_day_window_subset(6, 1, n_days=15)
+    may31 = ds.get_day_window_subset(5, 31, n_days=15)
+    jun01 = ds.get_day_window_subset(6, 1, n_days=15)
     shared = set(may31["day_slot"]) & set(jun01["day_slot"])
     print(f"   window May 31 vs Jun 1 : {len(shared)}/31 days shared  <- slides smoothly")
 
-    month_may = set(mdp.get_month_subset(5)["date_id"])
-    month_jun = set(mdp.get_month_subset(6)["date_id"])
+    month_may = set(ds.get_month_subset(5)["date_id"])
+    month_jun = set(ds.get_month_subset(6)["date_id"])
     print(f"   month  May    vs Jun   : {len(month_may & month_jun)} days shared      "
           f"<- a hard jump on June 1")
 
 
-def plot_comparison(mdp: MetDataProcessor, n_profiles: int = 25):
+def plot_comparison(ds: MetDataset, n_profiles: int = 25):
     """Draw synthetic days for the same target from each strategy, and compare."""
     print(f"\n5. Generating {n_profiles} synthetic profiles for May 1 from each strategy...")
 
-    month_gen = EnvSeriesGenerator(mdp.get_month_subset(5), attr_str=ATTR)
-    window_gen = DayWindowGenerator(mdp, attr_str=ATTR, n_days=15).for_day(5, 1)
+    month_gen = EnvSeriesGenerator(ds.get_month_subset(5), attr_str=ATTR)
+    window_gen = DayWindowGenerator(ds, attr_str=ATTR, n_days=15).for_day(5, 1)
 
     # One generator drives both draws, so the comparison differs only in the training
     # data, not in the randomness. An ensemble is now an explicit loop: pi(x0) is
@@ -141,9 +141,9 @@ def plot_comparison(mdp: MetDataProcessor, n_profiles: int = 25):
 
     print("                        generated   training data (observed)")
     print(f"   month subset       :   {month_days.sum(axis=1).mean()/1000:5.2f}          "
-          f"{_observed_daily_total(mdp.get_month_subset(5)):5.2f}   kWh/m2")
+          f"{_observed_daily_total(ds.get_month_subset(5)):5.2f}   kWh/m2")
     print(f"   rolling window     :   {window_days.sum(axis=1).mean()/1000:5.2f}          "
-          f"{_observed_daily_total(mdp.get_day_window_subset(5, 1, n_days=15)):5.2f}   kWh/m2")
+          f"{_observed_daily_total(ds.get_day_window_subset(5, 1, n_days=15)):5.2f}   kWh/m2")
     print("\n   The month model generates more sun, tracking the sunnier late-May climate")
     print("   it was trained on. Note both generators overshoot their own training data by")
     print("   a similar margin: that is a known open issue (see TODOs.md), unrelated to the")
@@ -153,15 +153,14 @@ def plot_comparison(mdp: MetDataProcessor, n_profiles: int = 25):
 
 
 def main():
-    df = load_paris_demo()
-    mdp = MetDataProcessor(df)
-    print(mdp.describe_time_range())
+    ds = load_paris_demo()
+    print(ds.describe_time_range())
 
-    compare_subsets(mdp)
-    show_year_boundary_wrap(mdp)
-    show_leap_day(mdp)
-    show_smoothness(mdp)
-    plot_comparison(mdp)
+    compare_subsets(ds)
+    show_year_boundary_wrap(ds)
+    show_leap_day(ds)
+    show_smoothness(ds)
+    plot_comparison(ds)
 
     plt.show()
     print("\nDone.")

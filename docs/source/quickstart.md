@@ -51,13 +51,13 @@ That is the engine. Everything below wraps it in a calendar.
 ## Getting data for a day, a month, a year
 
 `DayWindowGenerator` is the entry point for all three, and the one to reach for by
-default. It wraps a `MetDataProcessor` and hands out a model for **any calendar day**,
+default. It wraps a `MetDataset` and hands out a model for **any calendar day**,
 trained on the rolling ±`n_days` window centred on that day, fitted on demand behind a
 small LRU cache.
 
 ```{mermaid}
 flowchart LR
-    A[hourly record] --> B["MetDataProcessor(df)"]
+    A[hourly record] --> B["MetDataset(df)"]
     B --> C["DayWindowGenerator<br/>attr_str, n_days"]
     C --> D["gen_day(month, day)<br/><b>one day</b>"]
     C --> E["generate_series(start, n_days)<br/><b>a month, a year</b>"]
@@ -70,12 +70,12 @@ One setup serves all three scales:
 ```python
 import numpy as np
 import pandas as pd
-from meteosynth import MetDataProcessor, DayWindowGenerator
+from meteosynth import MetDataset, DayWindowGenerator
 
 # `df` is an hourly frame with columns: year, month, day, hour, and at least one
 # registered variable (poa_global, temp_air, wind_speed, ...). See "Fetching real
 # data from PVGIS" below, or hand over a frame you already have.
-mdp = MetDataProcessor(df)
+mdp = MetDataset(df)
 
 generator = DayWindowGenerator(mdp, attr_str="poa_global", n_days=15)
 ```
@@ -204,9 +204,9 @@ data at all with June 1. A rolling window is centred on its target and slides sm
 across month boundaries.
 
 ```python
-from meteosynth import MetDataProcessor, EnvSeriesGenerator
+from meteosynth import MetDataset, EnvSeriesGenerator
 
-mdp = MetDataProcessor(df)
+mdp = MetDataset(df)
 
 # Two ways to cut the same record:
 may_month = mdp.get_month_subset(5)                       # all of May
@@ -240,19 +240,21 @@ free.
 ## Fetching real data from PVGIS
 
 ```python
-from meteosynth import MetDataProcessor
 from meteosynth.adapters import fetch_pvgis
 
 # Paris, 2011-2012. The cache file is written on the first call and read on every
 # later one, so collection happens once.
-df = fetch_pvgis(48.8566, 2.3522, 2011, 2012, cache="data/paris_2011_2012.csv")
-mdp = MetDataProcessor(df)
+ds = fetch_pvgis(48.8566, 2.3522, 2011, 2012, cache="data/paris_2011_2012.parquet")
 ```
 
-You get a canonical frame — the four calendar columns plus `poa_global`, `temp_air` and
-`wind_speed` — already validated against each column's physical support, so a unit error
-at the boundary (kW/m² read as W/m², °F as °C) raises here rather than surfacing months
-later as a plausible-looking synthetic series.
+You get a `MetDataset` directly — the four calendar columns plus `poa_global`,
+`temp_air` and `wind_speed` — canonicalised and validated on construction, and carrying
+a `Provenance` recording the site, the period and the source.
+
+The cache is matched against that provenance rather than trusted on its path, so
+requesting a different site or period from the same file raises `CacheMismatchError`
+instead of quietly returning the wrong record. Pass `force_refetch=True` to repurpose a
+path deliberately.
 
 PVGIS returns *either* global plane-of-array irradiance *or* its three components, never
 both. `irradiance="global"` is the default; pass `"direct"`, `"sky_diffuse"` or
@@ -268,7 +270,7 @@ stitches each month from a different real year, so otherwise the `year` column j
 
 ```{note}
 Adapters are optional. The contract with the rest of the package is an ordinary
-DataFrame, so if you already have data, hand it straight to `MetDataProcessor` and no
+DataFrame, so if you already have data, hand it straight to `MetDataset` and no
 adapter is involved at all. Register a spec for any column you want to model that the
 package does not ship — see {doc}`workflow`.
 ```
