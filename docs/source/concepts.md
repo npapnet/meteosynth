@@ -84,6 +84,9 @@ You can also have an **ensemble of chained series** — call `generate_series` t
 and you have twelve synthetic Mays (`use_cases/month/monthly_statistics.py`), or a hundred times
 for a hundred synthetic years. That is the shape a real Monte-Carlo study takes.
 
+Both calls live on `DayWindowGenerator`, so one fitted object covers every scale —
+{doc}`quickstart` shows a day, a month and a year from the same three lines of setup.
+
 ```{note}
 **The boundary of a call is the reset.** Within one `generate_series` call the days are
 chained across midnight; between two calls nothing is carried over. So "500 independent

@@ -75,40 +75,84 @@ flowchart TD
 ```
 
 ```{note}
-The evaluation domain spans exactly the observed data range (no padding). An
-earlier version padded the range by 10%, which could push sampled irradiance or
-wind speed **below zero** — physically impossible. Keeping the domain tight to
-the data avoids that.
+The evaluation domain spans the observed data range, intersected with the
+variable's declared physical **support** — and is not padded. An earlier version
+padded the range by 10%, which could push sampled irradiance or wind speed
+**below zero**. Since `np.interp` cannot return a value outside the domain it is
+given, clamping the domain makes an out-of-support sample impossible rather than
+merely rare.
+```
+
+The conditioning value is itself clamped into the range the model was fitted
+over. Far enough outside it every kernel evaluates to ~0, the joint density sums
+to zero, and the normalisation is $0/0$ — which would poison the *next* hour with
+a NaN. Extrapolating a KDE beyond its data is not meaningful anyway, so the
+nearest fitted value is both the safest and the most faithful answer.
+
+### The cost of a draw, and the cached quantile grid
+
+Evaluating a 1000-point KDE slice per sample dominates generation — about 97% of
+runtime. Once a simulator has been asked for enough samples to pay for it (64),
+it replaces that evaluation with a **precomputed table of conditional quantile
+functions** on a 64-node grid of `previous` values. A draw then costs two
+interpolations: along `previous` between the two bracketing nodes, and along the
+quantile axis.
+
+What is interpolated across `previous` is the **quantile function**, not the cdf
+or the density. The conditional's location moves with `previous` — that is the
+whole content of the model — and averaging two cdfs of distributions centred in
+different places produces a bimodal blend of them, whereas averaging their
+quantile functions shifts one into the other.
+
+```{note}
+Large ensembles run ~8× faster; a short run never reaches the threshold and is
+bit-for-bit unchanged. A year-long chained walk takes **one** sample from each of
+a day's 24 simulators, so it never builds a grid or spends the memory either.
+Measured against the direct path over 20 000 draws, the cached sampler is within
+0.03% on the mean and 0.31% on the standard deviation. Both paths consume exactly
+one number from the RNG, so which one is taken never perturbs the stream.
 ```
 
 ## Singularity handling
 
 Real meteorological slices are often degenerate — e.g. direct irradiance is
 identically zero every night, so a covariance matrix collapses and the 2D KDE
-cannot be fitted. `meteosynth` classifies each transition into one of four
-cases using the standard deviations of the previous and current values, and
-dispatches to a dedicated routine.
+cannot be fitted. `meteosynth` classifies each transition from the standard
+deviations of the previous and current values, records the verdict on the
+simulator as `kind`, and dispatches to a dedicated routine.
 
-| Code | Previous | Current | Strategy |
+| `Kind` | Previous | Current | Strategy |
 |------|----------|---------|----------|
-| `NN` | varies   | varies  | Full 2D KDE + conditional sampling |
-| `CN` | constant | varies  | Sample from the 1D KDE of the current values |
-| `NC` | varies   | constant| Return the constant current value |
-| `CC` | constant | constant| Return the constant value (deterministic) |
+| `KDE_2D` | varies   | varies  | Full 2D KDE + conditional sampling |
+| `KDE_1D` | constant | varies  | Sample from the 1D KDE of the current values |
+| `CONSTANT` | any    | constant| Return the constant current value (deterministic) |
 
 ```{mermaid}
 flowchart TD
-    S["std(previous), std(current)"] --> Q1{"prev varies?"}
-    Q1 -->|no| Q2{"current varies?"}
-    Q1 -->|yes| Q3{"current varies?"}
-    Q2 -->|no| CC["CC: constant &#8594; constant"]
-    Q2 -->|yes| CN["Kind.KDE_1D: 1D KDE of current"]
-    Q3 -->|no| NC["Kind.CONSTANT: return constant"]
-    Q3 -->|yes| NN["Kind.KDE_2D: 2D KDE conditional"]
+    S["std(previous), std(current)"] --> Q1{"current varies?"}
+    Q1 -->|no| C["Kind.CONSTANT<br/>return the constant"]
+    Q1 -->|yes| Q2{"previous varies?"}
+    Q2 -->|no| K1["Kind.KDE_1D<br/>1D KDE of current"]
+    Q2 -->|yes| K2["Kind.KDE_2D<br/>2D KDE conditional"]
 ```
 
 This is what lets the generator run through a full 24-hour cycle that includes
 dead night-time hours without numerical failure.
+
+```{note}
+**"Constant" means constant to within a tolerance, not `std == 0`.** The test used
+to be exact, which worked only because PVGIS happens to store literal zeros at
+night. Any source storing a physically-zero night as `1e-16` — interpolation,
+resampling, unit conversion — fell through to the 2D branch, where a KDE was
+fitted across a `previous` spanning ~50 and a `current` spanning ~1e-14. That
+covariance is catastrophically ill-conditioned. The tolerance is now relative to
+the largest magnitude the simulator holds across *both* axes, because what makes a
+slice degenerate is being negligible next to the other axis.
+
+A `KDE_2D` fit that turns out singular anyway — perfectly collinear data — degrades
+to `KDE_1D` with a warning rather than failing several steps later. One unfittable
+hour should not take a whole synthetic year with it.
+```
 
 ## An initial distribution, then transitions
 
@@ -318,25 +362,44 @@ chronological "±n days by timestamp" design would fail outright, since January 
 - **Stationarity within the training subset.** Train on comparable periods so the
   diurnal and seasonal statistics are consistent — a calendar month, or better,
   a rolling day window centred on the target.
-- **Kernel bandwidth matters.** Too small overfits the sample; too large washes
-  out real structure. Tune `bandwidth` per variable — for `wind_speed` it is
-  decisive, where Scott's rule reproduces the observed mean exactly and `0.1`
-  overshoots by ~9%.
-- **Bounded variables are biased upward.** Generated irradiance overshoots by
-  ~13% on the 2011–2012 Paris record while reproducing the seasonal *shape*
-  faithfully (correlation 0.95). This is **not** fixable by tuning `bandwidth`:
-  the bias survives every bandwidth including Scott's rule. Irradiance piles
-  against a hard floor at zero, and a symmetric Gaussian kernel renormalised onto
-  a `[0, max]` domain pushes mass upward — the classic KDE boundary problem —
-  and the error then compounds along the 24-step walk (+6% for one step from
-  true values, +18% by midday). Treat absolute magnitudes as uncalibrated for
-  zero-floored variables. See `TODOs.md`.
+- **Kernel bandwidth matters, and the shipped default is the measured one.**
+  Too small overfits the sample; too large washes out real structure. The
+  default `bandwidth=0.1` was checked against Scott's rule on a 19-year record
+  at four dates through the year: Scott pulls the mean daily total *down* by
+  1.3–5.6% at every date and narrows the distribution (P10 up, P50 and P90 down
+  — the signature of over-smoothing, from a kernel 3.9× wider). Tune per
+  variable if you have the evidence to; do not switch to Scott's rule for
+  irradiance on general principle.
+- **The overcast tail is under-produced.** Where a record holds heavily overcast
+  days, the generator makes roughly **four times too few** of them — 0.2%
+  against 1.4% observed below 1 kWh/m² at 21 March, 12.7% against 15.1% at
+  21 December. Irradiance piles against a hard floor at zero, and a symmetric
+  kernel cannot put enough mass near the bound without putting some below it.
+  How much this matters depends entirely on the question: it moves an annual P90
+  by 0.12%, so a yield study cannot see it, but it reaches anything reading the
+  dark end directly — storage autonomy, worst-case days, a daily P10 (up to 9%
+  high). Tracked as `FIX-1` and deliberately deferred.
+- **Mild under-dispersion.** The standard deviation of the daily total comes out
+  at 0.89–1.00 of observed at the shipped bandwidth. The model is compared
+  against the very pool it was fitted to, so it *should* reproduce that pool's
+  spread.
+- **Absolute magnitudes are calibrated, against the pool.** Measured against the
+  pooled window it was fitted to, the mean daily total lands within 0.7% of
+  observed at all four dates — with a positive control confirming the instrument
+  detects an injected 10% effect in 9 of 9 configurations. An earlier claim of a
+  systematic +14% overshoot, taken from a two-year Paris record, does not
+  reproduce and is superseded; see `examples/diagnostics-overshoot/`.
 - **Thin samples in short records.** Sample size scales as
   $(2n + 1) \times n_\text{years}$ for a window, or $\sim 30 \times
   n_\text{years}$ for a month. Two years gives ~61 pairs per hourly KDE — thin
   for a 2D density. Prefer more years over a wider $n$ where you have them.
-- **Hour 0 looks backwards.** `hour_prev = (hour - 1) % 24` makes hour 0's
-  *previous* value hour 23 of the **same** day rather than 23:00 the night
-  before. `generate_series` is what avoids it: every later day's hour 0 comes
-  from that day's own cross-midnight model, conditioned on the previous day's
-  23:00 value (see `examples/use_cases/year/synthetic_year.py`).
+- **A window pools days that are not the target day.** The share of a pooled
+  window's variance explained by *position within the window* is the price of
+  pooling: 10.4% at ±15 days on 21 March, falling to 3.8% at ±7 — but 19.3% at
+  ±7 on 21 September, because the seasonal slope there is measured against a much
+  smaller day-to-day variance. The cost of a window is date-dependent and worst
+  where the record is *least* variable, which is the opposite of where intuition
+  puts it. There is no single right $n$.
+- **Independent draws are what has been measured.** The diagnostics exercise
+  `gen_day` at one site on one variable. Nothing there speaks to drift along a
+  multi-day chained walk.

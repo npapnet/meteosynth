@@ -1,4 +1,4 @@
-Status: accepted · Author: Antigravity Agent · Date: 2026-07-27
+Status: accepted · Author: Antigravity Agent · Date: 2026-07-27 · Last revised: 2026-07-28
 
 # Package Architecture & Design Overview
 
@@ -26,15 +26,64 @@ The primary application of `meteosynth` is **Monte-Carlo simulation for renewabl
 
 ---
 
-## Current Package State (v0.2.0)
+## Current Package State (v0.2.0 + unreleased work)
 
-- **Version**: `0.2.0` (managed via `uv` and `hatchling`).
+- **Version**: `0.2.0` released 2026-07-22 (managed via `uv` and `hatchling`), with an
+  unreleased sprint on top — see [Changes since v0.2.0](#changes-since-v020).
 - **Python Compatibility**: `>=3.10`.
+- **Test suite**: 280 tests across 16 modules, headless by construction.
 - **Key Architectural Features**:
-  - **Decoupled Variable Specs**: Physical constraints (`support`, `units`, `long_name`) are registered centrally in `meteosynth.variables` independently of dataset-specific column names.
+  - **Decoupled Variable Specs**: Physical constraints (`support`, `units`, `long_name`) are registered centrally in `meteosynth.variables` independently of dataset-specific column names. A column is modellable if and only if it has a spec.
   - **Date-Indexed Pair Alignment**: Daily wide-format restructuring keys transition pairs on calendar dates, eliminating silent mispairing bugs caused by dataset re-sorting.
   - **Lazy LRU-Cached Generators**: `DayWindowGenerator` dynamically instantiates daily models behind an LRU cache, permitting full-year simulations without excessive memory consumption.
+  - **Lazily Cached Conditional Sampling**: a simulator sampled past a threshold caches its conditional inverse CDF over a grid of `previous` values, turning each draw into two interpolations. Lazy by design — a chained year takes one sample per simulator and must not pay to build a cache it will use once.
   - **PVGIS API Integration**: `meteosynth.adapters` interfaces with `pvlib.iotools` to fetch hourly (`fetch_pvgis`, plane-of-array) and TMY (`fetch_pvgis_tmy`, horizontal) data, normalising each to the canonical schema and validating against registered support before it reaches the core. Adapters are an optional convenience, not a required layer.
+
+---
+
+## Changes since v0.2.0
+
+The authoritative record is [`CHANGELOG.md`](../../CHANGELOG.md). This section carries the
+subset with **architectural consequence** — what a developer or agent orienting on the
+package would otherwise get wrong.
+
+### Behaviour of the core engine
+
+| change | architectural consequence |
+| :--- | :--- |
+| **Cached conditional quantiles** (`PERF-1`) | `MarkovChainSimulator2dKDE` now has **two sampling paths**, not one: a direct KDE evaluation below an activation threshold and a cached quantile grid above it. Anything reasoning about sampling cost, memory, or exact reproducibility across ensemble sizes has to know this. ~8× on ensembles; nothing on a chained year, by design. See [`precomputed-conditional-quantiles.md`](precomputed-conditional-quantiles.md). |
+| **Scale-aware degeneracy detection** (`FIX-2`) | `Kind` classification no longer assumes a source stores physical zero as exact `0.0`. This is what **unblocks ingesting providers other than PVGIS**, where resampling and unit conversion leave `1e-16` nights. |
+| **Singular covariance degrades instead of crashing** | Perfectly collinear `previous`/`current` is re-categorised `KDE_1D` with a warning. One unfittable hour can no longer take a whole synthetic year with it. |
+| **Horizontal irradiance registered** | `IRRADIANCE_HORIZONTAL` with `ghi`/`dni`/`dhi` is a *distinct spec object* from `IRRADIANCE` despite identical support and units, because `long_name` is quoted back to the user by `validate_support` — naming a horizontal quantity "plane-of-array" misinforms exactly when someone is debugging provenance. |
+
+### Calibration, and what is known about accuracy
+
+The package's accuracy claims changed materially, and the evidence is committed.
+
+- **`FIX-1`'s "+14 % overshoot" did not survive measurement.** It was recorded against a
+  retired estimator (month subsets, pre-0.2.0 code) on one two-year record without
+  repetition. Measured against the pool the model is fitted to — 19 years, four dates,
+  n = 1000 — the mean lands **within 0.7 %** and no date's interval excludes parity.
+- **What is real is a lower-tail deficit**: ~4× too few heavily overcast days. It is worth
+  **0.12 % of an annual P90**, so yield work is unaffected; storage autonomy and
+  worst-case-day work are not. `FIX-1` is deliberately deferred on that basis.
+- **`CHORE-1` gained numbers**: within-window seasonal structure is 3.8 % of pool variance
+  at ±7 days and 10.4 % at ±15 on 21 March — but 19.3 % at ±7 on 21 September, because the
+  same seasonal slope sits on a smaller day-to-day variance. A single global half-width
+  cannot be right for every date.
+
+**Architecturally this matters because it establishes where the evidence lives.**
+`examples/diagnostics-overshoot/` is not an example in the demonstrative sense; it is the
+repo's measuring instrument, with a pre-registered decision rule, three controls and dated
+findings. Claims about generator accuracy are expected to cite it.
+
+### Repository shape
+
+- **`examples/` reorganised** into `use_cases/` (by time scale: day / month / year),
+  `concepts/`, `tools/`, and `diagnostics-overshoot/`.
+- **`metdata_pvgis.py` removed**, superseded by `adapters.py`.
+- **`docs/source/concepts.md`** added — the vocabulary (ensemble, realisation, envelope,
+  P50/P90, support, π(x₀)) the rest of the documentation assumes.
 
 ---
 
@@ -86,6 +135,7 @@ meteosynth/
 │   ├── design/              # Internal design specifications workspace
 │   │   ├── README.md        # Workspace conventions & index
 │   │   ├── architecture.md  # [This File] Architecture & current state overview
+│   │   ├── precomputed-conditional-quantiles.md  # PERF-1: the cached sampling path
 │   │   └── completed/       # Implemented design specs archive
 │   └── source/              # Sphinx source files (rst, md, conf.py)
 ├── examples/                # Runnable scripts, split by purpose (see examples/README.md)
@@ -100,6 +150,16 @@ meteosynth/
 │   │   ├── example_exploratory_analysis.py
 │   │   ├── example_leap_year_windows.py
 │   │   └── example_rolling_window.py
+│   ├── diagnostics-overshoot/  # The repo's measuring instrument, not a demonstration
+│   │   ├── README.md            # What it is, how the comparison works, what guards it
+│   │   ├── PLAN.md              # Why it is measured this way; pre-registered decision rule
+│   │   ├── FINDINGS-2026-07-28.md  # One dated file per run; never edited after the fact
+│   │   ├── run_all.py           # All four steps, with progress and a measured ETA
+│   │   ├── config.py            # Dates, window, bandwidth factor, seeds, thresholds
+│   │   ├── step1_fetch.py       # Probe PVGIS for the widest range it serves, cache it
+│   │   ├── step2_simulate.py    # Every configuration -> results/raw/, then self-check
+│   │   ├── step3_analyse.py     # Reads results/raw/ only -> results/summary_*.csv
+│   │   └── step4_figures.py     # ECDF with a tail zoom, ratio-with-interval charts
 │   └── use_cases/           # Applied workflows (Heraklion 2010-2020)
 │       ├── README.md               # Index over the three time scales
 │       ├── day/                    # Does a synthetic day look like a real one?
@@ -125,13 +185,12 @@ meteosynth/
 │       │   ├── markov_chain_simulator_continuous.py # Binned 1D KDE simulator
 │       │   └── markov_chain_simulator_discrete.py   # Discrete transition matrix simulator
 │       ├── met_data_processor.py # DataFrame restructuring & window slicing
-│       ├── variables.py    # VariableSpec registry: support, units, long names
 │       ├── py.typed          # PEP 561 static type marker
 │       ├── sup_plot_lib.py  # Visual diagnostics & KDE surface plotting
-│       └── variables.py     # VariableSpec registry & physical support bounds
+│       └── variables.py     # VariableSpec registry: support, units, long names
 ├── tests/                   # Automated test suite (pytest)
-│   ├── conftest.py          # Shared test fixtures & synthetic frames
-│   └── test_*.py            # 16 component test modules
+│   ├── conftest.py          # Shared fixtures; selects a headless backend at import
+│   └── test_*.py            # 16 modules, 280 tests
 ├── .gitignore
 ├── CHANGELOG.md             # Version release history
 ├── LICENSE                  # MIT License
@@ -151,13 +210,12 @@ meteosynth/
 | Module | Core Responsibility |
 | :--- | :--- |
 | [`__init__.py`](../../src/meteosynth/__init__.py) | Exposes top-level public API symbols (`MetDataProcessor`, `MarkovChainSimulator2dKDE`, `EnvSeriesGenerator`, `DayWindowGenerator`, `VariableSpec`, `register`, etc.). |
-| [`variables.py`](../../src/meteosynth/variables.py) | Defines `VariableSpec` dataclass (`support`, `units`, `long_name`), domain clamping logic (`clamp_domain`), and the global variable registry (`register`, `get_spec`). Pre-registers `IRRADIANCE`, `TEMP_AIR`, `WIND_SPEED`. |
-| [`markov_chain_simulator_kde2d.py`](../../src/meteosynth/markov_chain_simulator_kde2d.py) | Main stochastic engine (`MarkovChainSimulator2dKDE`). Fits 2D Gaussian KDE over $(X_{h-1}, X_h)$ pairs, constructs cumulative conditional distributions $P(X_h \mid X_{h-1} = x)$, truncates evaluation grids to physical support, and handles degenerate data via `Kind.KDE_2D`, `Kind.KDE_1D`, and `Kind.CONSTANT`. |
+| [`variables.py`](../../src/meteosynth/variables.py) | Defines `VariableSpec` dataclass (`support`, `units`, `long_name`), domain clamping logic (`clamp_domain`), and the global variable registry (`register`, `get_spec`). Pre-registers `IRRADIANCE` (plane-of-array), `IRRADIANCE_HORIZONTAL` (`ghi`/`dni`/`dhi`), `TEMP_AIR` and `WIND_SPEED`. A column is modellable if and only if it has a spec, which is what makes the package variable-agnostic. |
+| [`markov_chain_simulator_kde2d.py`](../../src/meteosynth/markov_chain_simulator_kde2d.py) | Main stochastic engine (`MarkovChainSimulator2dKDE`). Fits 2D Gaussian KDE over $(X_{h-1}, X_h)$ pairs, constructs cumulative conditional distributions $P(X_h \mid X_{h-1} = x)$, truncates evaluation grids to physical support, and handles degenerate data via `Kind.KDE_2D`, `Kind.KDE_1D`, and `Kind.CONSTANT`. **Two sampling paths**: a direct KDE evaluation, and a cached conditional-quantile grid built lazily once a simulator proves hot (`precompute_grid`, `has_quantile_grid`). |
 | [`generators.py`](../../src/meteosynth/generators.py) | High-level daily series orchestration. `EnvSeriesGenerator` manages 23 hourly transition simulators + 1 initial distribution. `DayWindowGenerator` manages rolling window generation with an LRU cache. Also builds date-aligned transition pairs (`build_transition_pairs`, `build_cross_midnight_pairs`). |
 | [`day_window.py`](../../src/meteosynth/day_window.py) | Pure-function circular 366-day `all_leap` calendar arithmetic (`day_slot`, `window_slots`, `circular_delta`, `slot_to_month_day`). Enables New Year wrapping and leap-year treatment without pandas timestamp overhead. |
 | [`met_data_processor.py`](../../src/meteosynth/met_data_processor.py) | Handles ingestion validation (`validate_columns`), wide-format pivot (`convert_to_daily_wide`), and training data slicing by calendar month (`get_month_subset`) or centered day windows (`get_day_window_subset`). |
 | [`adapters.py`](../../src/meteosynth/adapters.py) | Optional collection helpers. `fetch_pvgis` (hourly, plane-of-array) and `fetch_pvgis_tmy` (TMY, horizontal) call `pvlib.iotools` and cache by file extension; `normalise` maps provider column names to canonical ones per source; `validate_support` turns unit-confusion bugs into an error at the boundary. |
-| [`variables.py`](../../src/meteosynth/variables.py) | The spec registry: `VariableSpec` (support, units, long_name) and the shipped registrations. A column is modellable if and only if it has a spec, which is what makes the package variable-agnostic. |
 | [`constants.py`](../../src/meteosynth/constants.py) | Package constants including index column names (`year`, `month`, `day`, `hour`) and shipped attribute sets. |
 | [`sup_plot_lib.py`](../../src/meteosynth/sup_plot_lib.py) | Visual diagnostic functions for plotting fitted 2D KDE surfaces, conditional CDFs, and synthetic time-series comparisons. |
 | [`markov_implementations/`](../../src/meteosynth/markov_implementations) | Alternative Markov models: `ContinuousMarkovChainSimulator` (binned 1D KDE) and `MarkovChainSimulatorDiscrete` (binned matrix transitions). |

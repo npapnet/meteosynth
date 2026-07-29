@@ -27,7 +27,6 @@ from tools.site_data import (
     HERAKLION_YEARS,
     PARIS,
     PARIS_YEARS,
-    load_paris_demo,
     load_site,
 )
 
@@ -44,10 +43,8 @@ def main(refresh: bool = False) -> None:
     # Heraklion 2010-2020 is what the use cases train on.
     report(HERAKLION, HERAKLION_YEARS, load_site(HERAKLION, *HERAKLION_YEARS, refresh=refresh))
 
-    # Paris 2011-2012 is what the concept scripts use. Routed through load_paris_demo
-    # unless refreshing, so a checkout that already has the legacy Excel cache reuses
-    # it rather than re-downloading.
-    paris = (load_site(PARIS, *PARIS_YEARS, refresh=True) if refresh else load_paris_demo())
+    # Paris 2011-2012 is what the concept scripts use.
+    paris = load_site(PARIS, *PARIS_YEARS, refresh=refresh)
     report(PARIS, PARIS_YEARS, paris)
 
     print(f"\nCache lives in {HERAKLION.cache_path(*HERAKLION_YEARS).parent} "

@@ -50,6 +50,21 @@ Two project-specific conventions:
 - **`examples/tools/`** — `site_data.py` (sites, cached records, output paths),
   `envelope.py` (observed-vs-synthetic comparison and figures), `fetch_site_data.py`
   (runnable cache priming).
+- **`examples/diagnostics-overshoot/`** — the repo's measuring instrument, and the first
+  thing to cite when making a claim about generator accuracy. Fits on a 19-year PVGIS
+  record, draws 1000 synthetic days at each of four dates against two bandwidths, and
+  scores them against the pooled window they were fitted to. One command
+  (`run_all.py`, ~5 min) behind four separately-runnable steps.
+
+  What makes it evidence rather than a demonstration: **the training pool is the
+  reference**, so the comparison target is a known quantity rather than an estimate;
+  a **null control** (observed data resampled in place of synthetic — must show nothing)
+  and a **positive control** (a +10 % injection — must be detected) run before any result
+  is read; an **anchor cell** reproduces the prior run's configuration so a harness change
+  cannot silently move the numbers; a **pre-registered decision rule** in `PLAN.md` fixes
+  the reading before the data arrives; and findings are written to **one dated file per
+  run**, never edited afterwards. `step3` reads only the CSVs `step2` wrote, so any check
+  made by hand against them is a check against exactly what the analysis saw.
 - **`docs/source/concepts.md`** — foundational terminology in plain language (ensemble,
   realisation, envelope, coverage, P50/P90, support, π(x₀), …), first in the
   getting-started toctree.
@@ -103,9 +118,27 @@ Two project-specific conventions:
   `FEAT-3` (chained series between two dates, shape settled as `end=(month, day)`),
   `FEAT-4` (downloads cache by default), `FEAT-5` (`MetDataProcessor.metadata`), `CHORE-3`
   (document the on-disk format) and `CHORE-4` (realign `docs/source/`). The file gained an
-  **Order of work** section recording the sequence and, more usefully, the couplings —
-  `CHORE-1` folds into `FIX-1` because they are the same experiment, and `PERF-1` follows
-  `FIX-1` because a precomputed CDF grid must encode whatever boundary correction lands.
+  **Order of work** section recording the sequence and, more usefully, the couplings.
+
+  *Both couplings it recorded were later retired by measurement: `CHORE-1` no longer folds
+  into `FIX-1`, and `PERF-1` did not have to wait for it. See the two entries below.*
+- **`FIX-1` restated on measurement, and deferred.** It read "generated irradiance is
+  systematically too high (+14 %)" and was first in the queue. Measured against the pool
+  the model is fitted to — Heraklion 2005–2023, four dates through the year, n = 1000 per
+  cell — the mean daily total lands **within 0.7 %** and no date's interval excludes
+  parity. The +14 % came from a retired estimator (month subsets, `gen_day_sequence`,
+  pre-0.2.0) on one two-year record with no repetition.
+
+  What is real, and now what the item records, is a **deficit of heavily overcast days**:
+  ~4× too few where a record holds any, confirmed at two dates and two thresholds. It is
+  worth **0.12 % of an annual P90**, so yield work is unaffected; storage autonomy and
+  worst-case-day work are not. Deferred on that basis, with the limitation documented in
+  `README.md` and the use-case READMEs rather than left for a user to discover.
+- **`CHORE-1` gained numbers instead of an answer.** Within-window seasonal structure is
+  3.8 % of pool variance at ±7 days and 10.4 % at ±15 on 21 March — but **19.3 % at ±7 on
+  21 September**, because the same seasonal slope sits on a smaller day-to-day variance.
+  A single global half-width cannot be right for every date, which is more than the item
+  previously knew and less than it asked for.
 
 ### Fixed
 

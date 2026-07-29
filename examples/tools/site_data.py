@@ -57,9 +57,6 @@ SITES = {site.key: site for site in (HERAKLION, PARIS)}
 #: calendar day has eleven real observations to compare a synthetic day against.
 HERAKLION_YEARS = (2010, 2020)
 
-#: Legacy cache written by the older examples: Paris 2011-2012, in Excel. Kept so a
-#: working copy that already has it does not re-download.
-PARIS_LEGACY_CACHE = DATA_DIR / "pvgis_hourly_data.xlsx"
 PARIS_YEARS = (2011, 2012)
 
 
@@ -158,14 +155,7 @@ def load_site(
 
 
 def load_paris_demo() -> pd.DataFrame:
-    """Load the 2011-2012 Paris record the concept scripts use.
-
-    Prefers the legacy Excel cache if a working copy already has it, so nothing
-    re-downloads on an existing checkout.
-    """
-    if PARIS_LEGACY_CACHE.exists():
-        print(f"Loading cached weather data from {PARIS_LEGACY_CACHE}...")
-        return add_poa_global(pd.read_excel(PARIS_LEGACY_CACHE))
+    """Load the 2011-2012 Paris record the concept scripts use."""
     return load_site(PARIS, *PARIS_YEARS)
 
 
