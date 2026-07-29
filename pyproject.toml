@@ -1,6 +1,6 @@
 [project]
 name = "meteosynth"
-version = "0.2.0"
+version = "0.2.1"
 description = "A package for generating synthetic environmental time-series using Markov Chain models and PVGIS data integration."
 readme = "README.md"
 authors = [
@@ -24,15 +24,16 @@ dependencies = [
     # (plotting helpers are first-class methods), so it is a hard dependency.
     "matplotlib>=3.5.0",
     "seaborn>=0.11.0",
+    "tqdm>=4.66.0", # Progress bars for the long-running generation loops.
 ]
 
-[project.optional-dependencies]
-# Extras used only by the scripts under examples/, not by the package itself.
-# Install with:  uv sync --extra examples   (or  pip install meteosynth[examples])
-examples = [
-    # Progress bars for the long-running generation loops.
-    "tqdm>=4.66.0",
-]
+#[project.optional-dependencies]
+## Extras used only by the scripts under examples/, not by the package itself.
+## Install with:  uv sync --extra examples   (or  pip install meteosynth[examples])
+#examples = [
+#    
+#    "tqdm>=4.66.0",
+#]
 
 [project.urls]
 Homepage = "https://github.com/npapnet/meteosynth"
