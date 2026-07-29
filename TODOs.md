@@ -5,9 +5,8 @@ and removed from here, so this file never grows a "done" section. Design rationa
 in [`docs/design/`](docs/design/README.md).
 
 Each item records **what was measured**, so nobody has to re-derive it, and carries a
-**stable ID** — cross-references elsewhere in the repo point at `FIX-2`, not at "item 7",
-so re-ordering this file breaks nothing. Groups are ordered by how much they block real
-use; within a group, most significant first.
+**stable ID** — cross-references elsewhere point at `FIX-2`, not at "item 7". Groups are
+ordered by how much they block real use; within a group, most significant first.
 
 ## ID allocation
 
@@ -16,27 +15,23 @@ use; within a group, most significant first.
 IDs come from **one counter shared by every category**. The prefix says what an item
 *is*; the number says *which* item it is. Only the number is the identity.
 
-1. **Allocate from the single counter, then bump it.** The next item is `#10`, written
-   `FIX-10`, `FEAT-10` or `CHORE-10` depending on what it turns out to be — never all
-   three. No two items ever share a number, whatever their prefixes.
+1. **Allocate from the single counter, then bump it** — `FIX-10`, `FEAT-10` or
+   `CHORE-10`, never all three. No two items share a number.
 2. **Numbers are never reused.** Landing, dropping or superseding an item does not free
-   its number. `FIX-2` and `FIX-3` are burned permanently.
+   its number.
 3. **Reclassification changes the prefix, never the number.** A feature that turns out to
-   be a defect becomes `FIX-14`, not a new ID. This is why the category is not part of the
-   identity: a stale `FEAT-14` in a commit message or design doc still resolves
-   unambiguously to item 14.
-4. **Triage preserves the number.** An `INBOX-n` graduates by swapping its prefix —
-   `INBOX-8` becomes `FEAT-8` — so the link across triage survives without an annotation.
-   The ID only becomes citable at that point — see
+   be a defect becomes `FIX-14`, so a stale `FEAT-14` in a commit message still resolves
+   unambiguously.
+4. **Triage preserves the number.** `INBOX-8` graduates to `FEAT-8`; the link across
+   triage survives without an annotation. The ID only becomes citable at that point — see
    [the record-keeping rules](docs/design/architecture.md#the-rules-this-implies).
 5. **IDs below 10 are legacy** and predate this scheme, so several categories reuse the
    same low numbers (`FIX-1`, `PERF-1`, `FEAT-1` are three different items). For those the
-   full `PREFIX-N` string is the identity. They are **not** renumbered — 97 citations
-   across the repo and the git history point at them. From `#10` up, the number alone is
-   unambiguous.
+   full `PREFIX-N` string is the identity; they are **not** renumbered. From `#10` up, the
+   number alone is unambiguous.
 
-**Retired numbers** — burned, and where they went: `FIX-2`, `FIX-3` → [`CHANGELOG.md`](CHANGELOG.md)
-0.2.0 · `INBOX-1` … `INBOX-7` → triaged 2026-07-27, see the table at the end of this file.
+**Retired numbers:** `FIX-2`, `FIX-3` → [`CHANGELOG.md`](CHANGELOG.md) 0.2.0 ·
+`INBOX-1` … `INBOX-7` → [triaged 2026-07-27](#archived-items-from-todosmd).
 
 | ID                                                                              | Item                                            | Status                |
 | :------------------------------------------------------------------------------ | :---------------------------------------------- | :-------------------- |
@@ -56,34 +51,18 @@ IDs come from **one counter shared by every category**. The prefix says what an 
 | [CHORE-4](#chore-4--bring-docssource-back-in-line-with-the-repo)                | Bring `docs/source/` back in line with the repo | open · do last        |
 | [CHORE-12](#chore-12--nothing-pins-what-the-sampler-produces)                   | Nothing pins what the sampler produces          | open · **for review** |
 
-The [Inbox](#inbox--not-yet-triaged) is empty. `INBOX-1` … `INBOX-7` were triaged on
-2026-07-27: two landed (see [`CHANGELOG.md`](CHANGELOG.md)), one merged into the former
-`FIX-3`, the rest became `FEAT-3`, `FEAT-4`, `FEAT-5`, `CHORE-3` and `CHORE-4`.
-
 ## Order of work
 
 Groups are ordered by how much they block real use; this is the order to *take them in*,
 which is not the same thing.
 
-> **Reordered 2026-07-28.** `FIX-1` was first and is now deferred: the diagnostic that was
-> meant to measure it instead showed the calibration is sound, and the defect that remains
-> is worth **0.12 % of an annual P90**. That released `PERF-1`, which was queued behind it
-> — and `PERF-1` has since **landed**, see [`CHANGELOG.md`](CHANGELOG.md).
-
 1. **FEAT-2 (1)**, then **FEAT-1**, then **FEAT-4** and **FEAT-5**, which both need it.
 2. **CHORE-3**, then **CHORE-4** last, so the docs pass is one edit rather than three.
 3. **FIX-1**, whenever the cost is worth paying — the tail deficit is real, measured and
    documented, and it does not affect any quantity the package currently advertises.
-   **CHORE-1** now stands on its own rather than folded into it; half of it is measured.
+   **CHORE-1** stands on its own rather than folded into it; half of it is measured.
 
 **FEAT-3** is independent of all of it and can slot in anywhere.
-
-*Landed 2026-07-28, all folded into [`CHANGELOG.md`](CHANGELOG.md): `FIX-3` (stale
-`pvlib` unpacking) — which shrank `CHORE-4`, since the broken quickstart snippet went
-with it — `FIX-2` (exact-float degeneracy detection), which **unblocks VISION-1**, and
-`PERF-1` (cached conditional quantiles), which makes ensemble generation ~8× faster and
-is argued in
-[`docs/design/precomputed-conditional-quantiles.md`](docs/design/precomputed-conditional-quantiles.md).*
 
 ---
 
@@ -113,17 +92,17 @@ bandwidth=None -> pickles fine, 262 KB
 multiprocessing of fitted generators. A custom `__reduce__` would fix it.
 
 Not blocking anything today: generators are built lazily behind an LRU cache precisely
-because persisting them buys ~58 ms and duplicates data already on disk — a decision
-recorded in `CHANGELOG.md` 0.2.0 and argued in
-[`rolling-day-window.md`](docs/design/completed/rolling-day-window.md). It would start to
-matter if PERF-1 lands, since a precomputed CDF grid *is* worth persisting.
+because persisting them buys ~58 ms and duplicates data already on disk — argued in
+[`rolling-day-window.md`](docs/design/completed/rolling-day-window.md). `PERF-1`'s quantile
+grid does not change that: it is built lazily, only for hot simulators, and costs ~0.5 MB
+and ~0.5 s, so persisting it is a worse trade than the one already rejected.
 
-> **PERF-1 landed 2026-07-28, and it makes this *less* urgent rather than more.** The
-> grid is built **lazily**, only for simulators that are actually sampled often, and it
-> costs ~0.5 MB and ~0.5 s to build. Persisting it would write a derived array to save
-> half a second, for the subset of generators that happen to be hot — a worse trade than
-> the one already rejected for fitted generators. What remains is the original problem:
-> `bandwidth=0.1` cannot be pickled at all, which still blocks multiprocessing.
+**Switching the default to `bandwidth=None` is not a way around it** — measured
+2026-07-28, `examples/diagnostics-overshoot/`. Scott's rule chooses **0.390** at a ±7-day
+window on a 19-year record against the hand-set **0.100** — a 3.9× wider kernel — and is
+worse on every statistic tested: mean daily total drops to 0.944–0.987 of observed at
+**all four** dates, P50 to 0.890–0.979, P90 to 0.902–0.996, all excluding 1. The signature
+is over-smoothing (P10 rises while P50 and P90 fall). The custom `__reduce__` is the fix.
 
 ---
 
@@ -186,15 +165,6 @@ accuracy gain does not justify; a single better rule would.
 See [`docs/design/precomputed-conditional-quantiles.md`](docs/design/precomputed-conditional-quantiles.md)
 for the measurements behind the current choice.
 
-> **Switching the default to `bandwidth=None` is not the fix** — measured 2026-07-28,
-> `examples/diagnostics-overshoot/`. Scott's rule chooses a factor of **0.390** at a
-> ±7-day window on a 19-year record, against the hand-set **0.100** — a 3.9× wider kernel —
-> and it is worse on every statistic tested: the mean of the daily total drops to
-> 0.944–0.987 of observed at **all four** dates, P50 to 0.890–0.979, P90 to 0.902–0.996,
-> all excluding. The signature is over-smoothing (P10 rises while P50 and P90 fall). So
-> this item needs the custom `__reduce__` it already proposes; it cannot be sidestepped by
-> changing the default.
-
 ---
 
 # Fixes — known defects
@@ -204,12 +174,8 @@ for the measurements behind the current choice.
 **Status:** open · **deferred 2026-07-28** · **Impact:** confined to low-tail questions —
 storage autonomy, worst-case days. **Nothing the package advertises is affected.**
 
-> **This item used to read "generated irradiance is systematically too high" and used to be
-> first in the queue. It is neither any more.** The diagnostic built to measure the
-> overshoot failed to reproduce it and found a smaller defect in its place. Evidence:
-> [`examples/diagnostics-overshoot/FINDINGS-2026-07-28.md`](examples/diagnostics-overshoot/FINDINGS-2026-07-28.md);
-> design and the provenance of the retired numbers in
-> [`PLAN.md`](examples/diagnostics-overshoot/PLAN.md).
+Evidence: [`examples/diagnostics-overshoot/FINDINGS-2026-07-28.md`](examples/diagnostics-overshoot/FINDINGS-2026-07-28.md);
+design and provenance in [`PLAN.md`](examples/diagnostics-overshoot/PLAN.md).
 
 ### Why it is deferred — the cost/benefit, measured
 
@@ -263,26 +229,15 @@ observed days below either threshold, so they cannot test it either way. Daily t
 also mildly **under-dispersed** (sd ratio 0.891–1.001 at bandwidth 0.1).
 
 **Mechanism:** a symmetric kernel across a bounded, right-skewed conditional density cannot
-put enough mass near the floor without putting some below it. This is the same boundary
-problem the old entry named — it just does not express itself as a mean bias.
+put enough mass near the floor without putting some below it.
 
-### What was retired, and why
+**Not reproduced, do not re-derive:** a biased mean (the earlier Paris +13 %/+14 % figures
+were measured under the pre-0.2.0 month-subset estimator and are kept in `PLAN.md`'s
+appendix as provenance, not as live measurements); compounding along the 24-step walk
+(per-hour bias is flat); any dependence on record length (k ∈ {19, 9, 3, 2} years, flat,
+and two-year cells at −0.02 %).
 
-The mean is **not** biased. At the shipped `bandwidth=0.1` the ratio of synthetic to
-observed mean daily total is 1.007 / 0.998 / 0.994 / 1.001 at the four dates, **none**
-excluding 1, on an instrument that recovers an injected +10 % in 9 of 9 configurations.
-
-The retired figures — Paris +13 %/+14 %, the bandwidth sweep, the compounding table — were
-measured under the **month-subset estimator on pre-0.2.0 code** (`gen_day_sequence(start_value=0.0)`,
-±10 % domain padding), on one two-year record, without repetition. The rolling window landed
-at 08:21 on 2026-07-15 and this entry was written at 09:09 the same morning, citing "the May
-*subset*". They are kept in `PLAN.md`'s appendix as provenance, not as live measurements.
-
-Also not reproduced: **compounding along the 24-step walk** (per-hour bias is flat), and any
-**dependence on record length** (k ∈ {19, 9, 3, 2} years, flat, and two-year cells at
-−0.02 %).
-
-### Candidate fixes — unchanged, and now aimed at the right target
+### Candidate fixes
 
 - **Boundary correction for the bounded-below case**: reflection at zero, a log/sqrt
   transform before fitting, or beta/gamma kernels near the bound. All three act directly on
@@ -292,12 +247,9 @@ Also not reproduced: **compounding along the 24-step walk** (per-hour bias is fl
 - Investigate whether `_calc_domain` taking `min`/`max` across *both* `previous` and
   `current` widens the domain where the two ranges differ.
 
-### The calibration test now exists
-
-`examples/diagnostics-overshoot/` is the harness the old entry asked for: nine
-configurations, ~2 minutes, with a null control, a positive control and an anchor cell that
-reproduces the previous run. **Any attempted fix should move the tail shares above without
-moving the mean ratios off 1.**
+`examples/diagnostics-overshoot/` is the calibration harness — nine configurations,
+~2 minutes, with a null control, a positive control and an anchor cell. **Any attempted fix
+should move the tail shares above without moving the mean ratios off 1.**
 
 ### Already tried — do not repeat
 
@@ -336,10 +288,10 @@ it cannot express which irradiance form the file holds.
 
 **Status:** decision partly taken · **Needed before VISION-1**
 
-> **Settled (2026-07-27): one irradiance column is modelled, and it is chosen by what the
-> source supplies.** Components are *not* modelled separately and summed. What remains is
-> **selection and provenance** — how the package chooses between `poa_global` and
-> `poa_direct` when only one is available, and how it records which it used.
+> **Settled: one irradiance column is modelled, chosen by what the source supplies.**
+> Components are *not* modelled separately and summed. What remains is **selection and
+> provenance** — how the package chooses between `poa_global` and `poa_direct` when only
+> one is available, and how it records which it used.
 
 PVGIS returns **either** the global plane-of-array irradiance **or** its three components,
 never both — one boolean, two mutually exclusive column sets:
@@ -361,11 +313,11 @@ sound for *observed* data, before any fitting.
 
 ### Why summing synthetic components is ruled out
 
-Recorded so it is not re-litigated. Fitting the three components independently and summing
-the *generated* series is not equivalent to fitting `poa_global`: each component gets its
-own KDE and its own draw, so the physical anticorrelation between direct and diffuse — a
-cloud moves one down and the other up — is destroyed. The sum is then under-dispersed at
-the day scale, over-dispersed hour to hour, and can produce hours no sky could.
+Fitting the three components independently and summing the *generated* series is not
+equivalent to fitting `poa_global`: each component gets its own KDE and its own draw, so
+the physical anticorrelation between direct and diffuse — a cloud moves one down and the
+other up — is destroyed. The sum is then under-dispersed at the day scale, over-dispersed
+hour to hour, and can produce hours no sky could.
 
 The accepted consequence: a user needing internally consistent components — to re-transpose
 onto a different tilt, say — cannot get them from this package. That is a limitation of the
@@ -397,7 +349,7 @@ one-attribute-at-a-time engine, not a bug.
 
 ## FEAT-3 — Chained series between two dates
 
-**Status:** open · **Shape decided (2026-07-27)** · **Independent of everything else**
+**Status:** open · shape decided · **Independent of everything else**
 
 Explicit *start* dates already work: `gen_day(5, 21)`, `for_day(month, day)`,
 `generate_series(start=(1, 1), n_days=365)`. What is missing is the **end**: `n_days` is
@@ -423,8 +375,6 @@ Three things the implementation has to settle, all visible in that loop:
   `n_days` must skip it the same way or the series overshoots by a day.
 - **`end=(2, 29)` with `include_feb29=False`** should raise, mirroring the existing
   guard on `start=(2, 29)` at `generators.py:660-664`.
-
-*(Was INBOX-4.)*
 
 ---
 
@@ -455,8 +405,6 @@ directory (matches the examples, visible, easy to git-ignore) or a user-level ca
 directory (survives moving between projects, but invisible from any of them)? **Decide
 this before FEAT-1 starts**, since it shapes the API surface both share.
 
-*(Was INBOX-5, kept separate from FEAT-1 by decision on 2026-07-27.)*
-
 ---
 
 ## FEAT-5 — `MetDataProcessor` metadata dict
@@ -467,25 +415,23 @@ Add a `.metadata` dict reporting what the processor can see: row count, years co
 date range, columns kept and dropped, non-null count per attribute — plus provenance
 (source, coordinates, period) when an adapter can supply it.
 
-**Two cautions, carried over from the triage.**
-
-1. **"Size of training set" has two meanings, in two homes.** The processor holds the
-   *whole record*; the actual training subset is per calendar day and belongs on
-   `DayWindowGenerator` / `EnvSeriesGenerator` — e.g. 341 pooled days for a ±15-day
-   window on the 11-year record, against 96 432 rows in the record itself. Reporting
-   both, each where it is true, is more useful than one number that has to be qualified.
-2. **Provenance cannot be invented.** A hand-built DataFrame has none, and `adapters.py`
-   deliberately supports that path (case B in its module docstring). The field must be
-   optional and **absent, never an error**.
-
 > **Settled: derived fields, plus an optional provenance passthrough the adapter fills.**
 > Derived-only would mean the one thing a user most wants to audit — where did this come
 > from — is the one thing the dict cannot say.
 
+Two cautions:
+
+1. **"Size of training set" has two meanings, in two homes.** The processor holds the
+   *whole record*; the actual training subset is per calendar day and belongs on
+   `DayWindowGenerator` / `EnvSeriesGenerator` — e.g. 341 pooled days for a ±15-day
+   window on the 11-year record, against 96 432 rows in the record itself. Report both,
+   each where it is true.
+2. **Provenance cannot be invented.** A hand-built DataFrame has none, and `adapters.py`
+   deliberately supports that path (case B in its module docstring). The field must be
+   optional and **absent, never an error**.
+
 The derived half needs nothing from FEAT-1 and could land first; the passthrough needs
 FEAT-1 to have defined what provenance *is*.
-
-*(Was INBOX-7.)*
 
 ---
 
@@ -493,7 +439,7 @@ FEAT-1 to have defined what provenance *is*.
 
 ## VISION-1 — Ingest sources other than PVGIS
 
-**Status:** future · **Unblocked** (FIX-2 landed 2026-07-28) · **Shapes:** FEAT-1, FEAT-2
+**Status:** future · **Unblocked** · **Shapes:** FEAT-1, FEAT-2
 
 Support other providers (Open-Meteo, ERA5, local station data) via a thin **adapter
 layer** that normalises each source into the canonical schema the core consumes
@@ -506,17 +452,9 @@ against each spec's `support` — turning silent ingestion bugs (kW/m² read as 
 °C) into an error at the boundary. `adapters.py` already has the shape of this; what is
 missing is a second real provider to prove it.
 
-**Both prerequisites are now cleared, so this is buildable.**
-
-- **FIX-2 landed 2026-07-28.** Any resampled or unit-converted source produces
-  near-zero-but-not-zero nights; degeneracy detection is now scale-aware rather than an
-  exact `== 0`, so those hours are classified as constant instead of having a 2D KDE
-  fitted across a catastrophically ill-conditioned covariance.
-- **Horizontal irradiance is registered** (`ghi`, `dni`, `dhi` against
-  `IRRADIANCE_HORIZONTAL`, 2026-07-28). Open-Meteo supplies GHI/DNI/DHI on the
-  horizontal, and `SOURCE_RENAMES["open_meteo"]` already maps `shortwave_radiation` — but
-  onto `poa_global`, which is **wrong** now that a truthful target exists. Fixing that
-  mapping is the first task of this item, and FEAT-2's resolver is what decides the rest.
+**First task:** `SOURCE_RENAMES["open_meteo"]` maps `shortwave_radiation` onto
+`poa_global`, which is **wrong** now that `ghi`/`dni`/`dhi` are registered against
+`IRRADIANCE_HORIZONTAL`. Fix that mapping; FEAT-2's resolver decides the rest.
 
 ---
 
@@ -558,7 +496,6 @@ costs. Both bandwidths at ±7 reproduce the pool's mean, so ±7 is not obviously
 own padded `date_str` instead. Worth aligning, but it is a breaking change for anything
 grouping on `date_id`.
 
-
 ## CHORE-3 — Document the on-disk format
 
 **Status:** open · **Needs:** FEAT-1 to settle provenance first
@@ -578,19 +515,14 @@ and what is deliberately absent, with the reasoning already in `adapters.py`'s m
 docstring (*"the column name is the provenance… no metadata sidecar"*). That position is
 what FEAT-1 revisits, which is why this waits on it.
 
-*(Was INBOX-6.)*
-
 ## CHORE-4 — Bring `docs/source/` back in line with the repo
 
 **Status:** open · **Do last**, after FEAT-1 and CHORE-3
 
-**Assessment.** Less drift than feared, and less again now. `quickstart.md` and
-`workflow.md` already describe π(x₀), `generate_series` and the registry; the 2026-07-27
-examples reorganisation repointed every stale path; and the 2026-07-28 `FIX-3` work
-rewrote the PVGIS sections of `quickstart.md` and `README.md` and put `adapters` and
-`variables` into `api.rst`, neither of which had been in the API docs at all.
-
-What is left:
+**Assessment.** Less drift than feared. `quickstart.md` and `workflow.md` already describe
+π(x₀), `generate_series` and the registry; every stale example path has been repointed;
+and the PVGIS sections of `quickstart.md` and `README.md` have been rewritten, with
+`adapters` and `variables` added to `api.rst`. What is left:
 
 - **No page documents the on-disk format** (CHORE-3) — add one once CHORE-3 decides
   what it says.
@@ -602,61 +534,47 @@ What is left:
 
 Do this pass *after* the items it depends on, so it is one edit rather than three.
 
-*(Was INBOX-3. The quickstart defect went to FIX-3 and landed with it.)*
-
 ## CHORE-12 — Nothing pins what the sampler produces
 
 **Status:** open · **raised for review, not yet agreed** · **Recommended priority:
 medium-low** — worth deciding on, not worth dropping other work for
 
-> **This entry exists to be judged, not acted on yet.** It was raised while landing
-> `PERF-1`, and the person raising it may be overstating it. The claim, the evidence
-> against it, and what would settle it are all below so the call can be made on the
-> facts rather than on the framing.
-
 ### The observation
 
 `PERF-1` added an entirely new sampling path — a cached quantile grid replacing a live KDE
-evaluation — and **all 271 existing tests passed without modification**. That is convenient,
-but it means the suite could not tell the difference between the two samplers. It also
-could not have told the difference had the new one been *wrong*.
+evaluation — and **all 271 existing tests passed without modification**. The suite could
+not tell the difference between the two samplers, and could not have told the difference
+had the new one been *wrong*. It tests **properties**: that a seed reproduces, that a
+shared generator advances, that samples stay inside physical support, that degenerate
+hours are classified correctly. All of those survive a sampler that returns materially
+different numbers.
 
-The suite tests **properties**: that a seed reproduces, that a shared generator advances,
-that samples stay inside physical support, that degenerate hours are classified correctly.
-All of those survive a sampler that returns materially different numbers.
-
-### The case that this is less serious than it sounds
-
-Worth stating, because it is real:
+### Arguments against acting
 
 - **The density computation *is* pinned.** `test_get_conditional_density_p1000` fixes
   `argmax == 463` and the density maximum to 1e-8 on a known fixture. What is unpinned is
   the step from that density to a sampled value, and the chain built on top of it.
-- **Support truncation is pinned end-to-end**, over a whole generated year — which is the
-  defect that actually shipped once (1.29 % negative irradiance) and the one most likely
-  to recur.
+- **Support truncation is pinned end-to-end**, over a whole generated year — the defect
+  that actually shipped once (1.29 % negative irradiance) and the one most likely to recur.
 - **A statistical property is genuinely awkward to pin.** An exact-value golden test on a
   sampler is brittle: a `numpy` or `scipy` release that changes generator internals or
-  `gaussian_kde` would break it without anything being wrong. That is a real reason the
-  gap exists, not an oversight.
+  `gaussian_kde` would break it without anything being wrong.
 
-### The case that it is worth closing
+### Arguments for
 
 - The gap is **demonstrated, not hypothetical**: this change exercised it.
-- The defects this repo has actually found — `FIX-2` (degenerate-slice misclassification),
-  `FIX-3`, and the two harness defects in the overshoot diagnostic — were all found by
-  *running things*, never by the suite. The suite has not yet caught a modelling defect.
+- Every modelling defect this repo has found — `FIX-2`, `FIX-3`, the two harness defects
+  in the overshoot diagnostic — was found by *running things*, never by the suite.
 - The natural check already exists but lives outside the suite:
   `examples/diagnostics-overshoot/` compares a generated ensemble against the pool it was
   fitted to. It needs a network fetch and ~5 minutes, so it cannot be a unit test — but a
   miniature of it can.
 
-### What would close it, if the answer is yes
+### What would close it
 
 A **calibration test**, not a golden-value test. Fit on the existing `synthetic_mdp`
 fixture (two years, a known generative process, all four attributes, already used across
-the suite), draw a few hundred days, and assert against the training pool with tolerances
-loose enough to survive a library upgrade and tight enough to catch a real shift:
+the suite), draw a few hundred days, and assert against the training pool:
 
 | assertion | suggested tolerance | what it catches |
 | :--- | :--- | :--- |
@@ -665,9 +583,9 @@ loose enough to survive a library upgrade and tight enough to catch a real shift
 | every value inside support | exact | already covered; keep it here too |
 | no NaN or inf anywhere | exact | the failure mode `FIX-2` produced |
 
-Estimated cost: **one test file, a few tens of seconds** now that `PERF-1` has landed. The
-tolerances are the whole design problem — too tight and it becomes a maintenance tax, too
-loose and it asserts nothing. The numbers above are a starting point, not a measurement.
+Estimated cost: **one test file, a few tens of seconds**. The tolerances are the whole
+design problem — too tight and it becomes a maintenance tax, too loose and it asserts
+nothing. The numbers above are a starting point, not a measurement.
 
 **Do it per attribute, not just for irradiance.** `temp_air` and `wind_speed` exercise
 different structure — no floor, no degenerate hours — and a defect confined to one of
@@ -680,9 +598,10 @@ them is exactly what a single-attribute test would miss.
 Raw notes land here — refined but not yet costed or classified — and leave by
 graduating into a group above with a real ID, or by being dropped. Nothing stays long.
 
-## INBOX-10 : Move envelope functionality from the examples into the code 
+## INBOX-10 : Move envelope functionality from the examples into the code
 
-examples/tools/ contains fucntionality that could be part of the main library as a diagnostics or convenience fucntion. 
+`examples/tools/` contains functionality that could be part of the main library as a
+diagnostics or convenience function.
 
 ## Archived items from TODOs.md
 
