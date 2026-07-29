@@ -232,14 +232,14 @@ statistics it learns are only meaningful if the days it pools share a climate.
 That makes the choice of subset a modelling decision, not a detail.
 `meteosynth` offers two strategies.
 
-**By calendar month** — `MetDataProcessor.get_month_subset(5)` pools every day
+**By calendar month** — `MetDataset.get_month_subset(5)` pools every day
 in May. Simple, but it has two defects. It is **off-centre**: a model for May 1
 trains on data whose centre of mass sits on May 16, biased roughly fifteen days
 late in the season. And it **jumps**: May 31 and June 1 train on *disjoint*
 data, so the generator steps discontinuously at every month boundary — twelve
 times a year, on dates with no physical meaning.
 
-**By rolling day window** — `MetDataProcessor.get_day_window_subset(5, 1)`
+**By rolling day window** — `MetDataset.get_day_window_subset(5, 1)`
 pools every day within $n$ days of May 1 (default $n = 15$), across all years in
 the record. It is centred on the target by construction and slides smoothly from
 one day to the next.

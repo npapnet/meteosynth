@@ -12,7 +12,7 @@ wired that way") and {doc}`quickstart` ("what to type").
 ```{mermaid}
 flowchart TD
     RawData["Raw hourly record (DataFrame)"]
-    RawData --> Ingest["MetDataProcessor(df)<br/>validate_columns + trim_columns"]
+    RawData --> Ingest["MetDataset(df)<br/>schema v1: validate, trim, canonicalise"]
 
     Ingest --> SliceChoice{"Training subset"}
     SliceChoice -->|"get_day_window_subset(month, day, n_days)"| WindowRoute["Rolling day window<br/>e.g. 21 May +/- 15 days"]
@@ -41,14 +41,38 @@ hour by hour; days are chained across midnight into a month or a year.
 ## 1. Ingestion and validation
 
 ```python
-from meteosynth import MetDataProcessor
+from meteosynth import MetDataset
 
 # df is a pandas DataFrame of historical hourly records
-mdp = MetDataProcessor(df)
+ds = MetDataset(df)
 ```
 
-The constructor does two things, both driven by the **variable registry** rather than by
-a fixed column list:
+`MetDataset` is the package's core object: a **strict, source-agnostic training record**.
+Whether the frame came from an adapter, a file or your own code, it is checked and
+canonicalised the same way, so strictness belongs to the format rather than to whichever
+route the data arrived by.
+
+The constructor is driven by the **variable registry** rather than by a fixed column
+list. It enforces the schema:
+
+| Rule | Behaviour |
+|---|---|
+| calendar index present, at least one registered variable | raise (`validate_columns`) |
+| unregistered columns | dropped (`trim_columns`) |
+| dtypes and row order | canonicalised, so two datasets over the same data are equal |
+| duplicate `(year, month, day, hour)` | raise, naming the dates |
+| impossible calendar (`month=13`, 31 April) | raise, naming the row |
+| value outside a spec's physical support | clipped to the bound, warned, counted in `describe()` |
+| a date with fewer than 24 hours | kept, and reported by `describe()` |
+
+The two structural rejections were already fatal before the schema existed — a duplicate
+row died inside `pivot`, an impossible month inside `day_slot` — so this changes the error
+message rather than what is accepted. Out-of-support values are *repaired* rather than
+refused because real records routinely carry small negative irradiance at night from
+sensor noise, and the check cannot catch the unit errors it was written for anyway (280 K
+and 20 °F both sit inside support).
+
+The two registry-driven checks in more detail:
 
 **`validate_columns`** — the rule is *all* of the calendar index columns
 (`INDEX_COLS = year, month, day, hour`) and *any* registered variable. Requiring only one
@@ -82,6 +106,40 @@ documentation-grade note of the defaults and gates nothing.
 A spec carries **constraints, not an identity**: `support`, `units`, `long_name`. The
 support is what makes an out-of-support sample impossible rather than merely unlikely —
 the evaluation domain is clamped to it before any CDF is built.
+
+### What the dataset can tell you
+
+```python
+ds.variables            # ('poa_global', 'temp_air', 'wind_speed')
+ds.irradiance_column    # 'poa_global' -- or 'ghi' for a horizontal record
+ds.describe()           # rows, years, dates, incomplete_dates, clipped, provenance
+ds.provenance           # Provenance(source='pvgis_hourly', site='paris', ...)
+```
+
+`irradiance_column` is what lets a script stop caring which source produced its data: a
+PVGIS hourly record answers `poa_global`, a TMY answers `ghi`. It refuses to guess when
+only *components* of a total are present, because a component is a part of a total and
+answering with one would be a factor-of-two error.
+
+`describe()["rows"]` is the **whole record**. The number of days a generator actually
+trains on is a different quantity, per calendar day — see *Seasonal slicing* below.
+
+### Saving and loading
+
+```python
+ds.save("paris.parquet")
+MetDataset.load("paris.parquet") == ds       # True: dtypes and provenance included
+```
+
+Parquet is the canonical format because it is the only one that round-trips: one file,
+exact dtypes, and provenance carried inside it as key-value metadata. CSV remains
+available as *interchange* under names that say so — `MetDataset.read_csv` imports and
+`ds.to_csv` exports with a warning — because it widens `int8` to `int64` and carries no
+provenance at all. `save`/`load` are a pair; `read_csv`/`to_csv` are not.
+
+A file written by a **newer** schema version is refused rather than guessed at, since
+today's code cannot know what changed. Unknown *provenance* fields are the opposite: they
+are descriptive, so they are ignored with a warning and the dataset still loads.
 
 ---
 
@@ -137,7 +195,7 @@ wide = convert_to_daily_wide(window_data, value_col="poa_global")
 ```
 
 The result is indexed by `date_str` (`YYYYMMDD`, so it *does* sort) with hours `0–23` as
-columns. `MetDataProcessor.get_monthly_attribute_wide_format(value_col, month_id)` is the
+columns. `MetDataset.get_monthly_attribute_wide_format(value_col, month_id)` is the
 convenience wrapper that slices a month and pivots in one call.
 
 **Why this shape is load-bearing.** Both values of a transition pair are read from the

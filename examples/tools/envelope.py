@@ -31,7 +31,7 @@ import numpy as np
 import pandas as pd
 from matplotlib import patheffects
 
-from meteosynth import DayWindowGenerator, MetDataProcessor, convert_to_daily_wide
+from meteosynth import DayWindowGenerator, MetDataset, convert_to_daily_wide
 
 HOURS = np.arange(24)
 
@@ -74,7 +74,7 @@ def apply_chart_style() -> None:
 
 
 def day_matrix(
-    mdp: MetDataProcessor, attr: str, month: int, day: int, n_days: int = 0
+    ds: MetDataset, attr: str, month: int, day: int, n_days: int = 0
 ) -> pd.DataFrame:
     """
     Observed days as a days-by-hours matrix, for one calendar day or a window round it.
@@ -87,7 +87,7 @@ def day_matrix(
     pd.DataFrame
         Indexed by ``YYYYMMDD``, with integer hour columns 0-23.
     """
-    subset = mdp.get_day_window_subset(month, day, n_days=n_days)
+    subset = ds.get_day_window_subset(month, day, n_days=n_days)
     return convert_to_daily_wide(subset, value_col=attr).reindex(columns=range(24))
 
 

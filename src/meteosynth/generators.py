@@ -15,9 +15,9 @@ or call :meth:`DayWindowGenerator.generate_series` for a continuous chained seri
 Training data can be sliced two ways, and both are supported:
 
 * by calendar month, via
-  :meth:`~meteosynth.met_data_processor.MetDataProcessor.get_month_subset`;
+  :meth:`~meteosynth.dataset.MetDataset.get_month_subset`;
 * by a rolling window of +/- n days centred on a target day, via
-  :meth:`~meteosynth.met_data_processor.MetDataProcessor.get_day_window_subset` --
+  :meth:`~meteosynth.dataset.MetDataset.get_day_window_subset` --
   wrapped ergonomically by :class:`DayWindowGenerator`, which builds each day's
   generator lazily rather than holding all 366 in memory at once.
 """
@@ -33,7 +33,7 @@ import pandas as pd
 
 from .day_window import DAYS_IN_YEAR, day_slot, slot_to_month_day
 from .markov_chain_simulator_kde2d import MarkovChainSimulator2dKDE, _as_rng
-from .met_data_processor import MetDataProcessor, convert_to_daily_wide
+from .dataset import MetDataset, convert_to_daily_wide
 from .variables import get_spec, registered
 
 HOURS_PER_DAY = 24
@@ -62,7 +62,7 @@ def build_transition_pairs(wide: pd.DataFrame, hour: int) -> pd.DataFrame:
     Build ``previous``/``current`` transition pairs for one hour from a wide frame.
 
     ``wide`` is a days-by-hours frame as produced by
-    :func:`~meteosynth.met_data_processor.convert_to_daily_wide`: one row per day, one
+    :func:`~meteosynth.dataset.convert_to_daily_wide`: one row per day, one
     column per hour. Both values of a pair are therefore read from the *same row*, which
     is what guarantees they come from the same day.
 
@@ -148,7 +148,7 @@ def build_initial_values(wide: pd.DataFrame) -> pd.DataFrame:
     ----------
     wide : pd.DataFrame
         Days-by-hours frame, as produced by
-        :func:`~meteosynth.met_data_processor.convert_to_daily_wide`.
+        :func:`~meteosynth.dataset.convert_to_daily_wide`.
 
     Returns
     -------
@@ -307,9 +307,9 @@ class EnvSeriesGenerator:
     met_data : pd.DataFrame
         Processed meteorological data with ``hour`` and ``attr_str`` columns. Typically
         a month subset
-        (:meth:`~meteosynth.met_data_processor.MetDataProcessor.get_month_subset`) or a
+        (:meth:`~meteosynth.dataset.MetDataset.get_month_subset`) or a
         rolling day window
-        (:meth:`~meteosynth.met_data_processor.MetDataProcessor.get_day_window_subset`);
+        (:meth:`~meteosynth.dataset.MetDataset.get_day_window_subset`);
         both are accepted unchanged.
     attr_str : str
         Attribute to model. Must have a registered
@@ -447,7 +447,7 @@ class DayWindowGenerator:
     """
     Seasonal generator built on rolling day windows, fitted lazily per target day.
 
-    Wraps a :class:`~meteosynth.met_data_processor.MetDataProcessor` and hands out an
+    Wraps a :class:`~meteosynth.dataset.MetDataset` and hands out an
     :class:`EnvSeriesGenerator` for any calendar day, trained on the +/- ``n_days``
     window centred on that day. Unlike a month-based split, the training data is centred
     on the target and varies smoothly from day to day.
@@ -467,7 +467,7 @@ class DayWindowGenerator:
 
     Parameters
     ----------
-    mdp : MetDataProcessor
+    dataset : MetDataset
         Processor holding the source meteorological data.
     attr_str : str
         Attribute to model. Must have a registered
@@ -481,14 +481,14 @@ class DayWindowGenerator:
 
     Examples
     --------
-    >>> dwg = DayWindowGenerator(mdp, attr_str='poa_direct')      # doctest: +SKIP
+    >>> dwg = DayWindowGenerator(dataset, attr_str='poa_direct')      # doctest: +SKIP
     >>> profile = dwg.gen_day(2, 29)                              # doctest: +SKIP
     >>> year = dwg.generate_series(start=(1, 1), n_days=365)      # doctest: +SKIP
     """
 
     def __init__(
         self,
-        mdp: MetDataProcessor,
+        dataset: MetDataset,
         attr_str: str,
         n_days: int = 15,
         bandwidth: Optional[float] = 0.1,
@@ -498,7 +498,7 @@ class DayWindowGenerator:
         if cache_size < 1:
             raise ValueError(f"cache_size must be at least 1, got {cache_size}")
 
-        self.mdp = mdp
+        self.dataset = dataset
         self.attr_str = attr_str
         self.n_days = n_days
         self.bandwidth = bandwidth
@@ -514,7 +514,7 @@ class DayWindowGenerator:
         day would repeat the single most expensive operation in the package 366 times.
         """
         if self._wide_full_cache is None:
-            self._wide_full_cache = _to_wide(self.mdp.met_data, self.attr_str)
+            self._wide_full_cache = _to_wide(self.dataset.met_data, self.attr_str)
         return self._wide_full_cache
 
     def for_day(self, month: int, day: int) -> EnvSeriesGenerator:
@@ -560,7 +560,7 @@ class DayWindowGenerator:
         logging.info("Fitting window generator for %02d-%02d (slot %d, n_days=%d)...",
                      month, day, slot, self.n_days)
         generator = EnvSeriesGenerator(
-            self.mdp.get_day_window_subset(month, day, n_days=self.n_days),
+            self.dataset.get_day_window_subset(month, day, n_days=self.n_days),
             attr_str=self.attr_str,
             bandwidth=self.bandwidth,
             wide_full=self._wide_full(),

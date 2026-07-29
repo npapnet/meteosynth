@@ -39,18 +39,21 @@ Pure data, no pandas -- mirrors the free-function style of :mod:`meteosynth.day_
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Iterable, Optional, Sequence, Tuple
 
 __all__ = [
     "VariableSpec",
     "IRRADIANCE",
     "IRRADIANCE_HORIZONTAL",
+    "IRRADIANCE_COLUMNS",
     "TEMP_AIR",
     "WIND_SPEED",
     "get_spec",
     "register",
     "unregister",
     "registered",
+    "irradiance_columns",
+    "resolve_irradiance",
 ]
 
 
@@ -134,6 +137,26 @@ TEMP_AIR = VariableSpec((-273.15, None), "degC", "Air temperature")
 
 #: Wind speed. Non-negative, but unlike irradiance it never touches the bound.
 WIND_SPEED = VariableSpec((0.0, None), "m/s", "Wind speed")
+
+#: Irradiance **totals**, most preferred first -- the answer to "which column here is the
+#: irradiance?" when a caller has not named one.
+#:
+#: Only totals appear. A component is a *part* of a total, never "the irradiance":
+#: ``poa_direct`` is roughly 70 % of ``poa_global``, so returning it for a caller who asked
+#: for the irradiance would be the factor-of-two error the naming scheme exists to prevent,
+#: arrived at from a new direction. :func:`resolve_irradiance` therefore raises rather than
+#: guessing when only components are present.
+#:
+#: ``poa_global`` outranks ``ghi`` because plane-of-array is what this package models --
+#: but a record holding only ``ghi`` resolves to ``ghi`` rather than erroring, and the
+#: *returned name* is what every caller then uses, so the plane is never silently lost.
+IRRADIANCE_COLUMNS: Tuple[str, ...] = ("poa_global", "ghi")
+
+#: The specs that make a column an irradiance. Membership is by **identity**, which is what
+#: :data:`IRRADIANCE_HORIZONTAL` being "deliberately a distinct object" is for: register a
+#: column against one of these and :func:`resolve_irradiance` discovers it, with no change
+#: to this package and no second list to keep in step.
+_IRRADIANCE_SPECS = (IRRADIANCE, IRRADIANCE_HORIZONTAL)
 
 
 #: Column name -> spec. Several names may map to the same spec object.
@@ -231,3 +254,80 @@ def registered() -> tuple[str, ...]:
     ``attr_str`` against it, and ingestion keeps exactly these columns.
     """
     return tuple(sorted(_REGISTRY))
+
+
+def irradiance_columns() -> Tuple[str, ...]:
+    """
+    Every registered column name whose spec is an irradiance spec, sorted.
+
+    Derived from the registry rather than hand-listed, so a user who registers
+    ``poa_reflected`` against :data:`IRRADIANCE` -- the sharing that
+    :func:`register` already documents as intended -- becomes resolvable with no change
+    here.
+    """
+    return tuple(
+        sorted(name for name, spec in _REGISTRY.items() if spec in _IRRADIANCE_SPECS)
+    )
+
+
+def resolve_irradiance(
+    columns: Iterable[str],
+    prefer: Sequence[str] = IRRADIANCE_COLUMNS,
+) -> str:
+    """
+    Pick the one irradiance column to model, by what is available.
+
+    This is what lets a caller stop caring whether their record came from PVGIS hourly
+    (``poa_global``) or a TMY (``ghi``). It **never renames or converts anything**: it
+    returns a name that the caller then uses everywhere -- ``attr_str``, plot labels,
+    saved output -- so the quantity and its plane travel with the result.
+
+    Parameters
+    ----------
+    columns : iterable of str
+        Column names to choose from, e.g. ``dataset.frame.columns``.
+    prefer : sequence of str, optional
+        Preference order over *totals*. Defaults to :data:`IRRADIANCE_COLUMNS`.
+
+    Returns
+    -------
+    str
+        The chosen column name.
+
+    Raises
+    ------
+    LookupError
+        If no irradiance column is present, or if the only ones present are components
+        of a total that is itself absent. Both messages name what was found and what
+        was looked for, because a user hitting this is by construction trying to work
+        out what their data holds.
+
+    Examples
+    --------
+    >>> resolve_irradiance(["poa_global", "temp_air", "wind_speed"])
+    'poa_global'
+    >>> resolve_irradiance(["ghi", "dni", "dhi"])
+    'ghi'
+    >>> resolve_irradiance(["poa_direct", "temp_air"])       # sole candidate, no ambiguity
+    'poa_direct'
+    """
+    present = [col for col in columns if col in irradiance_columns()]
+
+    for name in prefer:
+        if name in present:
+            return name
+
+    if not present:
+        raise LookupError(
+            f"no irradiance column found. Looked for {irradiance_columns()}; "
+            f"register one against IRRADIANCE or IRRADIANCE_HORIZONTAL to add it."
+        )
+
+    if len(present) == 1:
+        return present[0]
+
+    raise LookupError(
+        f"cannot choose an irradiance column: {sorted(present)} are all components, and "
+        f"none of the totals {tuple(prefer)} is present. A component is a part of a "
+        f"total, not the total -- name one explicitly, or build the total first."
+    )

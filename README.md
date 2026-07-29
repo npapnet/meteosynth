@@ -109,10 +109,10 @@ downstream energy analysis:
 
 ```python
 import numpy as np
-from meteosynth import MetDataProcessor, EnvSeriesGenerator
+from meteosynth import MetDataset, EnvSeriesGenerator
 
 # `df` is a processed PVGIS hourly frame (year, month, day, hour, poa_direct, ...)
-mdp = MetDataProcessor(df)
+mdp = MetDataset(df)
 may = mdp.get_month_subset(5)                     # train on one month
 
 gen = EnvSeriesGenerator(may, attr_str="poa_direct", bandwidth=0.1)
@@ -132,9 +132,9 @@ inherits May 16's climate, and May 31 shares no training data with June 1. A
 rolling window is centred on its target and slides smoothly.
 
 ```python
-from meteosynth import MetDataProcessor, DayWindowGenerator
+from meteosynth import MetDataset, DayWindowGenerator
 
-mdp = MetDataProcessor(df)
+mdp = MetDataset(df)
 
 # Both pool ~62 days from a 2-year record, around different centres:
 may_month = mdp.get_month_subset(5)                       # all of May
@@ -157,19 +157,36 @@ year = dwg.generate_series(start=(1, 1), n_days=365, seed=1)   # (365, 24)
 Fetch real data from PVGIS with `meteosynth.adapters`:
 
 ```python
-from meteosynth import MetDataProcessor
 from meteosynth.adapters import fetch_pvgis
 
-# Paris, 2011-2012. Pass `cache=` and the file is written on the first call and
+# Paris, 2011-2012. Pass `cache=` and the dataset is written on the first call and
 # read on every later one -- collection is slow and networked, modelling is not.
-df = fetch_pvgis(48.8566, 2.3522, 2011, 2012, cache="data/paris_2011_2012.csv")
-mdp = MetDataProcessor(df)
+ds = fetch_pvgis(48.8566, 2.3522, 2011, 2012, cache="data/paris_2011_2012.parquet")
 ```
 
-The frame comes back canonical: the four calendar columns plus `poa_global`, `temp_air`
-and `wind_speed`, validated against each column's physical support. Ask for a different
-irradiance component with `irradiance="direct"` — the emitted column keeps its specific
-name, so **the name records the choice** and no metadata sidecar is needed.
+You get a `MetDataset` directly: the four calendar columns plus `poa_global`, `temp_air`
+and `wind_speed`, canonicalised and validated. Ask for a different irradiance component
+with `irradiance="direct"` — the emitted column keeps its specific name, so **the name
+records the quantity**.
+
+What a column name *cannot* record is which site and which years produced it, so each
+dataset also carries a `Provenance`. That is what a warm cache is matched against:
+
+```python
+ds.provenance          # Provenance(source='pvgis_hourly', latitude=48.8566, ...)
+ds.irradiance_column   # 'poa_global' -- resolved, so a TMY record answers 'ghi' instead
+
+# Pointing a different request at the same file is an error, not a silent wrong answer.
+fetch_pvgis(35.3387, 25.1442, 2011, 2012, cache="data/paris_2011_2012.parquet")
+# CacheMismatchError: site (48.8566, 2.3522) != requested (35.3387, 25.1442)
+```
+
+Any dataset saves and loads losslessly, whatever built it:
+
+```python
+ds.save("data/paris.parquet")
+MetDataset.load("data/paris.parquet") == ds     # True, dtypes and provenance included
+```
 
 A Typical Meteorological Year is `fetch_pvgis_tmy(48.8566, 2.3522, coerce_year=2023)`.
 Note it supplies *horizontal* irradiance (`ghi`, `dni`, `dhi`), not plane-of-array — a

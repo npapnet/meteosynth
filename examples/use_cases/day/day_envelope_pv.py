@@ -49,7 +49,7 @@ _EXAMPLES = next(p for c in (_HERE, *_HERE.parents) for p in (c, c / "examples")
                  if (p / "tools" / "site_data.py").is_file())
 sys.path.insert(0, str(_EXAMPLES))
 
-from meteosynth import DayWindowGenerator, MetDataProcessor
+from meteosynth import DayWindowGenerator, MetDataset
 from tools.envelope import (
     day_matrix,
     ensemble_frame,
@@ -72,19 +72,18 @@ SEED = 42
 
 
 def main():
-    df = load_site(HERAKLION, *HERAKLION_YEARS)
-    mdp = MetDataProcessor(df)
-    print(mdp.describe_time_range())
+    ds = load_site(HERAKLION, *HERAKLION_YEARS)
+    print(ds.describe_time_range())
 
     # The observed cloud: the exact date, and the fortnight around it.
-    observed_exact = day_matrix(mdp, ATTR, *TARGET, n_days=0)
-    observed_pool = day_matrix(mdp, ATTR, *TARGET, n_days=POOL_DAYS)
+    observed_exact = day_matrix(ds, ATTR, *TARGET, n_days=0)
+    observed_pool = day_matrix(ds, ATTR, *TARGET, n_days=POOL_DAYS)
 
     print(f"\nFitting the +/-{WINDOW_DAYS} day window generator for {DATE_LABEL}...")
-    generator = DayWindowGenerator(mdp, attr_str=ATTR, n_days=WINDOW_DAYS)
+    generator = DayWindowGenerator(ds, attr_str=ATTR, n_days=WINDOW_DAYS)
     day_generator = generator.for_day(*TARGET)
     degenerate = [h for h, sim in day_generator.simulators.items() if sim.is_degenerate]
-    print(f"  training days pooled : {len(day_matrix(mdp, ATTR, *TARGET, n_days=WINDOW_DAYS))}")
+    print(f"  training days pooled : {len(day_matrix(ds, ATTR, *TARGET, n_days=WINDOW_DAYS))}")
     print(f"  degenerate hours     : {degenerate}")
     print(f"  pi(x0) kind          : {day_generator.initial.kind.name} "
           f"-- every observed midnight is 0 W/m2, so every synthetic day starts there")

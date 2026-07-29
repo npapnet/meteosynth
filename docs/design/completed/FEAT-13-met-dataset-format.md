@@ -1,10 +1,36 @@
 # FEAT-13 — `MetDataset`: a strict, source-agnostic training format
 
-Status: proposed · Author: N. Papadakis (with Claude) · Date: 2026-07-29 · Targets: v0.3.0
+Status: **implemented 2026-07-29** · Author: N. Papadakis (with Claude) · Date: 2026-07-29
 
 Supersedes `FEAT-1`. Absorbs `FEAT-2 (1)`, `FEAT-5` and `CHORE-3`.
-Replaces [`FEAT-2-FEAT-1-column-resolution-and-provenance.md`](FEAT-2-FEAT-1-column-resolution-and-provenance.md),
+Replaces [`../FEAT-2-FEAT-1-column-resolution-and-provenance.md`](../FEAT-2-FEAT-1-column-resolution-and-provenance.md),
 which put provenance inside the adapter's cache — the wrong place, for the reason below.
+
+> **Archive note — landed 2026-07-29, 314 tests green.** Implemented as designed, with
+> three deviations worth recording:
+>
+> 1. **Method names on the dataset kept their `get_` prefix** (`get_month_subset`,
+>    `get_day_window_subset`) rather than being shortened as the API sketch below shows.
+>    Renaming them would have touched ~17 further files for no behavioural gain, on top of
+>    a rename that was already wide.
+> 2. **Group membership for the irradiance resolver is derived from the registry** by spec
+>    identity, rather than from a second hand-maintained list. The shipped constant
+>    `IRRADIANCE_COLUMNS = ("poa_global", "ghi")` is the *preference order* over totals, as
+>    agreed; the candidate set comes from `irradiance_columns()`. This adds no concept —
+>    sharing a spec object is already the documented way to relate columns — and it means a
+>    user registering `poa_reflected` against `IRRADIANCE` is discovered automatically,
+>    which the text below records as a cost that in the end was not paid.
+> 3. **A mismatched cache raises rather than refetching.** The summary line in *What
+>    shrinks* said "refetch on mismatch"; the detailed reasoning inherited from the
+>    superseded plan said raise. Raise was chosen deliberately, because the caller picks
+>    the path, so a mismatch is a mistake to surface rather than a stale entry to evict —
+>    and overwriting would destroy a record that may have taken a long download.
+>
+> Also landed alongside: `examples/tools/migrate_cache.py`, converting the legacy CSV
+> caches (4.9 MB → 0.6 MB, 4.3 MB → 0.5 MB, 0.8 MB → 0.1 MB on the shipped files).
+>
+> Still open, unchanged by this work: `FEAT-4` (default cache location), period
+> containment, `FEAT-2` (3), and schema migrations.
 
 ## Overview
 

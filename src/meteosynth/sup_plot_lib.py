@@ -3,16 +3,16 @@ import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
 
-from .met_data_processor import MetDataProcessor
+from .dataset import MetDataset
 
 _f_month_name = lambda x: pd.to_datetime(f'2023-{x}-01').strftime('%B')
 
-def plot_month_by_year_sns(mdp:MetDataProcessor, month_ind:int=5, value_col:str='poa_direct'):
+def plot_month_by_year_sns(dataset:MetDataset, month_ind:int=5, value_col:str='poa_direct'):
     """
     Create a faceted plot of the monthly data for each year using Seaborn.
     
     Parameters:
-    - mdp: MetDataProcessor instance.
+    - dataset: MetDataset instance.
     - month_ind: Month index (1-12) to filter the data.
     - value_col: Column name for the value to plot.
     
@@ -20,7 +20,7 @@ def plot_month_by_year_sns(mdp:MetDataProcessor, month_ind:int=5, value_col:str=
     - FacetGrid object.
     """
     # Filter the data for the specified month
-    month_data = mdp.get_month_subset(month_ind).copy()
+    month_data = dataset.get_month_subset(month_ind).copy()
     
     # Create the plot using FacetGrid
     g = sns.FacetGrid(

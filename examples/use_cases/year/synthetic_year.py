@@ -59,7 +59,7 @@ _EXAMPLES = next(p for c in (_HERE, *_HERE.parents) for p in (c, c / "examples")
                  if (p / "tools" / "site_data.py").is_file())
 sys.path.insert(0, str(_EXAMPLES))
 
-from meteosynth import DayWindowGenerator, MetDataProcessor
+from meteosynth import DayWindowGenerator, MetDataset
 from tools.site_data import HERAKLION, HERAKLION_YEARS, load_site, save_figure, save_frame
 
 ATTRS = ["poa_global", "temp_air", "wind_speed"]
@@ -84,10 +84,10 @@ def hourly_index(year: int) -> pd.DatetimeIndex:
     return index
 
 
-def generate_year(mdp: MetDataProcessor, attr: str, seed: int) -> np.ndarray:
+def generate_year(ds: MetDataset, attr: str, seed: int) -> np.ndarray:
     """One chained 365-day series for one attribute. Returns shape ``(365, 24)``."""
     generator = DayWindowGenerator(
-        mdp, attr_str=attr, n_days=WINDOW_DAYS, cache_size=CACHE_SIZE
+        ds, attr_str=attr, n_days=WINDOW_DAYS, cache_size=CACHE_SIZE
     )
     started = time.perf_counter()
     days = generator.generate_series(start=(1, 1), n_days=365, seed=seed)
@@ -166,9 +166,8 @@ def plot_year(frame: pd.DataFrame):
 
 
 def main():
-    df = load_site(HERAKLION, *HERAKLION_YEARS)
-    mdp = MetDataProcessor(df)
-    print(mdp.describe_time_range())
+    ds = load_site(HERAKLION, *HERAKLION_YEARS)
+    print(ds.describe_time_range())
     print(f"Generating {N_REALISATIONS} synthetic year(s) of {ATTRS} "
           f"on a {REFERENCE_YEAR} (non-leap) calendar.\n")
 
@@ -182,15 +181,15 @@ def main():
             # A distinct seed per (realisation, attribute): the attributes are modelled
             # independently, so sharing one stream would not couple them anyway -- but a
             # distinct seed makes each series reproducible on its own.
-            frame[attr] = generate_year(mdp, attr, seed=SEED + 1000 * realisation
+            frame[attr] = generate_year(ds, attr, seed=SEED + 1000 * realisation
                                         + ATTRS.index(attr)).ravel()
 
         name = f"year_{HERAKLION.key}_{REFERENCE_YEAR}_r{realisation + 1:02d}.csv"
         written.append(save_frame(frame, name))
 
         if realisation == 0:
-            summary = monthly_summary(frame, mdp.met_data)
-            print_summary(summary, frame, mdp.met_data)
+            summary = monthly_summary(frame, ds.met_data)
+            print_summary(summary, frame, ds.met_data)
             save_frame(summary, f"year_{HERAKLION.key}_monthly_summary.csv", index=False)
             if PLOT_HEATMAP:
                 save_figure(plot_year(frame),

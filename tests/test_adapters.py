@@ -14,11 +14,13 @@ import pytest
 from meteosynth import adapters
 from meteosynth.adapters import (
     SOURCE_RENAMES,
+    CacheMismatchError,
     fetch_pvgis,
     fetch_pvgis_tmy,
     normalise,
     validate_support,
 )
+from meteosynth.dataset import MetDataset
 
 
 def _canonical_frame(n=48, **overrides):
@@ -68,15 +70,18 @@ def test_already_canonical_names_are_a_no_op():
     pd.testing.assert_frame_equal(normalise(frame, source="open_meteo"), frame)
 
 
-# --- support validation ------------------------------------------------------------
+# --- support validation, as an opt-in hard check -------------------------------------
+#
+# MetDataset clips rather than raises, so ingestion is uniform however the data arrived.
+# validate_support survives as the stricter check a caller can ask for explicitly, which
+# keeps both behaviours available and neither of them implicit.
 
 def test_kelvin_temperature_slips_through():
     """Kelvin is *above* absolute zero, so the lower bound does not catch it.
 
     Documented rather than fixed: support validation is a necessary condition, not a
-    sufficient one, and catching this would need the unit conversion this round
-    deliberately excludes. Recorded so the limitation is visible rather than assumed
-    away -- see test_fahrenheit_mislabelled_as_celsius_passes for the same point.
+    sufficient one, and catching this would need the unit conversion the package
+    deliberately excludes.
     """
     frame = _canonical_frame()
     frame["temp_air"] = np.linspace(280, 295, len(frame))    # kelvin, not degC
@@ -115,7 +120,6 @@ def test_unregistered_columns_are_not_validated():
 
 
 # THE LIMITATION, asserted so nobody mistakes support validation for a unit check.
-# Support is a necessary condition, not a sufficient one.
 def test_fahrenheit_mislabelled_as_celsius_passes():
     frame = _canonical_frame()
     frame["temp_air"] = np.full(len(frame), 20.0)   # 20 degF read as 20 degC
@@ -189,46 +193,55 @@ def stub_pvlib(monkeypatch):
 
 def test_default_collects_global_irradiance(stub_pvlib):
     """PVGIS returns global or the three components depending on one flag."""
-    frame = fetch_pvgis(48.86, 2.35, 2011, 2011)
+    dataset = fetch_pvgis(48.86, 2.35, 2011, 2011)
 
-    assert "poa_global" in frame.columns
-    assert "poa_direct" not in frame.columns
+    assert "poa_global" in dataset.met_data.columns
+    assert "poa_direct" not in dataset.met_data.columns
     assert stub_pvlib["components"] is False
 
 
 def test_direct_is_opted_into(stub_pvlib):
-    frame = fetch_pvgis(48.86, 2.35, 2011, 2011, irradiance="direct")
+    dataset = fetch_pvgis(48.86, 2.35, 2011, 2011, irradiance="direct")
 
-    assert "poa_direct" in frame.columns
-    assert "poa_global" not in frame.columns
+    assert "poa_direct" in dataset.met_data.columns
+    assert "poa_global" not in dataset.met_data.columns
     assert stub_pvlib["components"] is True
 
 
-# The emitted column keeps its specific name, so the NAME records the choice. This is
-# why no metadata sidecar exists anywhere in the design.
-def test_the_column_name_is_the_provenance(stub_pvlib):
-    globals_frame = fetch_pvgis(48.86, 2.35, 2011, 2011, irradiance="global")
-    direct_frame = fetch_pvgis(48.86, 2.35, 2011, 2011, irradiance="direct")
+# The emitted column keeps its specific name, so the NAME records the quantity.
+# Provenance records what a name cannot: which site, which years, which source.
+def test_the_column_name_is_the_quantity(stub_pvlib):
+    globals_ds = fetch_pvgis(48.86, 2.35, 2011, 2011, irradiance="global")
+    direct_ds = fetch_pvgis(48.86, 2.35, 2011, 2011, irradiance="direct")
 
-    assert set(globals_frame.columns) != set(direct_frame.columns)
-    assert "poa_global" in globals_frame.columns
-    assert "poa_direct" in direct_frame.columns
+    assert set(globals_ds.variables) != set(direct_ds.variables)
+    assert "poa_global" in globals_ds.variables
+    assert "poa_direct" in direct_ds.variables
 
 
-def test_fetched_frame_is_canonical_and_ingestible(stub_pvlib):
-    from meteosynth.met_data_processor import MetDataProcessor
+def test_a_fetch_stamps_provenance(stub_pvlib):
+    dataset = fetch_pvgis(48.86, 2.35, 2011, 2011, site="paris")
 
-    frame = fetch_pvgis(48.86, 2.35, 2011, 2011)
+    assert dataset.provenance.source == "pvgis_hourly"
+    assert dataset.provenance.site == "paris"
+    assert (dataset.provenance.latitude, dataset.provenance.longitude) == (48.86, 2.35)
+    assert (dataset.provenance.start_year, dataset.provenance.end_year) == (2011, 2011)
+    assert dataset.provenance.fetched is not None
+
+
+def test_a_fetched_dataset_is_canonical(stub_pvlib):
+    dataset = fetch_pvgis(48.86, 2.35, 2011, 2011)
+
     for col in ("year", "month", "day", "hour"):
-        assert col in frame.columns
+        assert col in dataset.met_data.columns
+    assert dataset.irradiance_column == "poa_global"
 
-    mdp = MetDataProcessor(frame)
-    assert "poa_global" in mdp.met_data.columns
 
+# --- caching -------------------------------------------------------------------------
 
 def test_cache_round_trips(stub_pvlib, tmp_path):
     """Collection is slow and networked; modelling is not, and often runs later."""
-    cache = tmp_path / "site.csv"
+    cache = tmp_path / "site.parquet"
 
     first = fetch_pvgis(48.86, 2.35, 2011, 2011, cache=cache)
     assert cache.exists()
@@ -237,28 +250,72 @@ def test_cache_round_trips(stub_pvlib, tmp_path):
     second = fetch_pvgis(48.86, 2.35, 2011, 2011, cache=cache)
 
     assert "components" not in stub_pvlib      # the network path was not taken
-    # dtypes are not part of the canonical contract; a CSV round-trip may widen
-    # int32 to int64 on some platforms.
-    pd.testing.assert_frame_equal(first, second, check_dtype=False)
+    assert first == second                     # round-trip identity, dtypes included
 
 
-def test_cached_data_is_still_validated(stub_pvlib, tmp_path):
-    """A corrupted cache must not slip past the boundary check."""
-    cache = tmp_path / "site.csv"
-    fetch_pvgis(48.86, 2.35, 2011, 2011, cache=cache)
+def test_a_cache_must_be_parquet(stub_pvlib, tmp_path):
+    """CSV carries neither provenance nor dtypes, so it cannot answer a match check."""
+    with pytest.raises(ValueError, match="must be a .parquet path"):
+        fetch_pvgis(48.86, 2.35, 2011, 2011, cache=tmp_path / "site.csv")
 
-    corrupted = pd.read_csv(cache)
-    corrupted.loc[0, "poa_global"] = -100.0
-    corrupted.to_csv(cache, index=False)
 
-    with pytest.raises(ValueError, match="below its physical lower bound"):
+def test_a_different_site_is_a_mismatch_not_a_silent_answer(stub_pvlib, tmp_path):
+    """The defect this item was filed for: a warm cache answering the wrong question."""
+    cache = tmp_path / "heraklion.parquet"
+    fetch_pvgis(35.3387, 25.1442, 2011, 2011, cache=cache)
+
+    with pytest.raises(CacheMismatchError) as excinfo:
         fetch_pvgis(48.86, 2.35, 2011, 2011, cache=cache)
 
+    message = str(excinfo.value)
+    assert "site" in message
+    assert "35.3387" in message and "48.86" in message
 
-def test_adapters_are_optional(synthetic_mdp):
+
+def test_a_different_period_is_a_mismatch(stub_pvlib, tmp_path):
+    cache = tmp_path / "site.parquet"
+    fetch_pvgis(48.86, 2.35, 2011, 2011, cache=cache)
+
+    with pytest.raises(CacheMismatchError, match="period"):
+        fetch_pvgis(48.86, 2.35, 2015, 2016, cache=cache)
+
+
+def test_a_different_irradiance_form_is_a_mismatch(stub_pvlib, tmp_path):
+    """One PVGIS fetch cannot carry both forms -- the case that motivated the item."""
+    cache = tmp_path / "site.parquet"
+    fetch_pvgis(48.86, 2.35, 2011, 2011, irradiance="global", cache=cache)
+
+    with pytest.raises(CacheMismatchError, match="columns"):
+        fetch_pvgis(48.86, 2.35, 2011, 2011, irradiance="direct", cache=cache)
+
+
+def test_coordinates_match_to_four_decimals(stub_pvlib, tmp_path):
+    """Float noise must not read as a different site and cost a silent re-download."""
+    cache = tmp_path / "site.parquet"
+    fetch_pvgis(35.3387, 25.1442, 2011, 2011, cache=cache)
+
+    stub_pvlib.clear()
+    fetch_pvgis(35.33870000001, 25.14420000001, 2011, 2011, cache=cache)
+
+    assert "components" not in stub_pvlib      # matched, so no network
+
+
+def test_force_refetch_overwrites_a_mismatched_cache(stub_pvlib, tmp_path):
+    """The explicit way to repurpose a path, so nothing is destroyed by accident."""
+    cache = tmp_path / "site.parquet"
+    fetch_pvgis(35.3387, 25.1442, 2011, 2011, cache=cache)
+
+    dataset = fetch_pvgis(48.86, 2.35, 2011, 2011, cache=cache, force_refetch=True)
+
+    assert dataset.provenance.latitude == 48.86
+    assert MetDataset.load(cache).provenance.latitude == 48.86
+
+
+def test_adapters_are_optional(synthetic_ds):
     """Use case B: the user already has data and no adapter is involved at all."""
-    assert synthetic_mdp.met_data is not None
-    assert "temp_air" in synthetic_mdp.met_data.columns
+    assert synthetic_ds.met_data is not None
+    assert "temp_air" in synthetic_ds.met_data.columns
+    assert synthetic_ds.provenance.source == "user"
 
 
 # --- arity independence -------------------------------------------------------------
@@ -267,28 +324,25 @@ def test_adapters_are_optional(synthetic_mdp):
 # return, and the old metdata_pvgis module unpacked fixed shapes, so both of its fetch
 # functions raised on every call. Nothing depended on them, so the suite stayed green
 # and it went unnoticed until someone followed the README.
-#
-# Testing the *property* -- that the data is result[0] whatever else comes back -- beats
-# testing against a recorded response: there is no fixture to rot and no network.
 
 @pytest.mark.parametrize("arity", [2, 3, 4])
 def test_hourly_survives_any_pvlib_return_arity(monkeypatch, arity):
     _install_stub_pvlib(monkeypatch, arity=arity)
 
-    frame = fetch_pvgis(48.86, 2.35, 2011, 2011)
+    dataset = fetch_pvgis(48.86, 2.35, 2011, 2011)
 
-    assert "poa_global" in frame.columns
-    assert len(frame) == 72
+    assert "poa_global" in dataset.met_data.columns
+    assert len(dataset.met_data) == 72
 
 
 @pytest.mark.parametrize("arity", [2, 3, 4])
 def test_tmy_survives_any_pvlib_return_arity(monkeypatch, arity):
     _install_stub_pvlib(monkeypatch, arity=arity)
 
-    frame = fetch_pvgis_tmy(35.34, 25.14)
+    dataset = fetch_pvgis_tmy(35.34, 25.14)
 
-    assert "ghi" in frame.columns
-    assert len(frame) == 8760
+    assert "ghi" in dataset.met_data.columns
+    assert len(dataset.met_data) == 8760
 
 
 # --- TMY ----------------------------------------------------------------------------
@@ -299,31 +353,35 @@ def test_tmy_irradiance_is_horizontal_not_plane_of_array(stub_pvlib):
     Silently interchanging them is the factor-of-two error the naming scheme exists to
     prevent, in the plane dimension rather than the component one.
     """
-    frame = fetch_pvgis_tmy(35.34, 25.14)
+    dataset = fetch_pvgis_tmy(35.34, 25.14)
 
-    assert {"ghi", "dni", "dhi"} <= set(frame.columns)
-    assert not any(col.startswith("poa_") for col in frame.columns)
+    assert {"ghi", "dni", "dhi"} <= set(dataset.variables)
+    assert not any(col.startswith("poa_") for col in dataset.variables)
+
+
+def test_tmy_resolves_to_ghi(stub_pvlib):
+    """A caller should not need to know which of the two fetchers produced their data."""
+    assert fetch_pvgis_tmy(35.34, 25.14).irradiance_column == "ghi"
 
 
 def test_tmy_drops_unregistered_columns_by_rule(stub_pvlib):
     """PVGIS supplies pressure and friends; a column is kept iff it has a spec."""
-    frame = fetch_pvgis_tmy(35.34, 25.14)
+    dataset = fetch_pvgis_tmy(35.34, 25.14)
 
-    assert "pressure" not in frame.columns
-    assert set(frame.columns) == {"ghi", "dni", "dhi", "temp_air", "wind_speed",
-                                  "year", "month", "day", "hour"}
+    assert "pressure" not in dataset.met_data.columns
+    assert set(dataset.met_data.columns) == {
+        "ghi", "dni", "dhi", "temp_air", "wind_speed",
+        "year", "month", "day", "hour",
+    }
 
 
-def test_tmy_frame_is_canonical_and_ingestible(stub_pvlib):
-    """The whole point of registering ghi/dni/dhi: the irradiance survives ingestion."""
-    from meteosynth.met_data_processor import MetDataProcessor
+def test_tmy_records_no_period_rather_than_a_fabricated_one(stub_pvlib):
+    """Each month comes from a different real year, so there is no range to write."""
+    provenance = fetch_pvgis_tmy(35.34, 25.14).provenance
 
-    frame = fetch_pvgis_tmy(35.34, 25.14, coerce_year=2023)
-    for col in ("year", "month", "day", "hour"):
-        assert col in frame.columns
-
-    mdp = MetDataProcessor(frame)
-    assert "ghi" in mdp.met_data.columns
+    assert provenance.source == "pvgis_tmy"
+    assert provenance.start_year is None
+    assert provenance.end_year is None
 
 
 def test_tmy_coerce_year_is_passed_through_not_applied_for_you(stub_pvlib):
@@ -336,7 +394,7 @@ def test_tmy_coerce_year_is_passed_through_not_applied_for_you(stub_pvlib):
 
 
 def test_tmy_cache_round_trips(stub_pvlib, tmp_path):
-    cache = tmp_path / "tmy.csv"
+    cache = tmp_path / "tmy.parquet"
 
     first = fetch_pvgis_tmy(35.34, 25.14, cache=cache)
     assert cache.exists()
@@ -345,26 +403,4 @@ def test_tmy_cache_round_trips(stub_pvlib, tmp_path):
     second = fetch_pvgis_tmy(35.34, 25.14, cache=cache)
 
     assert "coerce_year" not in stub_pvlib      # the network path was not taken
-    pd.testing.assert_frame_equal(first, second, check_dtype=False)
-
-
-def test_horizontal_irradiance_is_actually_validated(stub_pvlib, tmp_path):
-    """Before ghi was registered this slipped through unchecked, which is the bug.
-
-    validate_support skips unregistered columns, so a TMY frame used to carry its
-    irradiance past the boundary with no check at all -- and then lose it entirely at
-    ingestion, since MetDataProcessor trims to the registered set.
-    """
-    cache = tmp_path / "tmy.csv"
-    fetch_pvgis_tmy(35.34, 25.14, cache=cache)
-
-    corrupted = pd.read_csv(cache)
-    corrupted.loc[0, "ghi"] = -50.0
-    corrupted.to_csv(cache, index=False)
-
-    with pytest.raises(ValueError, match="below its physical lower bound") as excinfo:
-        fetch_pvgis_tmy(35.34, 25.14, cache=cache)
-
-    message = str(excinfo.value)
-    assert "ghi" in message
-    assert "Horizontal-plane irradiance" in message    # the honest long_name, not POA
+    assert first == second
