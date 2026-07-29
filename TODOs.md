@@ -162,7 +162,7 @@ there is no evidence yet that anything is actually wrong for temperature either.
 count.** Two spacing rules selected by attribute is a maintenance cost that a marginal
 accuracy gain does not justify; a single better rule would.
 
-See [`docs/design/precomputed-conditional-quantiles.md`](docs/design/precomputed-conditional-quantiles.md)
+See [`docs/design/completed/PERF-1-precomputed-conditional-quantiles.md`](docs/design/completed/PERF-1-precomputed-conditional-quantiles.md)
 for the measurements behind the current choice.
 
 ---
@@ -264,8 +264,10 @@ The padding is gone from both the 1D and 2D paths.
 
 ## FEAT-1 — Cached data metadata and cache-match check
 
-**Status:** open · **Impact:** prevents redundant network fetches and cached-file
-mismatches
+**Status:** open · **Plan proposed 2026-07-29** · **Impact:** prevents redundant network
+fetches and cached-file mismatches
+
+Design: [`FEAT-2-FEAT-1-column-resolution-and-provenance.md`](docs/design/FEAT-2-FEAT-1-column-resolution-and-provenance.md).
 
 Saved datasets carry no embedded metadata identifying their origin, so a warm cache can
 silently answer a question it was not asked.
@@ -286,7 +288,9 @@ it cannot express which irradiance form the file holds.
 
 ## FEAT-2 — Irradiance: pick one column by availability
 
-**Status:** decision partly taken · **Needed before VISION-1**
+**Status:** decision partly taken · **Needed before VISION-1** · **(1) planned 2026-07-29**
+
+Design for (1): [`FEAT-2-FEAT-1-column-resolution-and-provenance.md`](docs/design/FEAT-2-FEAT-1-column-resolution-and-provenance.md).
 
 > **Settled: one irradiance column is modelled, chosen by what the source supplies.**
 > Components are *not* modelled separately and summed. What remains is **selection and
@@ -603,16 +607,6 @@ graduating into a group above with a real ID, or by being dropped. Nothing stays
 `examples/tools/` contains functionality that could be part of the main library as a
 diagnostics or convenience function.
 
-## Archived items from TODOs.md
+## INBOX-13 : make sure progress bar exists in example scripts and its functional 
 
-`INBOX-1` … `INBOX-7` were triaged on **2026-07-27**:
-
-| Was                                               | Became                                        |
-| :------------------------------------------------ | :-------------------------------------------- |
-| INBOX-1 — one folder per use case                 | **landed**, see `CHANGELOG.md`                |
-| INBOX-2 — retire duplicate concept scripts        | **landed**, see `CHANGELOG.md`                |
-| INBOX-3 — realign `docs/source/`                  | `CHORE-4`, minus the broken snippet → `FIX-3` |
-| INBOX-4 — chained series between two dates        | `FEAT-3`                                      |
-| INBOX-5 — downloads cache by default              | `FEAT-4`                                      |
-| INBOX-6 — confirm and document the on-disk format | `CHORE-3`                                     |
-| INBOX-7 — `MetDataProcessor` metadata dict        | `FEAT-5`                                      |
+`tdqm` is now part of core dependencies. I need to make sure that the code is able to visualize the concepts. Check whether this package is ok to put this functionality of a higher level one. 

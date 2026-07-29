@@ -47,7 +47,7 @@ Active / Architecture reference:
 | document | type | description |
 |---|---|---|
 | [architecture.md](architecture.md) | architecture reference | Concise overview of package essence, current state (v0.2.0), mathematical foundation, repository tree structure, module responsibilities, and developer/agent onboarding guide. |
-| [precomputed-conditional-quantiles.md](precomputed-conditional-quantiles.md) | design note | `PERF-1`: caching the conditional inverse CDF for simulators that are sampled often — 8× on ensemble work, nothing on a year-long walk. Records why the *quantile function* is the thing interpolated rather than the CDF, why node spacing is uniform rather than quantile-based, why the cache is lazy, and what the test suite did **not** catch. |
+| [FEAT-2-FEAT-1-column-resolution-and-provenance.md](FEAT-2-FEAT-1-column-resolution-and-provenance.md) | design spec | `FEAT-2 (1)` + `FEAT-1`: a resolver that picks the one irradiance column to model from what a frame actually holds, and a provenance record — site, period, columns — carried on `DataFrame.attrs` in memory and a JSON sidecar on disk, so a warm cache can no longer answer a question it was not asked. Records what `attrs` survives, measured. |
 
 
 
@@ -60,6 +60,7 @@ the test suite, not before.
 
 | document | type | implemented | what it is |
 |---|---|---|---|
+| [completed/PERF-1-precomputed-conditional-quantiles.md](completed/PERF-1-precomputed-conditional-quantiles.md) | design note | 2026-07-28 | `PERF-1`: caching the conditional inverse CDF for simulators that are sampled often — 8× on ensemble work, nothing on a year-long walk. Records why the *quantile function* is the thing interpolated rather than the CDF, why node spacing is uniform rather than quantile-based, why the cache is lazy, and what the test suite did **not** catch. |
 | [completed/variable-specs-and-initialisation.md](completed/variable-specs-and-initialisation.md) | design spec | 2026-07-22 | An extensible `VariableSpec` registry replacing the fixed column whitelist; sampling truncated to each quantity's physical support; `start_value` replaced by a fitted initial distribution π(x₀) plus a real cross-midnight transition; `generate_series` on the rolling-window path; an optional source-adapter layer. Fixes negative irradiance, out-of-domain crashes and the hour-0 quirk. Carries an archive note recording two claims that did not survive measurement. |
 | [completed/rolling-day-window.md](completed/rolling-day-window.md) | design spec | 2026-07-15 | A rolling ±n-day training window as an alternative to the month split, incl. the `all_leap` calendar, Feb 29 handling, and why generators are built lazily rather than persisted. |
 | [completed/transition-pair-alignment.md](completed/transition-pair-alignment.md) | explainer | 2026-07-15 | Plain-language account of why `previous`/`current` pairs must be matched by date rather than row position, and how an innocent `sort_values` silently corrupts 26,808 training pairs. |
