@@ -1,3 +1,4 @@
+#%%
 """
 Example: Exploratory Analysis of Meteorological Data
 
@@ -6,58 +7,26 @@ the `MetDataProcessor` from `meteosynth`, and visualize it using the plotting
 functions in `sup_plot_lib`.
 """
 
-import os
 import pathlib
-import pandas as pd
-import numpy as np
+import sys
+
 import matplotlib.pyplot as plt
-from pvlib.iotools import get_pvgis_hourly
+
+# Make `examples/` importable however this file is run (script, -m, or an editor cell).
+_HERE = pathlib.Path(__file__).resolve().parent if "__file__" in globals() else pathlib.Path.cwd()
+_EXAMPLES = next(p for c in (_HERE, *_HERE.parents) for p in (c, c / "examples")
+                 if (p / "tools" / "site_data.py").is_file())
+sys.path.insert(0, str(_EXAMPLES))
 
 # Import from our package (assuming installed in editable/dev mode)
 from meteosynth.met_data_processor import MetDataProcessor
 import meteosynth.sup_plot_lib as spl
-
-# Setup directories
-DATA_DIR = pathlib.Path("./data")
-DATA_DIR.mkdir(exist_ok=True)
-XLSX_FNAME = DATA_DIR / "pvgis_hourly_data.xlsx"
-
-def load_or_fetch_data() -> pd.DataFrame:
-    """Load PVGIS hourly data from cache, or download it if missing."""
-    if XLSX_FNAME.exists():
-        print(f"Loading cached weather data from {XLSX_FNAME}...")
-        return pd.read_excel(XLSX_FNAME)
-        
-    print("No cached data found. Fetching hourly data from PVGIS for Paris (48.8566, 2.3522)...")
-    latitude = 48.8566
-    longitude = 2.3522
-    start_year = 2011
-    end_year = 2012 # Fetching 2 years for demonstration speed
-
-    data, inputs = get_pvgis_hourly(
-        latitude=latitude, 
-        longitude=longitude, 
-        start=start_year, 
-        end=end_year,
-        usehorizon=True, 
-        outputformat="json", 
-        components=True
-    )
-    
-    # Process index to create year, month, day, hour columns
-    data['year'] = data.index.year
-    data['month'] = data.index.month
-    data['day'] = data.index.day
-    data['hour'] = data.index.hour 
-    
-    # Cache data to Excel
-    data.to_excel(XLSX_FNAME, index=False)
-    print(f"Data saved to {XLSX_FNAME}")
-    return data
+from tools.site_data import load_paris_demo
+#%%
 
 def main():
-    # 1. Load Data
-    df = load_or_fetch_data()
+    # 1. Load Data (Paris 2011-2012, cached under examples/data/)
+    df = load_paris_demo()
     print("Preview of PVGIS weather data:")
     print(df.head())
 
@@ -100,3 +69,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# %%

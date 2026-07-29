@@ -40,75 +40,175 @@ data = pd.DataFrame({"previous": previous, "current": current})
 sim = MarkovChainSimulator2dKDE(data)
 
 # Draw the next state given a current value ...
-print(sim.get_next_state(0.7, seed=42))
+print(sim.get_next_state(0.7, rng=42))
 
 # ... or a whole Markov trajectory.
-print(sim.generate_sequence(start_state=0.7, length=10, seed=42))
+print(sim.generate_sequence(start_state=0.7, length=10, rng=42))
 ```
 
-## End-to-end: a synthetic daily ensemble
+That is the engine. Everything below wraps it in a calendar.
 
-The typical workflow fits an initial distribution plus 23 hourly transitions, walks
-them into a full day, and draws either independent days or a chained series.
+## Getting data for a day, a month, a year
+
+`DayWindowGenerator` is the entry point for all three, and the one to reach for by
+default. It wraps a `MetDataProcessor` and hands out a model for **any calendar day**,
+trained on the rolling ±`n_days` window centred on that day, fitted on demand behind a
+small LRU cache.
 
 ```{mermaid}
 flowchart LR
-    A[hourly data] --> B[MetDataProcessor<br/>month subset or<br/>rolling day window]
-    B --> C["EnvSeriesGenerator<br/>&#960;(x&#8320;) + 23 transitions"]
-    C --> D["gen_day()<br/>or generate_series()"]
-    D --> E[Energy Monte-Carlo]
+    A[hourly record] --> B["MetDataProcessor(df)"]
+    B --> C["DayWindowGenerator<br/>attr_str, n_days"]
+    C --> D["gen_day(month, day)<br/><b>one day</b>"]
+    C --> E["generate_series(start, n_days)<br/><b>a month, a year</b>"]
+    D --> F[Energy Monte-Carlo]
+    E --> F
 ```
+
+One setup serves all three scales:
 
 ```python
 import numpy as np
 import pandas as pd
-from meteosynth import MetDataProcessor, EnvSeriesGenerator
+from meteosynth import MetDataProcessor, DayWindowGenerator
 
-# `df` is a processed PVGIS hourly frame with columns:
-#   year, month, day, hour, poa_direct, temp_air, wind_speed, ...
-# (see the Examples page for how to fetch it from PVGIS)
+# `df` is an hourly frame with columns: year, month, day, hour, and at least one
+# registered variable (poa_global, temp_air, wind_speed, ...). See "Fetching real
+# data from PVGIS" below, or hand over a frame you already have.
 mdp = MetDataProcessor(df)
 
-# Train on a single month so the diurnal statistics are consistent.
-may = mdp.get_month_subset(5)
+generator = DayWindowGenerator(mdp, attr_str="poa_global", n_days=15)
+```
 
-gen = EnvSeriesGenerator(may, attr_str="poa_direct", bandwidth=0.1)
+`n_days=15` gives a 31-day window: a 21 May model trains on 6 May – 5 June pooled
+across every year in the record.
 
-# One synthetic day (24 hourly values). There is no start value to pass: hour 0 is
-# drawn from the fitted initial distribution pi(x0). For irradiance every observed
-# midnight is zero, so pi(x0) is a spike at zero and the day starts at 0.0 -- read
-# off the data rather than hard-coded.
-day = gen.gen_day(seed=1)
+### A day
 
-# An ensemble of 500 independent days is an explicit loop. Share one Generator so the
-# whole draw is reproducible from a single seed, and pi(x0) is redrawn for each day.
-rng = np.random.default_rng(1)
-ensemble = np.vstack([gen.gen_day(rng=rng) for _ in range(500)])   # (500, 24)
-daily_energy = ensemble.sum(axis=1)          # crude Wh/m2 per day proxy
-print(daily_energy.mean(), daily_energy.std())
+`gen_day(month, day)` returns 24 hourly values. Hour 0 is drawn from that date's fitted
+initial distribution π(x₀) — there is no start value to pass.
+
+```python
+day = generator.gen_day(5, 21, seed=42)          # (24,) hourly W/m2
+print(day.sum() / 1000, "kWh/m2")
+```
+
+A single day is one roll of the dice. The question worth asking is what 21 May *can*
+look like, which is an **ensemble** — fit once with `for_day`, then draw repeatedly from
+one RNG stream so the whole draw is reproducible from a single seed:
+
+```python
+may21 = generator.for_day(5, 21)                 # fit the models once
+rng = np.random.default_rng(42)
+ensemble = np.vstack([may21.gen_day(rng=rng) for _ in range(200)])   # (200, 24)
+
+daily = ensemble.sum(axis=1) / 1000              # kWh/m2 per day
+print(f"mean {daily.mean():.2f}   P50 {np.percentile(daily, 50):.2f}   "
+      f"P90 {np.percentile(daily, 10):.2f}")     # P90 = exceeded in 90% of cases
+```
+
+Every call redraws π(x₀), so these are 200 independent samples of 21 May's climate
+rather than one 200-day walk.
+
+```{note}
+Measured on Heraklion 2010–2020 (11 years), `poa_global`, `n_days=15`: the 200-draw
+ensemble gives a mean daily total of **7.20 kWh/m²** against **7.19** for the 341
+observed days in the same window, and a median of 7.71 against 7.75. Fitting plus one
+day costs ~1.4 s; the 200-day ensemble ~18 s.
+```
+
+### A month
+
+A month is a **chained** series — `generate_series(start, n_days)` — because a month is
+about *order*: streaks of overcast days, a battery's state of charge, a monthly total.
+Day 1 starts from π(x₀); every later day's midnight comes from that day's cross-midnight
+model, conditioned on the previous day's 23:00 value.
+
+```python
+# Hold the whole month in the cache so repeated realisations do not refit.
+generator = DayWindowGenerator(mdp, attr_str="poa_global", n_days=15, cache_size=40)
+
+may = generator.generate_series(start=(5, 1), n_days=31, seed=42)    # (31, 24)
+print(may.sum() / 1000, "kWh/m2 over the month")
+```
+
+One synthetic May tells you little that the record does not. An **ensemble of months**
+is the shape a real study takes — the spread *between* realisations is the answer, and
+comparing it to the spread between observed years is the check on that answer:
+
+```python
+rng = np.random.default_rng(7)
+months = np.vstack([
+    generator.generate_series((5, 1), 31, rng=rng).ravel() for _ in range(12)
+])                                               # (12, 744) hours
+
+totals = months.sum(axis=1) / 1000
+print(f"{totals.mean():.1f} +/- {totals.std(ddof=1):.1f} kWh/m2 per May")
 ```
 
 ```{note}
-For `temp_air` and `wind_speed` this is a substantive change, not a cosmetic one. The
-old `start_value=0.0` default was *outside the observed midnight range* of both, so
-every day in an ensemble began at an impossible value -- and far enough out the KDE
-returned zero density and the next hour raised
-`ValueError: array must not contain infs or NaNs`.
+Same record, same settings: **218.3 ± 9.8 kWh/m²** across twelve synthetic Mays against
+**219.5 ± 10.6** across the eleven observed ones. The first realisation costs ~12 s
+(fitting 31 days); with `cache_size=40` the eleven that follow cost ~4.6 s each, since
+only sampling is left to pay for.
 ```
 
-## Choosing a training subset: month or rolling window
+### A year
 
-`get_month_subset` is not the only option, and usually not the best one. A model
-for May 1 trained on *all of May* inherits May 16's climate, and May 31 shares no
-training data at all with June 1. A **rolling day window** is centred on its
-target and slides smoothly across month boundaries.
+Same call, 365 days. `include_feb29` defaults to `False`, so the walk simply never
+requests Feb 29 — there is no filtering step and no exclusion list.
 
 ```python
-from meteosynth import MetDataProcessor, DayWindowGenerator
+generator = DayWindowGenerator(mdp, attr_str="poa_global", n_days=15, cache_size=8)
+
+year = generator.generate_series(start=(1, 1), n_days=365, seed=2026)   # (365, 24)
+
+# 8760 hourly values, ready to hang on a calendar and hand to a downstream model.
+index = pd.date_range("2023-01-01", periods=365 * 24, freq="h")
+series = pd.Series(year.ravel(), index=index, name="poa_global")
+series.to_csv("synthetic_year.csv")
+```
+
+Memory stays flat whatever the length of the walk: `DayWindowGenerator` fits each day on
+demand and keeps `cache_size` of them, so a year holds a few hundred KB rather than the
+~126 MB all 366 fitted generators would cost.
+
+```{note}
+Same record: the generated year totals **1918 kWh/m²** against observed annual totals
+ranging 1803–1938 (mean 1880), and takes ~2 min for one attribute — nearly all of it
+fitting. A leap year is `n_days=366, include_feb29=True`.
+```
+
+### Which call answers which question
+
+| You want | Call | Shape |
+| :--- | :--- | :--- |
+| One synthetic 21 May | `gen_day(5, 21)` | `(24,)` |
+| 200 independent 21 Mays | `for_day(5, 21)` then loop `gen_day(rng=rng)` | `(200, 24)` |
+| One synthetic May, in order | `generate_series((5, 1), 31)` | `(31, 24)` |
+| 12 independent synthetic Mays | loop `generate_series((5, 1), 31, rng=rng)`, `np.stack` | `(12, 31, 24)` |
+| One synthetic year | `generate_series((1, 1), 365)` | `(365, 24)` |
+
+```{note}
+**The boundary of a call is the reset.** Within one `generate_series` call the days are
+chained across midnight; between two calls nothing is carried over. So "500 independent
+days" is 500 calls with `n_days=1` (or 500 `gen_day` calls), *not* one call with
+`n_days=500`.
+```
+
+## Choosing a training subset: window or month
+
+The rolling window is not the only option, but it is usually the right one. A model for
+May 1 trained on *all of May* inherits May 16's climate, and May 31 shares no training
+data at all with June 1. A rolling window is centred on its target and slides smoothly
+across month boundaries.
+
+```python
+from meteosynth import MetDataProcessor, EnvSeriesGenerator
 
 mdp = MetDataProcessor(df)
 
-# Both pool ~62 days from a 2-year record, around different centres:
+# Two ways to cut the same record:
 may_month = mdp.get_month_subset(5)                       # all of May
 may_window = mdp.get_day_window_subset(5, 1, n_days=15)   # Apr 16 - May 16
 
@@ -116,49 +216,77 @@ may_window = mdp.get_day_window_subset(5, 1, n_days=15)   # Apr 16 - May 16
 new_year = mdp.get_day_window_subset(1, 2, n_days=4)      # Dec 29 - Jan 6
 leap = mdp.get_day_window_subset(2, 29)                   # centred on Feb 29
 
-# Either subset drops into EnvSeriesGenerator unchanged. For a whole calendar,
-# DayWindowGenerator fits each day on demand behind a small LRU cache, so you
-# never hold all 366 at once (~126 MB per attribute if you did).
-dwg = DayWindowGenerator(mdp, attr_str="poa_direct", n_days=15)
-feb29_day = dwg.gen_day(2, 29, seed=1)
-
-# A *chained* series lives here and only here -- it needs a start date, because each
-# day uses its own models and each midnight uses that day's cross-midnight transition.
-year = dwg.generate_series(start=(1, 1), n_days=365, seed=1)      # (365, 24)
+# Either subset drops into EnvSeriesGenerator unchanged. It is date-blind: the caller
+# chose the season by choosing the subset.
+gen = EnvSeriesGenerator(may_month, attr_str="poa_global", bandwidth=0.1)
+day = gen.gen_day(seed=1)                                 # (24,)
 ```
 
 ```{note}
-`generate_series` is deliberately not available on `EnvSeriesGenerator`. A month
+`generate_series` is deliberately **not** available on `EnvSeriesGenerator`. A month
 subset has one pooled initial distribution and one set of transitions shared by every
 generated day, so there is no honest answer to "what does day 32 look like". Chaining
-months by hand would step discontinuously twelve times a year in a quantity that
-varies smoothly.
+months by hand would step discontinuously twelve times a year in a quantity that varies
+smoothly. Chained series live on `DayWindowGenerator`, which knows the calendar.
 ```
 
 ```{note}
-With only two years of data both strategies pool ~62 days, so the window buys
-*centring* and *smoothness*, not sample size. See {doc}`theory` for the
-`all_leap` calendar that makes the wrap and the leap day fall out for free.
+The window buys **centring and smoothness, not sample size**. On the 11-year Heraklion
+record both a May month subset and a 21 May ±15 window pool 341 days. See {doc}`theory`
+for the `all_leap` calendar that makes the New Year wrap and the leap day fall out for
+free.
 ```
 
 ## Fetching real data from PVGIS
 
 ```python
-from meteosynth.metdata_pvgis import fetch_pvgis_hourly, SITE_PARIS, save_hourly
+from meteosynth import MetDataProcessor
+from meteosynth.adapters import fetch_pvgis
 
-df = fetch_pvgis_hourly(start_year=2011, end_year=2012, **SITE_PARIS)
-save_hourly(df)   # caches to data/pvgis_hourly_data.xlsx
+# Paris, 2011-2012. The cache file is written on the first call and read on every
+# later one, so collection happens once.
+df = fetch_pvgis(48.8566, 2.3522, 2011, 2012, cache="data/paris_2011_2012.csv")
+mdp = MetDataProcessor(df)
+```
+
+You get a canonical frame — the four calendar columns plus `poa_global`, `temp_air` and
+`wind_speed` — already validated against each column's physical support, so a unit error
+at the boundary (kW/m² read as W/m², °F as °C) raises here rather than surfacing months
+later as a plausible-looking synthetic series.
+
+PVGIS returns *either* global plane-of-array irradiance *or* its three components, never
+both. `irradiance="global"` is the default; pass `"direct"`, `"sky_diffuse"` or
+`"ground_diffuse"` for a component. The emitted column keeps its specific name, so the
+name itself records what was collected.
+
+```{note}
+`fetch_pvgis_tmy` fetches a Typical Meteorological Year instead. Its irradiance is
+**horizontal** (`ghi`, `dni`, `dhi`), not plane-of-array — a different quantity, hence
+different column names. Pass `coerce_year=` for a clean single-year calendar; a TMY
+stitches each month from a different real year, so otherwise the `year` column jumps.
+```
+
+```{note}
+Adapters are optional. The contract with the rest of the package is an ordinary
+DataFrame, so if you already have data, hand it straight to `MetDataProcessor` and no
+adapter is involved at all. Register a spec for any column you want to model that the
+package does not ship — see {doc}`workflow`.
 ```
 
 ## Running the test suite
 
 ```bash
-# MPLBACKEND=Agg keeps matplotlib headless
-MPLBACKEND=Agg uv run pytest
+uv run pytest
 ```
+
+No environment variables are needed: `tests/conftest.py` selects a headless matplotlib
+backend at import, so the suite is headless under `pytest`, an IDE runner or CI alike.
+Expect about nine minutes — most of it fitting KDEs.
 
 ## Next steps
 
+- {doc}`concepts` — the vocabulary, in plain language.
+- {doc}`workflow` — the pipeline, step by step.
 - {doc}`theory` — how the KDE Markov chain works and why.
 - {doc}`examples` — the full scripts under `examples/`.
 - {doc}`api` — the complete API reference.

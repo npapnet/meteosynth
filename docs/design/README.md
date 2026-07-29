@@ -42,9 +42,13 @@ dataset (`data/pvgis_hourly_data.xlsx`) over estimates, and say which is which.
 
 ## Contents
 
-Active — proposed or in progress:
+Active / Architecture reference:
 
-*(none — everything currently designed has landed.)*
+| document | type | description |
+|---|---|---|
+| [architecture.md](architecture.md) | architecture reference | Concise overview of package essence, current state (v0.2.0), mathematical foundation, repository tree structure, module responsibilities, and developer/agent onboarding guide. |
+| [precomputed-conditional-quantiles.md](precomputed-conditional-quantiles.md) | design note | `PERF-1`: caching the conditional inverse CDF for simulators that are sampled often — 8× on ensemble work, nothing on a year-long walk. Records why the *quantile function* is the thing interpolated rather than the CDF, why node spacing is uniform rather than quantile-based, why the cache is lazy, and what the test suite did **not** catch. |
+
 
 
 ## Completed

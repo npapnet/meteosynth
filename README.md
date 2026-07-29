@@ -7,7 +7,7 @@ Its primary target is **Monte-Carlo simulation of energy-project output and requ
 ## Features
 
 - **Markov Chain Simulators** (shared `get_next_state` / `generate_sequence` interface):
-  - `MarkovChainSimulator2dKDE`: Continuous state simulation using 2D Kernel Density Estimation, with degenerate data handled via the `Kind` enum (`KDE_2D`, `KDE_1D`, `CONSTANT`) and sampling truncated to each variable's physical support.
+  - `MarkovChainSimulator2dKDE`: Continuous state simulation using 2D Kernel Density Estimation, with degenerate data handled via the `Kind` enum (`KDE_2D`, `KDE_1D`, `CONSTANT`) and sampling truncated to each variable's physical support. A simulator that turns out to be sampled often **caches its conditional inverse CDF**, making large ensembles ~8× faster without changing what a short run produces.
   - `ContinuousMarkovChainSimulator`: Binned continuous state simulation using 1D Kernel Density Estimation.
   - `MarkovChainSimulatorDiscrete`: Discrete state transition modeling.
 - **Daily Series Generators** (`meteosynth.generators`):
@@ -18,8 +18,35 @@ Its primary target is **Monte-Carlo simulation of energy-project output and requ
   - Two selectable training strategies: by calendar month (`get_month_subset`) or by a **rolling ±n-day window** centred on a target day (`get_day_window_subset`).
 - **Seasonal day windows** (`meteosynth.day_window`):
   - A circular `all_leap` (CF-conventions `366_day`) calendar, so windows wrap across New Year and **Feb 29 is an ordinary day** — never discarded, and requestable as a generation target.
-- **PVGIS Integration**:
-  - Retrieve hourly or Typical Meteorological Year (TMY) data directly using the `pvlib` API (`meteosynth.metdata_pvgis`).
+- **PVGIS Integration** (`meteosynth.adapters`):
+  - `fetch_pvgis` retrieves a real multi-year hourly record on the plane of array; `fetch_pvgis_tmy` retrieves a Typical Meteorological Year on the horizontal. Both normalise to the canonical schema, validate against each column's physical support, and optionally cache to disk.
+  - Adapters are optional. The contract with the rest of the package is an ordinary DataFrame, so a user who already has data never goes through one.
+- **A variable registry, not a column whitelist** (`meteosynth.variables`):
+  - A column is modellable if and only if it has a registered `VariableSpec` carrying its physical `support`, `units` and `long_name`. Plane-of-array irradiance, **horizontal irradiance** (`ghi`, `dni`, `dhi`), air temperature and wind speed ship registered; `register()` adds your own.
+
+---
+
+## What has changed since 0.2.0
+
+The full record is in [`CHANGELOG.md`](CHANGELOG.md); these are the changes that alter
+what the package does rather than how it is arranged.
+
+| | |
+| :--- | :--- |
+| **Ensemble sampling is ~8× faster** | `get_next_state` used to evaluate a 1000-point KDE grid on *every* call — ~97 % of generation runtime. Hot simulators now cache their conditional inverse CDF. A short run is bit-for-bit unchanged; a large ensemble shifts by ~0.2 % on a daily total, an order of magnitude below anything the package can resolve. Argued in [`docs/design/precomputed-conditional-quantiles.md`](docs/design/precomputed-conditional-quantiles.md). |
+| **Degeneracy detection is scale-aware** | Night used to be recognised only when a source stored it as an exact `0.0`. Any resampled, interpolated or unit-converted record storing it as `1e-16` fell through to a 2D KDE fitted across a catastrophically ill-conditioned covariance. The test is now against the data's own scale. |
+| **A singular covariance no longer crashes** | Perfectly collinear `previous`/`current` degrades to the 1D path with a warning instead of dying several steps later on `np.sum(None)`. |
+| **Horizontal irradiance is a first-class quantity** | `ghi`, `dni` and `dhi` are registered against their own spec, so a TMY frame validates rather than being silently dropped at ingestion. |
+| **PVGIS fetching works again** | `pvlib` changed the arity of its PVGIS return value; both call sites were unpacking the old shape. |
+| **Absolute magnitudes are calibrated** | `FIX-1` recorded generated irradiance as "systematically too high" (+14 %). Measured against the pool the model is fitted to, on 19 years at four dates, the mean lands within 0.7 % and the claim does not reproduce. What is real is a **deficit of heavily overcast days** — see below. |
+
+### One known limitation, quantified
+
+The generator produces roughly **four times too few heavily overcast days** where a record
+holds any. It moves an annual P90 by **0.12 %**, so a yield study cannot see it — but it
+matters directly for storage autonomy, worst-case-day and dark-spell questions, and a
+daily P10 runs up to 9 % high. Tracked as `FIX-1`, deliberately deferred, and measured in
+[`examples/diagnostics-overshoot/`](examples/diagnostics-overshoot/).
 
 ---
 
@@ -39,8 +66,8 @@ uv sync --extra examples
 The `dev` dependency group — installed by default with `uv sync` — provides the
 documentation toolchain (Sphinx, furo, Mermaid, MyST) and an interactive
 workflow (`jupyter`, `notebook`, `ipykernel`) for VS Code / JupyterLab.
-The optional `examples` extra adds `tqdm`, needed only by
-`examples/example_synthetic_year.py`; nothing in the package itself requires it.
+The optional `examples` extra adds `tqdm`, needed only by the longer-running
+example scripts; nothing in the package itself requires it.
 
 ---
 
@@ -62,12 +89,18 @@ data = pd.DataFrame({
 simulator = MarkovChainSimulator2dKDE(data)
 
 # Generate the next state from a current value of 1.7 ...
-next_state = simulator.get_next_state(1.7, seed=42)
+next_state = simulator.get_next_state(1.7, rng=42)
 print("Next state:", next_state)
 
 # ... or a whole reproducible sequence
-print(simulator.generate_sequence(start_state=1.7, length=10, seed=42))
+print(simulator.generate_sequence(start_state=1.7, length=10, rng=42))
 ```
+
+> **`rng=` at the simulator level, `rng=` or `seed=` at the generator level.** Every
+> stochastic path takes an explicit source of randomness rather than touching the global
+> `np.random` state. `rng=` accepts `None`, an `int` seed, or a `Generator` — pass a
+> `Generator` to draw a whole ensemble from one advancing stream, which is what the
+> day generators do internally.
 
 ### Monte-Carlo daily ensemble
 
@@ -121,57 +154,84 @@ year = dwg.generate_series(start=(1, 1), n_days=365, seed=1)   # (365, 24)
 > window buys *centring* and *smoothness*, not sample size. See
 > [`docs/design/completed/rolling-day-window.md`](docs/design/completed/rolling-day-window.md).
 
-Fetch real data from PVGIS with `meteosynth.metdata_pvgis`:
+Fetch real data from PVGIS with `meteosynth.adapters`:
 
 ```python
-from meteosynth.metdata_pvgis import fetch_pvgis_hourly, SITE_PARIS, save_hourly
+from meteosynth import MetDataProcessor
+from meteosynth.adapters import fetch_pvgis
 
-df = fetch_pvgis_hourly(start_year=2011, end_year=2012, **SITE_PARIS)
-save_hourly(df)   # caches to data/pvgis_hourly_data.xlsx
+# Paris, 2011-2012. Pass `cache=` and the file is written on the first call and
+# read on every later one -- collection is slow and networked, modelling is not.
+df = fetch_pvgis(48.8566, 2.3522, 2011, 2012, cache="data/paris_2011_2012.csv")
+mdp = MetDataProcessor(df)
 ```
+
+The frame comes back canonical: the four calendar columns plus `poa_global`, `temp_air`
+and `wind_speed`, validated against each column's physical support. Ask for a different
+irradiance component with `irradiance="direct"` — the emitted column keeps its specific
+name, so **the name records the choice** and no metadata sidecar is needed.
+
+A Typical Meteorological Year is `fetch_pvgis_tmy(48.8566, 2.3522, coerce_year=2023)`.
+Note it supplies *horizontal* irradiance (`ghi`, `dni`, `dhi`), not plane-of-array — a
+different quantity, which is why it gets different column names.
 
 ---
 
 ## Examples
 
-Four runnable scripts live under `examples/`. On first run they fetch data from
-PVGIS and cache it to `data/pvgis_hourly_data.xlsx`, so subsequent runs are
-offline and fast.
+`examples/` is split by purpose — `use_cases/` (applied workflows that produce
+data), `concepts/` (how the package behaves), `tools/` (shared helpers), and
+`diagnostics-overshoot/` (a measurement rather than a demonstration). Downloads are
+cached under `examples/data/` and everything generated is written to the git-ignored
+`examples/output/`. See [`examples/README.md`](examples/README.md) for the full index.
 
 ```bash
-# Exploratory analysis: fetch, process, and plot PVGIS data
-uv run python examples/example_exploratory_analysis.py
+# Optional: download the two records the examples use, once, up front
+uv run python examples/tools/fetch_site_data.py
 
-# Synthetic generation: build hourly simulators and plot synthetic daily profiles
-uv run python examples/example_markov_generation.py
+# Use cases: Heraklion 2010-2020, grouped by time scale (day / month / year)
+uv run --extra examples python examples/use_cases/day/day_envelope_pv.py
+uv run --extra examples python examples/use_cases/day/day_envelope_temp.py
+uv run --extra examples python examples/use_cases/day/day_envelope_wind.py
 
-# Rolling windows: month subset vs rolling window, the year wrap, and Feb 29
-uv run python examples/example_rolling_window.py
+# An ensemble of synthetic Mays, reported as statistics against the observed years (~3 min)
+uv run --extra examples python examples/use_cases/month/monthly_statistics.py
 
-# A full synthetic non-leap year of poa_direct + wind_speed -> data/synthetic_year.csv
-# (needs the `examples` extra for tqdm; ~80 s)
-uv run --extra examples python examples/example_synthetic_year.py
+# A complete 8760-hour synthetic year of all three attributes, written to CSV (~4 min)
+uv run --extra examples python examples/use_cases/year/synthetic_year.py
 
-# Leap years: how Feb 29 and the end of February are pooled (no PVGIS needed)
-uv run python examples/example_leap_year_windows.py
+# Concepts: exploratory plots, rolling windows, leap days
+uv run python examples/concepts/example_exploratory_analysis.py
+uv run python examples/concepts/example_rolling_window.py
+uv run python examples/concepts/example_leap_year_windows.py                 # no PVGIS needed
+
+# Diagnostics: does the generator reproduce the distribution it was fitted to? (~5 min)
+uv run --extra examples python examples/diagnostics-overshoot/run_all.py
 ```
 
 See the **Examples** page in the documentation for a full walk-through.
+
+The diagnostics folder is worth knowing about separately: it is how a claim about the
+generator's accuracy gets settled in this repo. It fits on a 19-year record, draws a
+thousand synthetic days at four dates, and scores them against the pool they were fitted
+to — with a null control, a positive control and an anchor cell, so a negative result is
+worth as much as the demonstration that a positive would have been detected. Its design
+and its findings are committed alongside the code.
 
 ---
 
 ## Running Tests
 
-Verify the installation by running the test suite (`MPLBACKEND=Agg` keeps
-matplotlib headless):
+Verify the installation by running the test suite:
 
 ```bash
-# Linux/macOS
-MPLBACKEND=Agg uv run pytest
-
-# Windows (PowerShell)
-$env:MPLBACKEND = "Agg"; uv run pytest
+uv run pytest
 ```
+
+280 tests across 16 modules, about nine minutes — most of it fitting KDEs. No environment
+variables are needed: `tests/conftest.py` selects a headless matplotlib backend at import,
+so the suite is headless by construction under `pytest`, an IDE runner or CI alike. (This
+used to require setting `MPLBACKEND=Agg` by hand; that instruction is obsolete.)
 
 ---
 

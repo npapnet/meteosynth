@@ -12,7 +12,7 @@ to pin the two questions that are otherwise impossible to see working:
 2. With no leap year in the record at all, can Feb 29 still be generated from its
    late-February and early-March neighbours?
 
-See ``TODOs.md`` item 1 and ``docs/design/completed/rolling-day-window.md`` (Caveat B).
+See ``CHANGELOG.md`` (0.2.0) and ``docs/design/completed/rolling-day-window.md`` (Caveat B).
 """
 
 import numpy as np
@@ -27,11 +27,15 @@ LEAP_YEARS = (2012, 2016, 2020)
 def _synthetic_record(start_year: int, end_year: int, seed: int = 0) -> MetDataProcessor:
     """An hourly record with a realistic diurnal cycle and exactly-zero nights.
 
-    Night values must be *exactly* zero, as PVGIS supplies them, or the degeneracy check
-    in ``_cat_singularity`` (an exact ``std == 0`` test) routes a constant-zero hour into
-    the 2D KDE path and the generator emits NaN. Note ``np.sin(np.pi)`` is ``1.22e-16``,
-    not ``0``, so the night mask below is explicit rather than a ``clip`` -- a clipped
-    sine leaves ~1e-14 residue and trips exactly that trap. See TODOs.md item 7.
+    The night mask is explicit rather than a ``clip`` because ``np.sin(np.pi)`` is
+    ``1.22e-16``, not ``0``, and a clipped sine therefore leaves ~1e-14 residue at dusk.
+    That used to defeat ``_cat_singularity``'s exact ``std == 0`` check and route a
+    physically-constant hour into the 2D KDE path.
+
+    Degeneracy detection is scale-aware since 2026-07-28, so residue no longer breaks
+    anything -- ``tests/test_markov_chain_simulator_singularity.py`` covers that
+    deliberately. The mask stays explicit here so this fixture keeps testing *leap-year
+    windowing* against clean data, rather than quietly doubling as a residue test.
     """
     rng = np.random.default_rng(seed)
     index = pd.date_range(f"{start_year}-01-01", f"{end_year}-12-31 23:00", freq="h")
@@ -83,11 +87,12 @@ def _calendar_days(subset):
 # --- the fixtures themselves -------------------------------------------------------
 
 def test_fixture_nights_are_exactly_zero(leap_record):
-    """Guards the fixture against the trap described in TODOs.md item 7.
+    """Keeps this file testing leap-year windowing and nothing else.
 
-    If this fails, every generation test below becomes a false alarm rather than a
-    finding: near-zero-but-not-zero nights defeat the exact ``std == 0`` degeneracy
-    check and produce NaN, which looks like a leap-year bug and is not.
+    Residue-laden nights are handled correctly now, but they exercise a *different*
+    code path (the degeneracy tolerance, covered in
+    ``test_markov_chain_simulator_singularity.py``). Keeping the fixture exactly zero
+    means a failure below is a leap-year finding rather than an ambiguous one.
     """
     night = leap_record.met_data[leap_record.met_data["hour"] == 22]["poa_direct"].values
     assert np.unique(night).tolist() == [0.0]

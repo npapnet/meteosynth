@@ -1,0 +1,5 @@
+# Everything the example scripts write lands here and stays out of the repository.
+# The folder itself is tracked (via this file) so the scripts always have somewhere
+# to write, and so a fresh clone shows where the outputs will appear.
+*
+!.gitignore

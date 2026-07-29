@@ -17,6 +17,15 @@ under a name meaning direct: same units, same support, passing every validation,
 wrong by roughly a factor of two. Keeping the names distinct makes **the column name the
 provenance**, which is why nothing in this package needs a metadata sidecar.
 
+The same argument runs across *planes*, which is why :data:`IRRADIANCE_HORIZONTAL` is a
+separate object despite carrying identical constraints. ``ghi`` and ``poa_global`` are
+the same physical quantity measured on different surfaces, and they differ by however
+much the array is tilted -- so a horizontal series trained under a plane-of-array name is
+the factor-of-two error again, in a second dimension. The constraints coincide; the
+:attr:`~VariableSpec.long_name` does not, and that string is what
+:func:`meteosynth.adapters.validate_support` quotes back to a user who is, by
+construction, in the middle of debugging where their numbers came from.
+
 The registry is what makes the package variable-agnostic: a column is modellable **if and
 only if it has a spec**. Register one and it works, with no change to the package::
 
@@ -35,6 +44,7 @@ from typing import Optional, Tuple
 __all__ = [
     "VariableSpec",
     "IRRADIANCE",
+    "IRRADIANCE_HORIZONTAL",
     "TEMP_AIR",
     "WIND_SPEED",
     "get_spec",
@@ -112,6 +122,13 @@ class VariableSpec:
 #: why the component names stay distinct despite sharing one spec.
 IRRADIANCE = VariableSpec((0.0, None), "W/m2", "Plane-of-array irradiance")
 
+#: Horizontal-plane irradiance -- ``ghi``, ``dni``, ``dhi``, as PVGIS TMY and most
+#: reanalysis products supply it. Physically identical constraints to :data:`IRRADIANCE`,
+#: deliberately a distinct object: the ``long_name`` reaches the user in
+#: :func:`meteosynth.adapters.validate_support`'s error text, and naming a horizontal
+#: quantity "plane-of-array" would misinform at precisely the wrong moment.
+IRRADIANCE_HORIZONTAL = VariableSpec((0.0, None), "W/m2", "Horizontal-plane irradiance")
+
 #: Air temperature. Bounded below by absolute zero; unbounded in practice.
 TEMP_AIR = VariableSpec((-273.15, None), "degC", "Air temperature")
 
@@ -125,6 +142,9 @@ _REGISTRY: dict[str, VariableSpec] = {
     "poa_direct": IRRADIANCE,
     "poa_sky_diffuse": IRRADIANCE,
     "poa_ground_diffuse": IRRADIANCE,
+    "ghi": IRRADIANCE_HORIZONTAL,
+    "dni": IRRADIANCE_HORIZONTAL,
+    "dhi": IRRADIANCE_HORIZONTAL,
     "temp_air": TEMP_AIR,
     "wind_speed": WIND_SPEED,
 }

@@ -11,6 +11,7 @@ import pytest
 
 from meteosynth.variables import (
     IRRADIANCE,
+    IRRADIANCE_HORIZONTAL,
     TEMP_AIR,
     WIND_SPEED,
     VariableSpec,
@@ -71,6 +72,23 @@ def test_the_names_stay_distinct_even_though_the_spec_is_shared():
     assert get_spec("poa_global") is get_spec("poa_direct")
 
 
+def test_horizontal_irradiance_has_its_own_spec_despite_identical_constraints():
+    """`ghi` and `poa_global` are the same quantity on different surfaces.
+
+    The support and units coincide, so one shared object would validate identically. The
+    long_name does not coincide, and that string is what validate_support quotes back to
+    a user who is by construction debugging where their numbers came from -- calling GHI
+    "Plane-of-array irradiance" would misinform at precisely the wrong moment.
+    """
+    horizontal = [get_spec(n) for n in ("ghi", "dni", "dhi")]
+
+    assert all(spec is IRRADIANCE_HORIZONTAL for spec in horizontal)
+    assert get_spec("ghi") is not get_spec("poa_global")
+    assert IRRADIANCE_HORIZONTAL.support == IRRADIANCE.support
+    assert IRRADIANCE_HORIZONTAL.units == IRRADIANCE.units
+    assert IRRADIANCE_HORIZONTAL.long_name != IRRADIANCE.long_name
+
+
 def test_spec_carries_no_name():
     """A spec that owned a name could not honestly serve four columns at once."""
     assert not hasattr(IRRADIANCE, "name")
@@ -87,6 +105,7 @@ def test_specs_are_frozen():
 def test_shipped_registrations():
     assert set(registered()) == {
         "poa_global", "poa_direct", "poa_sky_diffuse", "poa_ground_diffuse",
+        "ghi", "dni", "dhi",
         "temp_air", "wind_speed",
     }
 

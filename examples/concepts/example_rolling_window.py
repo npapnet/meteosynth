@@ -21,11 +21,10 @@ See `docs/design/completed/rolling-day-window.md` for the full rationale.
 """
 
 import pathlib
+import sys
 
 import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
-from pvlib.iotools import get_pvgis_hourly
 
 from meteosynth import (
     DayWindowGenerator,
@@ -35,31 +34,15 @@ from meteosynth import (
     day_slot,
 )
 
-DATA_DIR = pathlib.Path("./data")
-DATA_DIR.mkdir(exist_ok=True)
-XLSX_FNAME = DATA_DIR / "pvgis_hourly_data.xlsx"
+# Make `examples/` importable however this file is run (script, -m, or an editor cell).
+_HERE = pathlib.Path(__file__).resolve().parent if "__file__" in globals() else pathlib.Path.cwd()
+_EXAMPLES = next(p for c in (_HERE, *_HERE.parents) for p in (c, c / "examples")
+                 if (p / "tools" / "site_data.py").is_file())
+sys.path.insert(0, str(_EXAMPLES))
+
+from tools.site_data import load_paris_demo
 
 ATTR = "poa_direct"
-
-
-def load_or_fetch_data() -> pd.DataFrame:
-    """Load PVGIS hourly data from cache, or download it if missing."""
-    if XLSX_FNAME.exists():
-        print(f"Loading cached weather data from {XLSX_FNAME}...")
-        return pd.read_excel(XLSX_FNAME)
-
-    print("No cached data found. Fetching hourly data from PVGIS for Paris...")
-    data, _ = get_pvgis_hourly(
-        latitude=48.8566, longitude=2.3522, start=2011, end=2012,
-        usehorizon=True, outputformat="json", components=True,
-    )
-    data["year"] = data.index.year
-    data["month"] = data.index.month
-    data["day"] = data.index.day
-    data["hour"] = data.index.hour
-    data.to_excel(XLSX_FNAME, index=False)
-    print(f"Data saved to {XLSX_FNAME}")
-    return data
 
 
 def _observed_daily_total(subset) -> float:
@@ -170,7 +153,7 @@ def plot_comparison(mdp: MetDataProcessor, n_profiles: int = 25):
 
 
 def main():
-    df = load_or_fetch_data()
+    df = load_paris_demo()
     mdp = MetDataProcessor(df)
     print(mdp.describe_time_range())
 
