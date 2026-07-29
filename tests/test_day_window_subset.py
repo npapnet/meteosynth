@@ -1,11 +1,11 @@
-"""Tests for MetDataProcessor.get_day_window_subset (rolling day windows)."""
+"""Tests for MetDataset.get_day_window_subset (rolling day windows)."""
 
 import numpy as np
 import pandas as pd
 import pytest
 
 from meteosynth.day_window import day_slot
-from meteosynth.met_data_processor import MetDataProcessor
+from meteosynth.dataset import MetDataset
 
 
 @pytest.fixture
@@ -29,7 +29,7 @@ def mdp_fixture():
     for col in ["poa_direct", "poa_sky_diffuse", "poa_ground_diffuse",
                 "solar_elevation", "temp_air", "wind_speed", "Int"]:
         df[col] = marker
-    return MetDataProcessor(df)
+    return MetDataset(df)
 
 
 def _dates(subset):

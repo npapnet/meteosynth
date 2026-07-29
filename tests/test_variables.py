@@ -17,7 +17,10 @@ from meteosynth.variables import (
     VariableSpec,
     get_spec,
     register,
+    IRRADIANCE_COLUMNS,
+    irradiance_columns,
     registered,
+    resolve_irradiance,
     unregister,
 )
 
@@ -177,3 +180,66 @@ def test_specs_are_declared_not_inferred():
     """
     assert WIND_SPEED.support[0] == 0.0        # not "unbounded, since 0.07 > 0"
     assert TEMP_AIR.support[0] == -273.15      # not "non-negative, since July is warm"
+
+
+# --- resolving "which column here is the irradiance?" --------------------------------
+#
+# What lets a caller stop caring whether their record came from PVGIS hourly
+# (poa_global) or a TMY (ghi). The resolver renames and converts nothing: it returns a
+# name the caller then uses everywhere, so the quantity and its plane travel with it.
+
+def test_the_preferred_total_wins_over_a_component_in_the_same_frame():
+    assert resolve_irradiance(["poa_direct", "poa_global", "temp_air"]) == "poa_global"
+
+
+def test_a_tmy_resolves_to_ghi_rather_than_erroring():
+    assert resolve_irradiance(["ghi", "dni", "dhi", "temp_air"]) == "ghi"
+
+
+def test_plane_of_array_outranks_horizontal_when_both_are_present():
+    """poa_global is what this package models; ghi is a different surface."""
+    assert resolve_irradiance(["ghi", "poa_global"]) == "poa_global"
+
+
+def test_a_lone_component_resolves_to_itself():
+    """One candidate is not ambiguous, so refusing it would be unhelpful."""
+    assert resolve_irradiance(["poa_direct", "temp_air", "wind_speed"]) == "poa_direct"
+
+
+def test_components_without_a_total_raise_and_name_all_of_them():
+    """A component is a part of a total, never the total.
+
+    poa_direct is roughly 70 % of poa_global, so answering with it would be the
+    factor-of-two error the distinct names exist to prevent.
+    """
+    with pytest.raises(LookupError) as excinfo:
+        resolve_irradiance(
+            ["poa_direct", "poa_sky_diffuse", "poa_ground_diffuse", "temp_air"]
+        )
+
+    message = str(excinfo.value)
+    for name in ("poa_direct", "poa_sky_diffuse", "poa_ground_diffuse"):
+        assert name in message
+
+
+def test_no_irradiance_at_all_raises_and_says_what_it_looked_for():
+    with pytest.raises(LookupError) as excinfo:
+        resolve_irradiance(["temp_air", "wind_speed"])
+
+    assert "poa_global" in str(excinfo.value)
+
+
+def test_a_user_registered_irradiance_column_is_discovered(temporary_registration):
+    """Sharing a spec object is how a column joins the group -- no second list."""
+    temporary_registration("poa_reflected", IRRADIANCE)
+
+    assert "poa_reflected" in irradiance_columns()
+    assert resolve_irradiance(["poa_reflected", "temp_air"]) == "poa_reflected"
+
+
+def test_preference_order_can_be_overridden():
+    assert resolve_irradiance(["poa_global", "ghi"], prefer=("ghi",)) == "ghi"
+
+
+def test_only_totals_ship_in_the_preference_order():
+    assert IRRADIANCE_COLUMNS == ("poa_global", "ghi")

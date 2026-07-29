@@ -19,12 +19,12 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from meteosynth import DayWindowGenerator, MetDataProcessor, day_slot
+from meteosynth import DayWindowGenerator, MetDataset, day_slot
 
 LEAP_YEARS = (2012, 2016, 2020)
 
 
-def _synthetic_record(start_year: int, end_year: int, seed: int = 0) -> MetDataProcessor:
+def _synthetic_record(start_year: int, end_year: int, seed: int = 0) -> MetDataset:
     """An hourly record with a realistic diurnal cycle and exactly-zero nights.
 
     The night mask is explicit rather than a ``clip`` because ``np.sin(np.pi)`` is
@@ -50,14 +50,20 @@ def _synthetic_record(start_year: int, end_year: int, seed: int = 0) -> MetDataP
     df = pd.DataFrame(
         {"year": index.year, "month": index.month, "day": index.day, "hour": hour}
     )
-    df["poa_direct"] = 800 * daylight * seasonal + rng.normal(0, 5, len(index)) * daylight
-    df["poa_sky_diffuse"] = 100 * daylight + rng.normal(0, 2, len(index)) * daylight
+    # Clipped at zero: irradiance cannot be negative, and the additive noise otherwise
+    # pushes near-dawn hours below the bound for MetDataset to repair on ingestion.
+    df["poa_direct"] = np.clip(
+        800 * daylight * seasonal + rng.normal(0, 5, len(index)) * daylight, 0, None
+    )
+    df["poa_sky_diffuse"] = np.clip(
+        100 * daylight + rng.normal(0, 2, len(index)) * daylight, 0, None
+    )
     df["poa_ground_diffuse"] = 0.0
     df["solar_elevation"] = 60 * daylight
     df["temp_air"] = 15 + 10 * seasonal + rng.normal(0, 1, len(index))
     df["wind_speed"] = np.abs(rng.normal(4, 1.5, len(index)))
     df["Int"] = 0
-    return MetDataProcessor(df)
+    return MetDataset(df)
 
 
 @pytest.fixture

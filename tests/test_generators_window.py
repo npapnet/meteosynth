@@ -6,7 +6,7 @@ import pytest
 
 from meteosynth.day_window import day_slot
 from meteosynth.generators import DayWindowGenerator, EnvSeriesGenerator
-from meteosynth.met_data_processor import MetDataProcessor
+from meteosynth.dataset import MetDataset
 
 
 @pytest.fixture
@@ -28,14 +28,20 @@ def mdp_fixture():
     )
     daylight = np.clip(np.sin((index.hour - 6) / 12 * np.pi), 0, None)
     seasonal = 0.5 + 0.5 * np.sin((index.dayofyear - 80) / 365 * 2 * np.pi)
-    df["poa_direct"] = 800 * daylight * seasonal + rng.normal(0, 5, len(index))
-    df["poa_sky_diffuse"] = 100 * daylight + rng.normal(0, 2, len(index))
-    df["poa_ground_diffuse"] = 20 * daylight + rng.normal(0, 1, len(index))
+    # Clipped at zero because irradiance cannot be negative. Without this the additive
+    # noise pushes thousands of near-dawn hours below the bound, and MetDataset repairs
+    # them on ingestion -- correct behaviour, but it means the fixture is not the data
+    # the test thinks it is.
+    df["poa_direct"] = np.clip(
+        800 * daylight * seasonal + rng.normal(0, 5, len(index)), 0, None
+    )
+    df["poa_sky_diffuse"] = np.clip(100 * daylight + rng.normal(0, 2, len(index)), 0, None)
+    df["poa_ground_diffuse"] = np.clip(20 * daylight + rng.normal(0, 1, len(index)), 0, None)
     df["solar_elevation"] = 60 * daylight - 10
     df["temp_air"] = 15 + 10 * seasonal + rng.normal(0, 1, len(index))
     df["wind_speed"] = np.abs(rng.normal(4, 1.5, len(index)))
     df["Int"] = 0
-    return MetDataProcessor(df)
+    return MetDataset(df)
 
 
 def test_for_day_returns_a_fitted_generator(mdp_fixture):

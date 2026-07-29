@@ -24,9 +24,9 @@ IRRADIANCE_ATTRS = ["poa_direct", "poa_sky_diffuse"]
 
 
 @pytest.mark.parametrize("attr", IRRADIANCE_ATTRS)
-def test_generated_irradiance_is_never_negative(synthetic_mdp, attr):
+def test_generated_irradiance_is_never_negative(synthetic_ds, attr):
     """Over a large ensemble, at every hour. This is the headline guarantee."""
-    generator = DayWindowGenerator(synthetic_mdp, attr_str=attr, n_days=15)
+    generator = DayWindowGenerator(synthetic_ds, attr_str=attr, n_days=15)
     rng = np.random.default_rng(0)
     ensemble = np.vstack(
         [generator.generate_series((5, 15), 1, rng=rng) for _ in range(200)]
@@ -37,9 +37,9 @@ def test_generated_irradiance_is_never_negative(synthetic_mdp, attr):
 
 
 @pytest.mark.parametrize("attr", IRRADIANCE_ATTRS)
-def test_a_whole_generated_year_is_never_negative(synthetic_mdp, attr):
+def test_a_whole_generated_year_is_never_negative(synthetic_ds, attr):
     """The chained path too, not just independent days."""
-    generator = DayWindowGenerator(synthetic_mdp, attr_str=attr, n_days=15)
+    generator = DayWindowGenerator(synthetic_ds, attr_str=attr, n_days=15)
     year = generator.generate_series((1, 1), 365, seed=3)
 
     assert year.min() >= 0.0
@@ -111,9 +111,9 @@ def test_without_a_spec_the_domain_is_the_data_alone():
 
 
 @pytest.mark.parametrize("attr", IRRADIANCE_ATTRS)
-def test_real_record_generates_no_negatives(real_mdp, attr):
+def test_real_record_generates_no_negatives(real_ds, attr):
     """The same guarantee against the shipped PVGIS record, where the bug was found."""
-    generator = DayWindowGenerator(real_mdp, attr_str=attr, n_days=15)
+    generator = DayWindowGenerator(real_ds, attr_str=attr, n_days=15)
     rng = np.random.default_rng(0)
     ensemble = np.vstack(
         [generator.generate_series((5, 15), 1, rng=rng) for _ in range(100)]

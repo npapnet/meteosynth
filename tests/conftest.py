@@ -22,18 +22,27 @@ import pytest
 
 matplotlib.use("Agg")
 
-DATA_FILE = pathlib.Path(__file__).parent.parent / "data" / "pvgis_hourly_data.xlsx"
+DATA_DIR = pathlib.Path(__file__).parent.parent / "data"
+
+#: Where the optional real record is looked for, in preference order. Parquet is the
+#: canonical format, so it comes first; CSV is accepted because it is what a user is most
+#: likely to already have lying around. XLSX is deliberately absent -- the package no
+#: longer reads it, and `openpyxl` left the dependency list with it.
+REAL_RECORD_CANDIDATES = (
+    DATA_DIR / "pvgis_hourly_data.parquet",
+    DATA_DIR / "pvgis_hourly_data.csv",
+)
 
 
 @pytest.fixture
-def synthetic_mdp():
+def synthetic_ds():
     """Two years (2011-2012) of hourly data with a plausible diurnal + seasonal cycle.
 
     Irradiance is exactly zero at night, so its night hours degenerate and its pi(x0) is
     a spike at zero -- the same structure the real PVGIS record has, which is what makes
     this a usable stand-in for it.
     """
-    from meteosynth.met_data_processor import MetDataProcessor
+    from meteosynth.dataset import MetDataset
 
     rng = np.random.default_rng(42)
     index = pd.date_range("2011-01-01", "2012-12-31 23:00", freq="h")
@@ -58,14 +67,25 @@ def synthetic_mdp():
     # Temperature and wind never stop, and never start at zero.
     df["temp_air"] = 15 + 10 * seasonal + 3 * daylight + rng.normal(0, 1, len(index))
     df["wind_speed"] = np.abs(rng.normal(4, 1.5, len(index))) + 0.5
-    return MetDataProcessor(df)
+    return MetDataset(df)
 
 
 @pytest.fixture
-def real_mdp():
-    """The shipped PVGIS record (Paris, 2011-2012), skipped if absent."""
-    from meteosynth.met_data_processor import MetDataProcessor
+def real_ds():
+    """The optional real PVGIS record (Paris, 2011-2012), skipped if absent.
 
-    if not DATA_FILE.exists():
-        pytest.skip(f"{DATA_FILE} not present")
-    return MetDataProcessor(pd.read_excel(DATA_FILE))
+    Git-ignored, so most checkouts skip every test that asks for it. That is deliberate:
+    the suite must be runnable without a network fetch or a large binary in the repo.
+    """
+    from meteosynth.dataset import MetDataset
+
+    for path in REAL_RECORD_CANDIDATES:
+        if path.exists():
+            if path.suffix == ".parquet":
+                return MetDataset.load(path)
+            return MetDataset.read_csv(path)
+
+    pytest.skip(
+        "no real record present. Expected one of "
+        f"{[p.name for p in REAL_RECORD_CANDIDATES]} in {DATA_DIR}."
+    )

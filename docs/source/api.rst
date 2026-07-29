@@ -16,13 +16,29 @@ subset.
    :undoc-members:
    :show-inheritance:
 
-Data Ingestion and Processing
------------------------------
+The Training Dataset
+--------------------
 
-.. automodule:: meteosynth.met_data_processor
+:class:`~meteosynth.dataset.MetDataset` is the package's core noun: a validated,
+source-agnostic training record that round-trips to disk without loss. Everything
+downstream reads one, and nothing downstream cares how it was built.
+
+.. automodule:: meteosynth.dataset
    :members:
    :undoc-members:
    :show-inheritance:
+
+.. automodule:: meteosynth.provenance
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Source Adapters
+---------------
+
+Optional collection helpers. They construct a
+:class:`~meteosynth.dataset.MetDataset` with its provenance filled in -- they are not a
+layer the data has to pass through.
 
 .. automodule:: meteosynth.adapters
    :members:

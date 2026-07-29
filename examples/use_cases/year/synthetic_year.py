@@ -52,6 +52,7 @@ import time
 
 import numpy as np
 import pandas as pd
+from tqdm.auto import tqdm
 
 # Make `examples/` importable however this file is run (script, -m, or an editor cell).
 _HERE = pathlib.Path(__file__).resolve().parent if "__file__" in globals() else pathlib.Path.cwd()
@@ -59,7 +60,7 @@ _EXAMPLES = next(p for c in (_HERE, *_HERE.parents) for p in (c, c / "examples")
                  if (p / "tools" / "site_data.py").is_file())
 sys.path.insert(0, str(_EXAMPLES))
 
-from meteosynth import DayWindowGenerator, MetDataProcessor
+from meteosynth import DayWindowGenerator, MetDataset
 from tools.site_data import HERAKLION, HERAKLION_YEARS, load_site, save_figure, save_frame
 
 ATTRS = ["poa_global", "temp_air", "wind_speed"]
@@ -84,17 +85,23 @@ def hourly_index(year: int) -> pd.DatetimeIndex:
     return index
 
 
-def generate_year(mdp: MetDataProcessor, attr: str, seed: int) -> np.ndarray:
-    """One chained 365-day series for one attribute. Returns shape ``(365, 24)``."""
+def generate_year(ds: MetDataset, attr: str, seed: int) -> np.ndarray:
+    """One chained 365-day series for one attribute. Returns shape ``(365, 24)``.
+
+    The progress bar is worth having here because the walk is slow for a reason worth
+    seeing: each calendar day fits its own generators on first visit, so the bar moves
+    steadily rather than stalling, and a run that has stopped moving is a real signal
+    rather than ordinary patience.
+    """
     generator = DayWindowGenerator(
-        mdp, attr_str=attr, n_days=WINDOW_DAYS, cache_size=CACHE_SIZE
+        ds, attr_str=attr, n_days=WINDOW_DAYS, cache_size=CACHE_SIZE
     )
     started = time.perf_counter()
-    days = generator.generate_series(start=(1, 1), n_days=365, seed=seed)
-    print(f"    {attr:12} {time.perf_counter() - started:5.0f}s   "
-          f"finite={np.isfinite(days).all()}  "
-          f"range {days.min():8.2f} .. {days.max():8.2f}  "
-          f"cached generators held: {len(generator._cache)}")
+    days = generator.generate_series(start=(1, 1), n_days=365, seed=seed, progress=True)
+    tqdm.write(f"    {attr:12} {time.perf_counter() - started:5.0f}s   "
+               f"finite={np.isfinite(days).all()}  "
+               f"range {days.min():8.2f} .. {days.max():8.2f}  "
+               f"cached generators held: {len(generator._cache)}")
     return days
 
 
@@ -166,35 +173,47 @@ def plot_year(frame: pd.DataFrame):
 
 
 def main():
-    df = load_site(HERAKLION, *HERAKLION_YEARS)
-    mdp = MetDataProcessor(df)
-    print(mdp.describe_time_range())
+    ds = load_site(HERAKLION, *HERAKLION_YEARS)
+    print(ds.describe_time_range())
     print(f"Generating {N_REALISATIONS} synthetic year(s) of {ATTRS} "
           f"on a {REFERENCE_YEAR} (non-leap) calendar.\n")
 
     index = hourly_index(REFERENCE_YEAR)
     written = []
+
+    # Outer bar over the whole run, inner bar over each attribute's 365-day walk. Two
+    # levels because the two questions are different: "how far through the job am I"
+    # and "is the current series still moving".
+    overall = tqdm(
+        total=N_REALISATIONS * len(ATTRS),
+        desc="synthetic years",
+        unit="series",
+        position=0,
+    )
     for realisation in range(N_REALISATIONS):
-        print(f"  realisation {realisation + 1}/{N_REALISATIONS}:")
+        tqdm.write(f"  realisation {realisation + 1}/{N_REALISATIONS}:")
         frame = pd.DataFrame(index=index)
         frame.index.name = "timestamp"
         for attr in ATTRS:
             # A distinct seed per (realisation, attribute): the attributes are modelled
             # independently, so sharing one stream would not couple them anyway -- but a
             # distinct seed makes each series reproducible on its own.
-            frame[attr] = generate_year(mdp, attr, seed=SEED + 1000 * realisation
+            frame[attr] = generate_year(ds, attr, seed=SEED + 1000 * realisation
                                         + ATTRS.index(attr)).ravel()
+            overall.update(1)
 
         name = f"year_{HERAKLION.key}_{REFERENCE_YEAR}_r{realisation + 1:02d}.csv"
         written.append(save_frame(frame, name))
 
         if realisation == 0:
-            summary = monthly_summary(frame, mdp.met_data)
-            print_summary(summary, frame, mdp.met_data)
+            summary = monthly_summary(frame, ds.met_data)
+            print_summary(summary, frame, ds.met_data)
             save_frame(summary, f"year_{HERAKLION.key}_monthly_summary.csv", index=False)
             if PLOT_HEATMAP:
                 save_figure(plot_year(frame),
                             f"year_{HERAKLION.key}_{REFERENCE_YEAR}_heatmap.png")
+
+    overall.close()
 
     print(f"\n  Feb 29 present in the output: "
           f"{((index.month == 2) & (index.day == 29)).any()}")

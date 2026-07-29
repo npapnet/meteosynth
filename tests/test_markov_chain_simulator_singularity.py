@@ -155,10 +155,10 @@ def test_a_whole_residue_laden_day_generates_finite_values():
                              shape * 800 * rng.uniform(0.7, 1.3)))
     frame = pd.DataFrame(rows, columns=[*INDEX_COLS, "poa_direct"])
 
-    from meteosynth import EnvSeriesGenerator, MetDataProcessor
+    from meteosynth import EnvSeriesGenerator, MetDataset
 
-    mdp = MetDataProcessor(frame)
-    generator = EnvSeriesGenerator(mdp.get_month_subset(5), attr_str="poa_direct")
+    ds = MetDataset(frame)
+    generator = EnvSeriesGenerator(ds.get_month_subset(5), attr_str="poa_direct")
     day = generator.gen_day(seed=1)
 
     assert np.isfinite(day).all()

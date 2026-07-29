@@ -36,18 +36,18 @@ cases, one per time scale; section 6 the diagnostics.
 ## 1. Exploratory analysis
 
 `examples/concepts/example_exploratory_analysis.py` shows the data-preparation and
-visualisation side: fetch hourly data, wrap it in `MetDataProcessor`, subset a
+visualisation side: fetch hourly data, wrap it in `MetDataset`, subset a
 month, reshape to daily-wide format, and produce diagnostic plots via
 `sup_plot_lib` (2D KDE contours, hourly boxplots, mean ± error bars, and a
 Seaborn faceted line plot).
 
 ```python
-from meteosynth import MetDataProcessor
+from meteosynth import MetDataset
 import meteosynth.sup_plot_lib as spl
 
-mdp = MetDataProcessor(df)
-month_data = mdp.get_month_subset(5)              # May
-wide = mdp.get_monthly_attribute_wide_format(     # days x hours
+ds = MetDataset(df)
+month_data = ds.get_month_subset(5)              # May
+wide = ds.get_monthly_attribute_wide_format(     # days x hours
     value_col="poa_direct", month_id=5)
 
 spl.plot_2d_kde_sns(month_data, value_str="poa_direct")
@@ -65,19 +65,19 @@ special handling, and generates profiles for the same target day from each
 strategy so the centring bias is visible.
 
 ```python
-from meteosynth import MetDataProcessor, DayWindowGenerator
+from meteosynth import MetDataset, DayWindowGenerator
 
-mdp = MetDataProcessor(df)
+ds = MetDataset(df)
 
 # Both pool ~62 days from the 2-year record, around different centres.
-may_month = mdp.get_month_subset(5)                          # all of May
-may_window = mdp.get_day_window_subset(5, 1, n_days=15)      # Apr 16 - May 16
+may_month = ds.get_month_subset(5)                          # all of May
+may_window = ds.get_day_window_subset(5, 1, n_days=15)      # Apr 16 - May 16
 
 # The window wraps across New Year with no special-casing.
-new_year = mdp.get_day_window_subset(1, 2, n_days=4)         # Dec 29 - Jan 6
+new_year = ds.get_day_window_subset(1, 2, n_days=4)         # Dec 29 - Jan 6
 
 # Feb 29 is an ordinary target.
-leap = DayWindowGenerator(mdp, attr_str="poa_direct").gen_day(2, 29)
+leap = DayWindowGenerator(ds, attr_str="poa_direct").gen_day(2, 29)
 ```
 
 ```{note}
@@ -127,10 +127,10 @@ into a distribution of daily energy yield:
 
 ```python
 import numpy as np
-from meteosynth import MetDataProcessor, DayWindowGenerator
+from meteosynth import MetDataset, DayWindowGenerator
 
-mdp = MetDataProcessor(df)
-generator = DayWindowGenerator(mdp, attr_str="poa_global", n_days=15)
+ds = MetDataset(df)
+generator = DayWindowGenerator(ds, attr_str="poa_global", n_days=15)
 
 # 1000 synthetic 21 Junes -> (1000, 24) array of hourly irradiance. Fit once with
 # for_day, then draw repeatedly from one RNG stream.
@@ -170,10 +170,10 @@ same rolling-window base:
 ```python
 import numpy as np
 import pandas as pd
-from meteosynth import DayWindowGenerator, MetDataProcessor
+from meteosynth import DayWindowGenerator, MetDataset
 
-mdp = MetDataProcessor(df)                                  # Heraklion 2010-2020
-generator = DayWindowGenerator(mdp, attr_str="poa_global", n_days=15)
+ds = MetDataset(df)                                  # Heraklion 2010-2020
+generator = DayWindowGenerator(ds, attr_str="poa_global", n_days=15)
 ```
 
 | Scale | Call | What it can be checked against |
@@ -218,7 +218,7 @@ eleven observed ones: level, spread, P50/P90, and the diurnal shape. A month is 
 a battery's state of charge.
 
 ```python
-generator = DayWindowGenerator(mdp, attr_str="poa_global", n_days=15, cache_size=40)
+generator = DayWindowGenerator(ds, attr_str="poa_global", n_days=15, cache_size=40)
 
 # One RNG stream across realisations: each call still redraws pi(x0), so these are
 # twelve independent Mays rather than one long chain.
@@ -249,7 +249,7 @@ correlation, annual totals. The point is the file, so plots are off by default; 
 `PLOT_HEATMAP = True` for a year-at-a-glance figure.
 
 ```python
-generator = DayWindowGenerator(mdp, attr_str="wind_speed", n_days=15, cache_size=8)
+generator = DayWindowGenerator(ds, attr_str="wind_speed", n_days=15, cache_size=8)
 
 # One call. Day 1 starts from pi(x0); every later midnight uses that day's own
 # cross-midnight model. include_feb29 defaults to False, giving a 365-day year.

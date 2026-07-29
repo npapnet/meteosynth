@@ -1,6 +1,6 @@
 """Ingestion: the registry decides what survives, not a hardcoded list.
 
-MetDataProcessor keeps INDEX_COLS plus every column that has a registered spec, and
+MetDataset keeps INDEX_COLS plus every column that has a registered spec, and
 drops the rest. ``solar_elevation`` and ``Int`` fall out **by that rule** -- neither is a
 stochastic environmental quantity, so neither has a spec -- rather than by name. The
 distinction matters: a future provider's quirk column falls out the same way, with no
@@ -12,7 +12,7 @@ import pandas as pd
 import pytest
 
 from meteosynth.constants import INDEX_COLS
-from meteosynth.met_data_processor import MetDataProcessor, trim_columns, validate_columns
+from meteosynth.dataset import MetDataset, trim_columns, validate_columns
 from meteosynth.variables import VariableSpec, register, unregister
 
 
@@ -27,26 +27,26 @@ def _frame(**columns):
 
 def test_index_columns_plus_one_registered_column_is_enough():
     """A temperature-only source with no irradiance at all ingests cleanly."""
-    mdp = MetDataProcessor(_frame(temp_air=np.linspace(5, 20, 48)))
-    assert set(mdp.met_data.columns) == {*INDEX_COLS, "temp_air"}
+    ds = MetDataset(_frame(temp_air=np.linspace(5, 20, 48)))
+    assert set(ds.met_data.columns) == {*INDEX_COLS, "temp_air"}
 
 
 def test_a_missing_index_column_is_rejected():
     frame = _frame(temp_air=np.zeros(48)).drop(columns=["hour"])
     with pytest.raises(ValueError, match="missing required index columns"):
-        MetDataProcessor(frame)
+        MetDataset(frame)
 
 
 def test_a_frame_with_nothing_modellable_is_rejected():
     frame = _frame(some_flag=np.zeros(48))
     with pytest.raises(ValueError, match="no modellable column"):
-        MetDataProcessor(frame)
+        MetDataset(frame)
 
 
 def test_the_error_names_the_registered_set_and_the_fix():
     frame = _frame(some_flag=np.zeros(48))
     with pytest.raises(ValueError) as excinfo:
-        MetDataProcessor(frame)
+        MetDataset(frame)
 
     message = str(excinfo.value)
     assert "temp_air" in message      # what it would accept
@@ -58,11 +58,11 @@ def test_unregistered_columns_are_dropped():
     frame = _frame(
         temp_air=np.zeros(48), solar_elevation=np.zeros(48), Int=np.zeros(48),
     )
-    mdp = MetDataProcessor(frame)
+    ds = MetDataset(frame)
 
-    assert "solar_elevation" not in mdp.met_data.columns
-    assert "Int" not in mdp.met_data.columns
-    assert "temp_air" in mdp.met_data.columns
+    assert "solar_elevation" not in ds.met_data.columns
+    assert "Int" not in ds.met_data.columns
+    assert "temp_air" in ds.met_data.columns
 
 
 def test_the_callers_frame_is_never_mutated():
@@ -72,7 +72,7 @@ def test_the_callers_frame_is_never_mutated():
     uses in PV work.
     """
     frame = _frame(temp_air=np.zeros(48), solar_elevation=np.arange(48.0))
-    MetDataProcessor(frame)
+    MetDataset(frame)
 
     assert "solar_elevation" in frame.columns
     np.testing.assert_array_equal(frame["solar_elevation"], np.arange(48.0))
@@ -83,11 +83,11 @@ def test_the_callers_frame_is_never_mutated():
 def test_registering_a_spec_makes_a_dropped_column_survive():
     frame = _frame(temp_air=np.zeros(48), solar_elevation=np.linspace(-10, 60, 48))
 
-    assert "solar_elevation" not in MetDataProcessor(frame).met_data.columns
+    assert "solar_elevation" not in MetDataset(frame).met_data.columns
 
     register("solar_elevation", VariableSpec((-90.0, 90.0), "degrees", "Solar elevation"))
     try:
-        assert "solar_elevation" in MetDataProcessor(frame).met_data.columns
+        assert "solar_elevation" in MetDataset(frame).met_data.columns
     finally:
         unregister("solar_elevation")
 
@@ -108,10 +108,10 @@ def test_a_user_column_is_modellable_once_registered():
 
     register("rel_humidity", VariableSpec((0.0, 100.0), "%", "Relative humidity"))
     try:
-        mdp = MetDataProcessor(frame)
-        assert "rel_humidity" in mdp.met_data.columns
+        ds = MetDataset(frame)
+        assert "rel_humidity" in ds.met_data.columns
 
-        generator = EnvSeriesGenerator(mdp.get_month_subset(2), attr_str="rel_humidity")
+        generator = EnvSeriesGenerator(ds.get_month_subset(2), attr_str="rel_humidity")
         day = generator.gen_day(seed=1)
 
         assert day.shape == (24,)
