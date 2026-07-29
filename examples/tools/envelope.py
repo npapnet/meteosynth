@@ -26,10 +26,13 @@ from __future__ import annotations
 
 from typing import Optional, Sequence
 
+import sys
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from matplotlib import patheffects
+from tqdm import tqdm
 
 from meteosynth import DayWindowGenerator, MetDataset, convert_to_daily_wide
 
@@ -92,7 +95,12 @@ def day_matrix(
 
 
 def synthetic_ensemble(
-    generator: DayWindowGenerator, month: int, day: int, n: int, seed: int = 42
+    generator: DayWindowGenerator,
+    month: int,
+    day: int,
+    n: int,
+    seed: int = 42,
+    show_progress: bool = False,
 ) -> np.ndarray:
     """
     Draw ``n`` independent synthetic days for one calendar date.
@@ -103,6 +111,21 @@ def synthetic_ensemble(
     366-day walk. One generator drives them all, so the ensemble is reproducible as a
     whole without any two members sharing a seed.
 
+    Parameters
+    ----------
+    generator : DayWindowGenerator
+        Generator instance.
+    month : int
+        Month of the target date (1-12).
+    day : int
+        Day of the target date.
+    n : int
+        Number of synthetic day profiles to draw.
+    seed : int, optional
+        Random seed for reproducibility. Defaults to 42.
+    show_progress : bool, optional
+        If True, displays a tqdm progress bar for drawing the ensemble. Defaults to False.
+
     Returns
     -------
     np.ndarray
@@ -110,7 +133,11 @@ def synthetic_ensemble(
     """
     rng = np.random.default_rng(seed)
     day_generator = generator.for_day(month, day)
-    return np.vstack([day_generator.gen_day(rng=rng) for _ in range(n)])
+    iterator = range(n)
+    if show_progress:
+        iterator = tqdm(iterator, desc="Drawing synthetic ensemble", file=sys.stdout)
+    return np.vstack([day_generator.gen_day(rng=rng) for _ in iterator])
+
 
 
 def _percentiles(matrix, lo: float, hi: float):

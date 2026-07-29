@@ -84,7 +84,7 @@ def main():
           f"-- above the 0.0 support bound, so the bound never binds")
 
     print(f"\nDrawing {N_SYNTHETIC} independent synthetic {DATE_LABEL} profiles...")
-    synthetic = synthetic_ensemble(generator, *TARGET, n=N_SYNTHETIC, seed=SEED)
+    synthetic = synthetic_ensemble(generator, *TARGET, n=N_SYNTHETIC, seed=SEED, show_progress=True)
 
     stats = report_day_stats(
         observed_pool, observed_exact, synthetic,

@@ -1,4 +1,5 @@
-#%%
+# %%
+# %%
 """
 Use case: does a synthetic 21 May look like a real 21 May?  --  irradiance (PV)
 
@@ -44,9 +45,17 @@ import sys
 import matplotlib.pyplot as plt
 
 # Make `examples/` importable however this file is run (script, -m, or an editor cell).
-_HERE = pathlib.Path(__file__).resolve().parent if "__file__" in globals() else pathlib.Path.cwd()
-_EXAMPLES = next(p for c in (_HERE, *_HERE.parents) for p in (c, c / "examples")
-                 if (p / "tools" / "site_data.py").is_file())
+_HERE = (
+    pathlib.Path(__file__).resolve().parent
+    if "__file__" in globals()
+    else pathlib.Path.cwd()
+)
+_EXAMPLES = next(
+    p
+    for c in (_HERE, *_HERE.parents)
+    for p in (c, c / "examples")
+    if (p / "tools" / "site_data.py").is_file()
+)
 sys.path.insert(0, str(_EXAMPLES))
 
 from meteosynth import DayWindowGenerator, MetDataset
@@ -57,18 +66,24 @@ from tools.envelope import (
     report_day_stats,
     synthetic_ensemble,
 )
-from tools.site_data import HERAKLION, HERAKLION_YEARS, load_site, save_figure, save_frame
+from tools.site_data import (
+    HERAKLION,
+    HERAKLION_YEARS,
+    load_site,
+    save_figure,
+    save_frame,
+)
 
 ATTR = "poa_global"
 UNIT = "W/m2"
-TARGET = (5, 21)          # 21 May
+TARGET = (5, 21)  # 21 May
 DATE_LABEL = "21 May"
-POOL_DAYS = 7             # observed envelope: every day within a week of the target
-WINDOW_DAYS = 15          # training window half-width, +/- 15 days
+POOL_DAYS = 7  # observed envelope: every day within a week of the target
+WINDOW_DAYS = 15  # training window half-width, +/- 15 days
 N_SYNTHETIC = 200
 SEED = 42
 
-#%%
+# %%
 
 
 def main():
@@ -83,35 +98,63 @@ def main():
     generator = DayWindowGenerator(ds, attr_str=ATTR, n_days=WINDOW_DAYS)
     day_generator = generator.for_day(*TARGET)
     degenerate = [h for h, sim in day_generator.simulators.items() if sim.is_degenerate]
-    print(f"  training days pooled : {len(day_matrix(ds, ATTR, *TARGET, n_days=WINDOW_DAYS))}")
+    print(
+        f"  training days pooled : {len(day_matrix(ds, ATTR, *TARGET, n_days=WINDOW_DAYS))}"
+    )
     print(f"  degenerate hours     : {degenerate}")
-    print(f"  pi(x0) kind          : {day_generator.initial.kind.name} "
-          f"-- every observed midnight is 0 W/m2, so every synthetic day starts there")
+    print(
+        f"  pi(x0) kind          : {day_generator.initial.kind.name} "
+        f"-- every observed midnight is 0 W/m2, so every synthetic day starts there"
+    )
 
     print(f"\nDrawing {N_SYNTHETIC} independent synthetic {DATE_LABEL} profiles...")
-    synthetic = synthetic_ensemble(generator, *TARGET, n=N_SYNTHETIC, seed=SEED)
+    synthetic = synthetic_ensemble(
+        generator, *TARGET, n=N_SYNTHETIC, seed=SEED, show_progress=True
+    )
 
     stats = report_day_stats(
-        observed_pool, observed_exact, synthetic,
-        attr=ATTR, unit=UNIT, date_label=DATE_LABEL,
-        aggregate="sum", aggregate_scale=1e-3, aggregate_unit="kWh/m2",
+        observed_pool,
+        observed_exact,
+        synthetic,
+        attr=ATTR,
+        unit=UNIT,
+        date_label=DATE_LABEL,
+        aggregate="sum",
+        aggregate_scale=1e-3,
+        aggregate_unit="kWh/m2",
     )
 
     print("\nSaving...")
-    save_frame(ensemble_frame(synthetic), f"day_{DATE_LABEL.replace(' ', '')}_{ATTR}_ensemble.csv")
-    save_frame(stats, f"day_{DATE_LABEL.replace(' ', '')}_{ATTR}_stats.csv", index=False)
+    save_frame(
+        ensemble_frame(synthetic),
+        f"day_{DATE_LABEL.replace(' ', '')}_{ATTR}_ensemble.csv",
+    )
+    save_frame(
+        stats, f"day_{DATE_LABEL.replace(' ', '')}_{ATTR}_stats.csv", index=False
+    )
 
     fig = plot_day_envelope(
-        observed_pool, observed_exact, synthetic,
-        attr=ATTR, unit=UNIT, date_label=DATE_LABEL,
-        site_label=HERAKLION.name, window_days=POOL_DAYS,
-        aggregate="sum", aggregate_scale=1e-3, aggregate_unit="kWh/m2",
+        observed_pool,
+        observed_exact,
+        synthetic,
+        attr=ATTR,
+        unit=UNIT,
+        date_label=DATE_LABEL,
+        site_label=HERAKLION.name,
+        window_days=POOL_DAYS,
+        aggregate="sum",
+        aggregate_scale=1e-3,
+        aggregate_unit="kWh/m2",
     )
     save_figure(fig, f"day_{DATE_LABEL.replace(' ', '')}_{ATTR}.png")
 
-    print("\n  Read the left panel as: the synthetic band should sit inside the observed")
+    print(
+        "\n  Read the left panel as: the synthetic band should sit inside the observed"
+    )
     print("  one and peak at the same hour. Read the right panel as: the orange mass")
-    print("  should overlie the blue. A shift to the right there is the known daily-total")
+    print(
+        "  should overlie the blue. A shift to the right there is the known daily-total"
+    )
     print("  overshoot, and it is visible even when the shapes agree.")
     return fig
 
