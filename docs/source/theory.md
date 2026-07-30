@@ -16,6 +16,67 @@ variability that drives the tails of production and demand. `meteosynth`
 instead learns the **transition statistics** of a variable and samples fresh
 trajectories that reproduce those statistics.
 
+## The process end to end
+
+Before the mathematics, the shape of the whole thing. Everything below elaborates one of
+these five steps.
+
+**1. Pick the training data for one calendar day.** To model 21 May, take every day within
+±*n* days of 21 May — pooled across *all* years of the record. Eleven years at `n_days=15`
+gives 341 days. This is a *climatological* window: it answers "what is this time of year
+like here", not "what happened in one particular May".
+
+**2. Cut that window into hourly transition pairs.** For each hour separately, collect every
+`(value at h−1, value at h)` observation the window contains. The 13:00→14:00 pairs are a
+different dataset from the 14:00→15:00 pairs, and each gets its own model. This is what
+makes the model *time-inhomogeneous within the day*: mid-afternoon behaves differently from
+dawn, and nothing forces them to share statistics.
+
+**3. Fit 25 models for that day, per attribute.**
+
+| how many | what it models | used when |
+| ---: | :--- | :--- |
+| 23 | the within-day transitions, h−1 → h for h = 1…23 | every hour of every day |
+| 1 | **π(x₀)**, the distribution of the 00:00 value alone | the day *starts* a series |
+| 1 | the **cross-midnight** transition, 23:00 yesterday → 00:00 today | the day *continues* a series |
+
+Hour 0 needs two of its own because it has no predecessor *within* its day — either a series
+begins there (draw from π(x₀)) or it continues from yesterday (draw from the cross-midnight
+model). The other 23 hours have an obvious predecessor and need only one model each.
+
+Each attribute — irradiance, temperature, wind — gets its own independent set of 25. They
+are never modelled jointly.
+
+**4. Walk the day, hour by hour.** Holding a current value $v$ for hour $h-1$, take hour
+$h$'s model, **slice** its joint density at $x_{t} = v$, renormalise the slice into a proper
+conditional distribution, and draw one value from it. That drawn value becomes the input for
+hour $h+1$. Twenty-four values later you have a day.
+
+**5. Cross into the next day and repeat.** The 23:00 value feeds the *next* calendar day's
+cross-midnight model, which produces its 00:00 value — and the next day uses **its own**
+window's models, fitted to data centred on *its* date. So the statistics drift smoothly
+through the season as the walk proceeds.
+
+```{mermaid}
+flowchart TD
+    R["historical record<br/>(all years)"] -->|"±n days around 21 May,<br/>pooled across years"| W["training window<br/>e.g. 341 days"]
+    W -->|"pairs, per hour"| P["23 sets of (previous, current)<br/>+ midnight values<br/>+ consecutive-date pairs"]
+    P -->|"fit a 2D KDE to each"| M["25 models for 21 May<br/>(per attribute)"]
+    M --> S["slice hour h's density<br/>at the current value v"]
+    S --> C["conditional distribution<br/>p(x&#8341; | x&#8341;&#8331;&#8321; = v)"]
+    C --> D["draw one value"]
+    D -->|"becomes the input for hour h+1"| S
+    D -->|"after 23:00, hand to<br/>22 May's cross-midnight model"| M2["25 models for 22 May"]
+```
+
+```{note}
+Fitting is per **calendar day** and per **attribute**, so a chained year over three
+attributes fits 365 × 3 × 25 models. That cost is why
+{meth}`~meteosynth.generators.DayWindowGenerator.generate_ensemble` walks the calendar once
+and lets every realisation share each day's fit, rather than repeating the walk per
+realisation.
+```
+
 ## First-order Markov assumption
 
 We model a meteorological variable $X_t$ as a first-order Markov process: the
@@ -104,14 +165,30 @@ whole content of the model — and averaging two cdfs of distributions centred i
 different places produces a bimodal blend of them, whereas averaging their
 quantile functions shifts one into the other.
 
+**Why wait for 64 rather than build the table up front?** Because building it *is* 64 draws'
+worth of the same computation: a single draw evaluates the density over a 1000-point grid,
+and the table evaluates it over 64 × 1000. So a model asked fewer than 64 times can never
+repay the cost.
+
+That is not a hypothetical case — it is the chained walk. `generate_series` fits a day's
+models, takes **exactly one** sample from each, and moves to the next calendar day with
+fresh ones. Building tables eagerly would make a synthetic year build 8 784 of them and use
+each once, at 64× the cost, for no benefit whatsoever. The counter exists to protect that
+path: it withholds the cost until a model has *proved* it will be asked enough times.
+
 ```{note}
 Large ensembles run ~8× faster; a short run never reaches the threshold and is
-bit-for-bit unchanged. A year-long chained walk takes **one** sample from each of
-a day's 24 simulators, so it never builds a grid or spends the memory either.
-Measured against the direct path over 20 000 draws, the cached sampler is within
-0.03% on the mean and 0.31% on the standard deviation. Both paths consume exactly
-one number from the RNG, so which one is taken never perturbs the stream.
+bit-for-bit unchanged. Measured against the direct path over 20 000 draws, the cached
+sampler is within 0.03% on the mean and 0.31% on the standard deviation. Both paths consume
+exactly one number from the RNG, so which one is taken never perturbs the stream, and the
+worst case is bounded at 2× — a model asked for about 128 samples pays 64 direct draws, then
+a build worth 64 more, then cheap lookups.
 ```
+
+When the ensemble size is known in advance and is large, the waiting is pointless:
+{meth}`~meteosynth.generators.DayWindowGenerator.generate_ensemble` builds the tables up
+front instead, so that every realisation is drawn through the same sampler rather than the
+first 64 differing from the rest.
 
 ## Singularity handling
 

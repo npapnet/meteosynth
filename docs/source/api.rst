@@ -16,6 +16,19 @@ subset.
    :undoc-members:
    :show-inheritance:
 
+Ensembles
+---------
+
+Many realisations in **one** calendar walk, and their on-disk form. Fitting each day's
+models once and sharing them across every realisation is what makes an ensemble of hundreds
+affordable; :func:`~meteosynth.ensemble.write_ensemble` streams the result to a single
+long-format parquet file, one row group per calendar day.
+
+.. automodule:: meteosynth.ensemble
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 The Training Dataset
 --------------------
 

@@ -1,4 +1,29 @@
-Status: accepted · Author: Claude (Opus 5) · Date: 2026-07-30 · Serves: `FEAT-15`
+Status: implemented · Author: Claude (Opus 5) · Date: 2026-07-30 · Serves: `FEAT-15`
+
+> **Archive note.** Implemented 2026-07-30; moved here the same day, with the suite green at
+> **345 passed, 12 skipped** (was 314). Landed as specified, with four deviations worth
+> recording:
+>
+> 1. **`generate_series` keeps its own RNG plumbing.** The spec said it would become
+>    `generate_ensemble(n_realisations=1)`. It shares the *walk*, but not the stream
+>    derivation: `rng=<Generator>` has always meant "draw from this and advance it", which is
+>    what makes repeated one-day calls an ensemble of independent days, and the keyed streams
+>    would have broken that. The walk therefore *consumes* streams it is handed rather than
+>    deriving them. Verified bit-for-bit identical to the pre-refactor implementation.
+> 2. **`generate_ensemble` clears the LRU cache on entry and exit** — not anticipated by the
+>    spec, and a genuine defect found by testing. The cache holds *sampler state*, not just
+>    fitted models: a cached simulator remembers how often it has been sampled, so one past
+>    `PERF-1`'s threshold answers from its grid where a fresh one answers directly. Without
+>    clearing, the same call on the same object returned different numbers. Costs nothing,
+>    since a walk never revisits a slot.
+> 3. **`precompute` is an explicit parameter**, because the automatic threshold means
+>    realisation *i* is not bit-identical across the 64-realisation boundary. The spec
+>    promised more than the threshold could deliver; the parameter is the escape hatch, and
+>    the docstring now states the limit accurately.
+> 4. **The headline number was wrong in the first draft** and is corrected in place below:
+>    ~77×, not ~300×. The original projection omitted the quantile-grid build, which every
+>    calendar day pays afresh. That correction also cut `PERF-16`'s ceiling from ~3× to ~1.2×
+>    and moved the next real optimisation target onto the build itself.
 
 # Generating an ensemble of synthetic years in one pass
 
@@ -8,18 +33,20 @@ The package's primary use case — N synthetic years, N in the hundreds or thous
 today the slowest thing it can do, for a reason that is pure bookkeeping. `generate_series`
 walks the calendar once and fits each day's models as it reaches that day; calling it N
 times therefore **fits every day's models N times**. Measured: 1000 realisations of one
-attribute would take **24 hours**, of which the modelling work is ~1 minute.
+attribute would take **~27 hours**, of which all but ~1.2 minutes is refitting models that
+were already fitted.
 
 This document specifies **inverting the two loops**. Walk the calendar once on the outside;
 at each calendar day, advance all N realisations through that day's already-fitted models.
-Fitting is then paid once. Measured projection: **24.1 h → 4.9 min** at N = 1000.
+Fitting is then paid once. Measured: **26.9 h → 20.9 min** at N = 1000, a **77×** reduction.
 
 Three things fall out of the inversion for free, and they are most of why this shape is the
 right one rather than merely a faster one:
 
 1. **`PERF-1`'s cached sampler starts applying.** A simulator asked for N samples instead of
-   one crosses its activation threshold and builds its quantile grid — worth a further **93×**
-   on sampling. A chained year is the one path `PERF-1` deliberately leaves cold.
+   one crosses its activation threshold and builds its quantile grid, cutting the cost of a
+   draw ~85×. A chained year is the one path `PERF-1` deliberately leaves cold. (The grid is
+   not free — building it turns out to dominate the per-day cost; see below.)
 2. **Peak memory goes *down*.** Only one day's generator is alive at a time, against ~126 MB
    per attribute to hold all 366 (the amortisation the `DayWindowGenerator` docstring
    rejects on those grounds).
@@ -30,7 +57,7 @@ right one rather than merely a faster one:
 flowchart TD
     S["start: (month, day), n_days, N realisations, seed"] --> SS["one stream per (realisation, attribute)<br/>keyed on index + crc32(attribute name)"]
     SS --> D["for each calendar day d in the walk"]
-    D --> F["fit that day's generator — ONCE<br/>(~180 ms)"]
+    D --> F["fit that day's generator — ONCE<br/>(~199 ms)"]
     F --> P["precompute_grid() so every realisation<br/>is drawn from the same sampler"]
     P --> R["for each realisation i in 1..N:<br/>advance i through day d, conditioned on<br/>realisation i's own 23:00 of day d-1"]
     R --> A["N x 24 values for day d"]
@@ -46,7 +73,7 @@ flowchart TD
 ## Why: what was measured
 
 Heraklion 2010–2020 (96 432 rows), `poa_global`, ±7-day window, `bandwidth=0.1`. The full
-set of numbers is in [`TODOs.md` `FEAT-15`](../../TODOs.md#feat-15--ensemble-of-n-synthetic-years-in-one-pass);
+set of numbers is in [`CHANGELOG.md`](../../../CHANGELOG.md);
 these are the ones the design turns on.
 
 **The LRU cache contributes nothing here, and the reason is not that it is too small.** A
@@ -56,17 +83,31 @@ and never revisits it, so no cache size short of the whole walk can hit. Raising
 `cache_size` to 32 cut it to 30 fits and 36.5 s → 15.9 s, confirming the misses were the
 whole cost. **70 % of wall time was fitting.**
 
-| operation | cost |
-| :--- | --: |
-| fit one calendar day's generator (window subset + 25 KDEs), median of 5 dates | **180 ms** |
-| sample one day, direct path — what a chained walk does today | **57.7 ms** |
-| sample one day, `PERF-1` cached-grid path | **0.62 ms** |
+| operation | cost | paid |
+| :--- | --: | :--- |
+| fit one calendar day's generator (window subset + 25 KDEs) | **199 ms** | per day, per attribute |
+| sample one day, direct path — what a chained walk does today | **57.7 ms** | per day, per realisation |
+| build that day's quantile grids (`PERF-1`) | **3.32 s** | per day, per attribute |
+| sample one day from the built grids | **0.68 ms** | per day, per realisation |
 
-| N realisations of a 365-day year | today | this design |
-| --: | --: | --: |
-| 10 | 14.5 min | 1.1 min |
-| 100 | 2.4 h | 1.5 min |
-| 1000 | **24.1 h** | **4.9 min** |
+End to end over a **60-day span**, scaled to a 365-day year, one attribute:
+
+| N realisations | today | this design | speedup |
+| --: | --: | --: | :--- |
+| 10 | 16.1 min | ~5 min | ~3× — direct path, no grids built |
+| 100 | 2.7 h | **17.5 min** | **9×** |
+| 1000 | **26.9 h** | **20.9 min** | **77×** |
+
+> **The grid build is what makes the win grow with N rather than being flat**, and it is the
+> cost easiest to overlook: it is the same ~3.3 s per day whatever N is, so it is nearly the
+> whole bill at N = 100 and still ~79 % at N = 1000. It is also why `PERF-1`'s 64-call
+> threshold is the right crossover here — at N = 64 the direct path and the grid path cost
+> within ~10 % of each other, which is where a threshold should sit.
+>
+> **An earlier draft of this document claimed ~300× and ~5 min.** That projection took its
+> per-day sampling cost from an already-warm generator and so omitted the build entirely —
+> but every calendar day gets a *fresh* generator, so the build is paid 365 times rather than
+> once. Correcting it cost a factor of four off the headline.
 
 **Statistically it is the same model.** Each realisation remains an independent chain through
 the same per-day models: realisation *i*'s hour 0 on day *d* conditions on realisation *i*'s
@@ -92,8 +133,9 @@ meteosynth.write_ensemble(
 ```
 
 `start`, `n_days` and `include_feb29` keep `generate_series`'s existing meanings, and the
-slot walk is the same code. **`generate_series` becomes `generate_ensemble(n_realisations=1)[0]`**
-rather than a second implementation — the two must not be able to drift apart.
+slot walk is the same code. **`generate_series` must not be a second implementation of the
+walk** — the two must not be able to drift apart. (As built it shares `_walk_ensemble` but
+keeps its own RNG plumbing; see archive note 1 for why.)
 
 ### One walk, three consumers
 
@@ -384,25 +426,36 @@ most shapes `PERF-16`, and it is recorded there.
 
 ### How much is actually on the table
 
-This is the number that decided it. Learning from the data is a floor of about **1 minute**
-per year's worth of models, no matter how fast the drawing gets. So for 1000 realisations:
+This is the number that decided it, and measurement shrank it sharply. Two costs are floors
+no amount of faster drawing can touch: **learning** each day's models from the data, and
+**preparing** them to be drawn from quickly. Together those are ~3.5 s of every 4.2 s spent
+on a calendar day at N = 1000 — **~84 %**. Drawing itself is the remaining ~16 %.
 
-| | time for 1000 years |
+| | time for 1000 years, one attribute |
 | :--- | --: |
-| today, before any of this work | **24 hours** |
-| after the change described above, drawing one at a time | **~5 minutes** |
-| bulk drawing, interesting hours only (measured) | ~3.5 minutes |
-| bulk drawing everything (estimated best case) | **~1.5 minutes** |
+| today, before any of this work | **27 hours** |
+| after the change described above, drawing one at a time | **~21 minutes** |
+| if drawing became instantaneous (the absolute floor) | ~17 minutes |
 
-**So the entire question is worth at most about 3× more, against roughly 300× that the main
-change already delivers.**
+**So the entire question is worth at most about 1.2× — roughly four minutes — against the
+77× the main change already delivers.** An earlier draft of this section put the ceiling at
+3×; that was computed before the preparation cost was measured, and measuring it cut the
+prize by more than half.
+
+**What this does change is where the next real speed-up lives.** It is not in the drawing at
+all: it is in that ~3.3 s per day of preparation, which is ~79 % of the bill and is paid
+whether you draw 100 realisations or 10 000. Nothing in this document addresses it, and
+nobody has looked at whether it can be made cheaper — a smaller node grid, a coarser
+evaluation, or exploiting the fact that consecutive days' training windows overlap by ~93 %
+at ±7 days. That is the question worth asking next, and it is recorded on `PERF-16`.
 
 ### Why one-at-a-time wins for now
 
 Two reasons, and the first is the decisive one.
 
-**The prize is bounded and small next to what is already in hand.** ~300× against at most a
-further ~3×. Batching is an optimisation on top of a solved problem, not part of solving it.
+**The prize is bounded and small next to what is already in hand.** 77× against at most a
+further ~1.2×, since preparation and fitting are 84 % of the cost and batching touches
+neither. Batching is an optimisation on top of a solved problem, not part of solving it.
 
 **The risk lands in the one place the test suite cannot see.** `CHORE-12` records that when
 the cached-sampler change was made, all 271 tests passed without modification — and would
@@ -412,5 +465,5 @@ notices, because a slightly wrong weather value still looks like a weather value
 routine means an ensemble and a single series *cannot* disagree, which is worth more than
 three minutes.
 
-Taking the ~300× costs nothing here: the one-at-a-time sampler is the code that already
+Taking the 77× costs nothing here: the one-at-a-time sampler is the code that already
 exists and is already trusted, so the fast path is also the conservative one.

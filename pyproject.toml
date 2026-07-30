@@ -27,13 +27,13 @@ dependencies = [
     "pyarrow>=25.0.0",
 ]
 
-#[project.optional-dependencies]
-## Extras used only by the scripts under examples/, not by the package itself.
-## Install with:  uv sync --extra examples   (or  pip install meteosynth[examples])
-#examples = [
-#    
-#    "tqdm>=4.66.0",
-#]
+[project.optional-dependencies]
+# Excel export of an ensemble (`meteosynth.ensemble_to_xlsx`). Not a core dependency: the
+# canonical ensemble format is parquet, which needs nothing beyond the required pyarrow.
+# Install with:  uv sync --extra excel   (or  pip install meteosynth[excel])
+excel = [
+    "openpyxl>=3.1.0",
+]
 
 [project.urls]
 Homepage = "https://github.com/npapnet/meteosynth"
