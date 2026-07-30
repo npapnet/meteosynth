@@ -25,14 +25,20 @@ Training data can be sliced two ways, and both are supported:
 from __future__ import annotations
 
 import logging
+import zlib
 from collections import OrderedDict
-from typing import Optional
+from dataclasses import dataclass
+from typing import Iterable, Iterator, Mapping, Optional, Sequence
 
 import numpy as np
 import pandas as pd
 
 from .day_window import DAYS_IN_YEAR, day_slot, slot_to_month_day
-from .markov_chain_simulator_kde2d import MarkovChainSimulator2dKDE, _as_rng
+from .markov_chain_simulator_kde2d import (
+    _GRID_ACTIVATION_CALLS,
+    MarkovChainSimulator2dKDE,
+    _as_rng,
+)
 from .dataset import MetDataset, convert_to_daily_wide
 from .variables import get_spec, registered
 
@@ -377,6 +383,31 @@ class EnvSeriesGenerator:
         """The fitted 23:00(d-1) -> 00:00(d) model, or None if not built."""
         return self._cross_midnight
 
+    def precompute_grids(self) -> None:
+        """
+        Build every simulator's cached quantile grid now, rather than on demand.
+
+        Worth calling when this day's models are about to be sampled many times -- an
+        ensemble of realisations -- and pointless otherwise. Two reasons to do it up front
+        rather than let ``PERF-1``'s threshold trip part-way through:
+
+        * **Every realisation is then drawn from the same sampler.** Left to the threshold,
+          realisation 0 would take the direct path and realisation 500 the cached one, so
+          ensemble members would not be quite exchangeable.
+        * It removes the crossover from any timing measurement.
+
+        A no-op for the degenerate transitions, which are already a single interpolation or
+        a lookup, and for the initial distribution, whose ``previous`` is constant by
+        construction. In practice it builds a grid for the non-degenerate within-day hours
+        plus the cross-midnight model -- 11 of 23 hours on a March day at Heraklion, 8 in
+        December, and **all 23 for temperature and wind**, which never degenerate.
+        """
+        for simulator in self._dic_simulator.values():
+            simulator.precompute_grid()
+        self._initial.precompute_grid()
+        if self._cross_midnight is not None:
+            self._cross_midnight.precompute_grid()
+
     def _walk_from(self, hour_0: float, rng) -> np.ndarray:
         """Fill hours 1-23 by walking the within-day transitions from ``hour_0``."""
         seq_vals = np.empty(HOURS_PER_DAY)
@@ -443,6 +474,229 @@ class EnvSeriesGenerator:
         )
 
 
+def realisation_stream(
+    seed: Optional[int], realisation: int, attr_str: str
+) -> np.random.Generator:
+    """
+    The random stream belonging to one ``(realisation, attribute)`` pair.
+
+    Keyed so that **a realisation depends on its own index and its own attribute, and on
+    nothing else**. Both halves of that matter, and both were got wrong by the obvious
+    implementations:
+
+    * Keyed on the realisation **index**, not drawn from one shared stream. A shared
+      stream makes realisation 0 depend on how many realisations were requested -- same
+      seed, different ``n_realisations``, different series.
+    * Keyed on a stable hash of the attribute **name**, not on its position in the
+      requested list. Positional keying makes ``temp_air`` depend on whether
+      ``poa_global`` was requested alongside it, which is the trap
+      ``examples/use_cases/year/synthetic_year.py`` used to carry.
+
+    So an ensemble can be extended from 100 to 200 realisations without invalidating the
+    first 100; realisation 743 can be reproduced without generating the other 999; and one
+    attribute can be regenerated alone and still match its column in a multi-attribute run.
+
+    ``zlib.crc32`` rather than the built-in ``hash``, which is salted per process and would
+    make a run irreproducible between invocations rather than merely between attribute
+    lists.
+
+    Distinct streams per attribute are required rather than merely tidy: attributes are
+    modelled independently, so feeding them one stream would push the same uniform draws
+    through every attribute's inverse CDF and lock them together in quantile space -- a
+    spurious correlation that looks like physics.
+
+    Parameters
+    ----------
+    seed : int or None
+        Root entropy. ``None`` draws from the OS, so the run is not reproducible.
+    realisation : int
+        Index of the realisation within the ensemble.
+    attr_str : str
+        Attribute name, used as itself rather than as a position.
+
+    Returns
+    -------
+    np.random.Generator
+    """
+    key = (int(realisation), zlib.crc32(attr_str.encode("utf-8")))
+    return np.random.default_rng(np.random.SeedSequence(seed, spawn_key=key))
+
+
+@dataclass(frozen=True)
+class EnsembleDay:
+    """One calendar day of an ensemble walk, across every attribute.
+
+    Parameters
+    ----------
+    day_index : int
+        1-based position in the walk. **Not** derivable from ``month``/``day``: the walk
+        is circular, so a series starting on 30 December wraps past New Year and the
+        calendar alone does not order it.
+    slot : int
+        ``all_leap`` calendar slot (1-366).
+    month, day : int
+        Calendar position of this day.
+    values : dict of str to np.ndarray
+        Per attribute, an array of shape ``(n_realisations, 24)``.
+    """
+
+    day_index: int
+    slot: int
+    month: int
+    day: int
+    values: dict[str, np.ndarray]
+
+
+def _validate_walk(start: tuple, n_days: int, include_feb29: bool) -> int:
+    """Check a walk request and return its starting slot.
+
+    Eager, so a bad request raises from the calling method rather than on first
+    iteration of the walk -- a generator function would otherwise defer it.
+    """
+    if n_days < 1:
+        raise ValueError(f"n_days must be at least 1, got {n_days}")
+
+    slot = day_slot(*start)
+    if not include_feb29 and slot == FEB29_SLOT:
+        raise ValueError(
+            "start=(2, 29) with include_feb29=False: the walk would skip its own "
+            "start day. Pass include_feb29=True to generate a leap year."
+        )
+    return slot
+
+
+def _walk_ensemble(
+    generators: Mapping[str, "DayWindowGenerator"],
+    start: tuple,
+    n_days: int,
+    streams: Mapping[str, Sequence[np.random.Generator]],
+    include_feb29: bool = False,
+    progress: bool = False,
+    progress_leave: bool = True,
+    precompute: Optional[bool] = None,
+) -> Iterator[EnsembleDay]:
+    """
+    Walk the calendar **once**, advancing every realisation through each day.
+
+    This is the single implementation of the day walk. :meth:`DayWindowGenerator.generate_series`,
+    :meth:`DayWindowGenerator.generate_ensemble` and
+    :func:`~meteosynth.ensemble.write_ensemble` are three consumers of it, so the calendar
+    logic -- the Feb 29 skip, the New Year wrap, which model each day uses -- cannot drift
+    between them.
+
+    **The inversion is the point.** Each day's generator is fitted once and then used by
+    every realisation, where calling ``generate_series`` N times refits it N times.
+    Measured on Heraklion 2010-2020, ``poa_global``, a 365-day year: 1000 realisations drop
+    from ~26.9 h to ~20.9 min (**77x**). Two consequences follow for free -- a simulator asked
+    for N samples crosses ``PERF-1``'s activation threshold and caches its quantile grid,
+    cutting per-draw cost ~85x, and only one day's generator is alive at a time, against
+    ~126 MB per attribute to hold all 366.
+
+    The speedup **grows with N** rather than being flat, because building a day's quantile
+    grids costs ~3.3 s whatever N is: ~3x at N=10, 9x at N=100, 77x at N=1000. That build
+    is 79 % of the per-day cost at N=1000, which is where the next real optimisation lives --
+    see ``PERF-16``, not this function.
+
+    Randomness is supplied rather than derived here: the walk consumes whatever streams it
+    is handed, one per realisation per attribute. That is what lets ``generate_series`` keep
+    its historic ``rng=`` semantics -- pass a ``Generator`` and it advances across calls --
+    while an ensemble uses the keyed streams of :func:`realisation_stream`.
+
+    Parameters
+    ----------
+    generators : mapping of str to DayWindowGenerator
+        One generator per attribute. Fitting stays strictly per-attribute; this function
+        only orchestrates.
+    start : tuple of (int, int)
+        ``(month, day)`` of the first day.
+    n_days : int
+        Number of consecutive days to walk.
+    streams : mapping of str to sequence of np.random.Generator
+        Per attribute, one generator per realisation. Every attribute must supply the same
+        number.
+    include_feb29 : bool, optional
+        Whether the walk visits Feb 29.
+    progress : bool, optional
+        Show a ``tqdm`` bar over the day walk.
+    progress_leave : bool, optional
+        Whether the bar persists. An ensemble is one walk, so its bar is worth keeping;
+        a single series inside a loop of hundreds is not.
+    precompute : bool, optional
+        Whether to build each day's quantile grids up front. ``None`` decides by realisation
+        count -- see :data:`~meteosynth.markov_chain_simulator_kde2d._GRID_ACTIVATION_CALLS`.
+
+    Yields
+    ------
+    EnsembleDay
+        One per calendar day, in walk order.
+    """
+    slot = _validate_walk(start, n_days, include_feb29)
+
+    if set(streams) != set(generators):
+        raise ValueError(
+            f"streams and generators must cover the same attributes; got "
+            f"{sorted(streams)} against {sorted(generators)}"
+        )
+    counts = {len(s) for s in streams.values()}
+    if len(counts) != 1:
+        raise ValueError(
+            f"every attribute needs the same number of realisation streams, got "
+            f"{ {attr: len(s) for attr, s in streams.items()} }"
+        )
+    (n_realisations,) = counts
+    if n_realisations < 1:
+        raise ValueError("at least one realisation stream is required")
+
+    # Above this many realisations, build each simulator's quantile grid up front instead
+    # of letting it appear part-way through the ensemble. Below it PERF-1 would not build
+    # one anyway, so the default is not a second policy -- it is the same crossover, applied
+    # earlier. This is also what keeps a single series bit-for-bit as it was: at
+    # n_realisations=1 nothing is precomputed and the direct path is taken throughout.
+    if precompute is None:
+        precompute = n_realisations > _GRID_ACTIVATION_CALLS
+
+    previous: dict[str, Optional[np.ndarray]] = {attr: None for attr in generators}
+
+    days: Iterable[int] = range(n_days)
+    if progress:
+        from tqdm.auto import tqdm
+
+        days = tqdm(
+            days,
+            desc=f"generating {', '.join(sorted(generators))}",
+            unit="day",
+            leave=progress_leave,
+        )
+
+    for i in days:
+        month, day = slot_to_month_day(slot)
+        values: dict[str, np.ndarray] = {}
+
+        for attr, dwg in generators.items():
+            # Through the instance, deliberately: the LRU cache lives there, and the test
+            # suite spies on for_slot to assert which days a walk visits.
+            generator = dwg.for_slot(slot)
+            if precompute:
+                generator.precompute_grids()
+
+            out = np.empty((n_realisations, HOURS_PER_DAY))
+            prev = previous[attr]
+            for r, rng in enumerate(streams[attr]):
+                if prev is None:
+                    out[r] = generator.gen_day(rng=rng)
+                else:
+                    out[r] = generator.gen_day_from(prev[r], rng=rng)
+
+            values[attr] = out
+            previous[attr] = out[:, -1]
+
+        yield EnsembleDay(day_index=i + 1, slot=slot, month=month, day=day, values=values)
+
+        slot = slot % DAYS_IN_YEAR + 1
+        if not include_feb29 and slot == FEB29_SLOT:
+            slot += 1
+
+
 class DayWindowGenerator:
     """
     Seasonal generator built on rolling day windows, fitted lazily per target day.
@@ -454,10 +708,17 @@ class DayWindowGenerator:
 
     Generators are built **on demand** and held in a small LRU cache rather than
     precomputed. Holding all 366 days costs ~126 MB for one attribute (~880 MB across
-    all seven), while fitting one costs only ~58 ms -- a ``gaussian_kde`` "fit" just
-    stores its 992 bytes of points and a 2x2 covariance. Since callers walk the calendar
-    in order, a small cache hits nearly always, and a whole synthetic year costs ~21 s of
-    fitting while holding a few hundred KB.
+    all seven), while fitting one costs ~58 ms on a two-year record -- a ``gaussian_kde``
+    "fit" just stores its points and a 2x2 covariance -- rising to ~180 ms on eleven years,
+    where there are more pairs to hold.
+
+    **The cache is for repeated requests for the same day**, which is the ensemble-of-days
+    use case (:meth:`gen_day` in a loop). It does **nothing** for a calendar walk: an
+    ordered walk visits each slot exactly once and never returns to it, so the hit rate is
+    zero regardless of ``cache_size``. Measured: a 30-day walk repeated 5 times at the
+    default size performed 150 fits for 30 distinct days. That is the cost
+    :meth:`generate_ensemble` exists to remove -- it walks the calendar once and lets every
+    realisation share each day's fit, rather than relying on a cache to notice the repeat.
 
     Persisting fitted generators to disk is deliberately *not* offered: it would write
     numbers already present in the source data, ~31x duplicated across overlapping
@@ -660,39 +921,142 @@ class DayWindowGenerator:
         >>> ens = np.vstack([dwg.generate_series((3, 14), 1, rng=rng)      # doctest: +SKIP
         ...                  for _ in range(500)])
         """
-        if n_days < 1:
-            raise ValueError(f"n_days must be at least 1, got {n_days}")
+        _validate_walk(start, n_days, include_feb29)
 
+        # One realisation, drawing from the caller's own stream. Deliberately *not* the
+        # keyed streams generate_ensemble builds: passing a Generator here has always meant
+        # "draw from this and advance it", which is what makes an ensemble of independent
+        # days out of repeated one-day calls.
         rng = _as_rng(seed if rng is None else rng)
-        slot = day_slot(*start)
-        if not include_feb29 and slot == FEB29_SLOT:
-            raise ValueError(
-                "start=(2, 29) with include_feb29=False: the walk would skip its own "
-                "start day. Pass include_feb29=True to generate a leap year."
-            )
 
         out = np.empty((n_days, HOURS_PER_DAY))
-        days = range(n_days)
-        if progress:
-            from tqdm.auto import tqdm
+        for step in _walk_ensemble(
+            {self.attr_str: self},
+            start=start,
+            n_days=n_days,
+            streams={self.attr_str: (rng,)},
+            include_feb29=include_feb29,
+            progress=progress,
+            progress_leave=False,
+        ):
+            out[step.day_index - 1] = step.values[self.attr_str][0]
+        return out
 
-            days = tqdm(
-                days,
-                desc=f"generating {self.attr_str}",
-                unit="day",
-                leave=False,
-            )
+    def generate_ensemble(
+        self,
+        start: tuple,
+        n_days: int,
+        n_realisations: int,
+        seed: Optional[int] = None,
+        include_feb29: bool = False,
+        progress: bool = False,
+        precompute: Optional[bool] = None,
+    ) -> np.ndarray:
+        """
+        Generate many independent synthetic series in **one** calendar walk.
 
-        for i in days:
-            generator = self.for_slot(slot)
-            if i == 0:
-                out[i] = generator.gen_day(rng=rng)
-            else:
-                out[i] = generator.gen_day_from(out[i - 1, -1], rng=rng)
+        Statistically this is :meth:`generate_series` called ``n_realisations`` times: each
+        realisation is its own chain through the same per-day models, and realisation *i*'s
+        hour 0 on day *d* is conditioned on realisation *i*'s own 23:00 of day *d-1*. What
+        changes is the order of evaluation -- the calendar is walked once on the outside, so
+        each day's models are **fitted once and reused by every realisation** instead of
+        being refitted per realisation.
 
-            slot = slot % DAYS_IN_YEAR + 1
-            if not include_feb29 and slot == FEB29_SLOT:
-                slot += 1
+        Measured on Heraklion 2010-2020, ``poa_global``, +/-7-day window, a 365-day year:
+        1000 realisations drop from ~26.9 h to ~20.9 min (77x), 100 from ~2.7 h to ~17.5 min. See
+        ``docs/design/FEAT-15-ensemble-generation.md``.
+
+        Parameters
+        ----------
+        start : tuple of (int, int)
+            ``(month, day)`` of the first day, as for :meth:`generate_series`.
+        n_days : int
+            Number of consecutive days per realisation.
+        n_realisations : int
+            How many independent series to generate.
+        seed : int, optional
+            Root entropy. Realisation *i* of this attribute draws from a stream keyed on
+            ``(seed, i, attr_str)`` and nothing else -- see :func:`realisation_stream` -- so
+            it does not depend on how many realisations were requested, nor on which other
+            attributes were. Subject to ``precompute``; see the note below.
+        include_feb29 : bool, optional
+            Whether the walk visits Feb 29. Defaults to ``False``, giving a 365-day year.
+        progress : bool, optional
+            Show a ``tqdm`` bar over the day walk. Unlike :meth:`generate_series`'s, this
+            one persists: an ensemble is a single walk rather than one of hundreds.
+        precompute : bool, optional
+            Whether to build every simulator's quantile grid before drawing. ``None``, the
+            default, decides by realisation count: above 64 it precomputes, at or below it
+            does not. Pass it explicitly to make two ensembles of *different* sizes directly
+            comparable -- see the note below.
+
+        Returns
+        -------
+        np.ndarray
+            Array of shape ``(n_realisations, n_days, 24)``.
+
+        Notes
+        -----
+        **Which sampler a draw comes from is part of its identity, so it is worth knowing
+        exactly when it changes.** ``PERF-1`` gives every simulator two paths: a direct KDE
+        evaluation, and a cached quantile grid built once the simulator turns out to be hot.
+        The two agree distributionally -- two-sample KS p = 1.0 -- but not to the last digit,
+        differing by ~0.02 % on a daily total.
+
+        With ``precompute=None`` the grids are built up front for ensembles **larger than
+        64**, so that every member of one ensemble comes from one sampler and the members
+        stay exchangeable. The consequence: realisation 0 of a 50-realisation ensemble is
+        *not* bit-identical to realisation 0 of a 500-realisation one, because the two
+        straddle that boundary. Within a regime it is exactly identical, and since real
+        ensembles are hundreds or thousands strong, extending 500 to 1000 is safe.
+
+        **To cross the boundary safely, set ``precompute`` explicitly** -- the same value for
+        both runs -- and realisation *i* is then bit-identical for any two sizes.
+
+        A chained :meth:`generate_series` is the ``n_realisations=1`` case and precomputes
+        nothing, so it remains bit-for-bit what it always was.
+
+        Examples
+        --------
+        >>> ens = dwg.generate_ensemble((1, 1), 365, 1000, seed=1)   # doctest: +SKIP
+        >>> ens.shape                                                # doctest: +SKIP
+        (1000, 365, 24)
+        """
+        if n_realisations < 1:
+            raise ValueError(f"n_realisations must be at least 1, got {n_realisations}")
+        _validate_walk(start, n_days, include_feb29)
+
+        streams = {
+            self.attr_str: [
+                realisation_stream(seed, r, self.attr_str) for r in range(n_realisations)
+            ]
+        }
+
+        # Start from cold generators, and leave none behind. The LRU cache carries
+        # *sampler state*, not just fitted models: a cached simulator remembers how many
+        # times it has been sampled, so one that has already crossed PERF-1's threshold
+        # answers from its quantile grid while a fresh one answers directly. Left alone,
+        # that makes this method non-reproducible in the plainest way -- the same call on
+        # the same object returns different numbers depending on what ran before it.
+        #
+        # Discarding the cache costs nothing here: a calendar walk visits each slot once,
+        # so there is no hit to lose. Clearing on the way out also releases the grids the
+        # walk built, which are ~0.5 MB each and are of no use to anything that follows.
+        self.clear_cache()
+        try:
+            out = np.empty((n_realisations, n_days, HOURS_PER_DAY))
+            for step in _walk_ensemble(
+                {self.attr_str: self},
+                start=start,
+                n_days=n_days,
+                streams=streams,
+                include_feb29=include_feb29,
+                progress=progress,
+                precompute=precompute,
+            ):
+                out[:, step.day_index - 1, :] = step.values[self.attr_str]
+        finally:
+            self.clear_cache()
         return out
 
     def clear_cache(self) -> None:

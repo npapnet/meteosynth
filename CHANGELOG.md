@@ -19,6 +19,79 @@ Two project-specific conventions:
 
 ---
 
+## Current sprint (unreleased)
+
+**Ensembles are now a first-class operation, and the package's primary use case got ~77×
+faster.** Generating N synthetic years used to mean calling `generate_series` N times, which
+refits every calendar day's models N times over; the calendar is now walked **once** and every
+realisation advances through each day's single fit. Measured on Heraklion 2010–2020,
+`poa_global`, a 365-day year: 1000 realisations drop from **~27 h to ~21 min**. 345 tests
+passing (was 314). Design:
+[`docs/design/completed/FEAT-15-ensemble-generation.md`](docs/design/completed/FEAT-15-ensemble-generation.md).
+
+### Added
+
+- **`DayWindowGenerator.generate_ensemble(start, n_days, n_realisations, seed=…)`**
+  (`FEAT-15`) — N independent chained series in one calendar walk, returning
+  `(n_realisations, n_days, 24)`. Statistically identical to N calls to `generate_series`:
+  each realisation is its own chain, and realisation *i*'s hour 0 on day *d* still conditions
+  on realisation *i*'s own 23:00 of day *d−1*. Only the order of evaluation changed.
+- **`write_ensemble` / `read_ensemble` / `Ensemble`** — one **long-format parquet file** per
+  ensemble, streamed one calendar day per row group, so peak memory holds one day rather than
+  the whole ensemble. Schema: `realisation`, `day_index`, `month`, `day`, `hour`, one column
+  per attribute, with `ensemble_schema_version` and the full generating parameters (seed,
+  span, window half-width, bandwidth, source provenance) embedded as parquet key-value
+  metadata. A newer schema version is refused rather than guessed at, as `MetDataset.load`
+  does. `Ensemble.realisation(i)` and `Ensemble.to_wide(attr)` are the views.
+- **`ensemble_to_xlsx`** — a lossy one-way export, **pivoted to wide**, one sheet per
+  attribute. Needs the new `meteosynth[excel]` extra; it refuses rather than truncates past a
+  worksheet's limits.
+- **`realisation_stream(seed, realisation, attr_str)`** — the keying that makes a realisation
+  identifiable. Streams are derived from `(seed, realisation index, crc32(attribute name))`,
+  so a realisation does not depend on how many were requested, and an attribute does not
+  depend on which others were requested alongside it.
+- **`EnvSeriesGenerator.precompute_grids()`** — build a day's cached quantile grids up front,
+  so every member of an ensemble is drawn from the same sampler instead of the sampler
+  switching part-way through.
+
+### Changed
+
+- **`generate_series` is now the one-realisation case of the same walk**, not a second
+  implementation — so the calendar rules (the Feb 29 skip, the New Year wrap, which models a
+  day uses) cannot drift between the two. Verified **bit-for-bit identical** to the previous
+  implementation across three attributes and three calendar spans, including the
+  `rng=<Generator>` path that advances a shared stream across calls.
+- **`DayWindowGenerator`'s docstring no longer claims its LRU cache helps a calendar walk.**
+  It does not: an ordered walk visits each slot exactly once and never returns, so the hit
+  rate is zero at any cache size. Measured — a 30-day walk repeated 5 times performed 150
+  fits for 30 distinct days. The cache earns its keep only for repeated requests for the
+  *same* day (`gen_day`).
+- **`examples/use_cases/year/synthetic_year.py` generates an ensemble** rather than one
+  series per realisation, and reports the spread across realisations — the quantity a single
+  series cannot give you.
+
+### Decisions
+
+- **Random streams are keyed by realisation index and attribute *name*, never by position or
+  a shared stream.** Both alternatives make results depend on the shape of the request rather
+  than on the seed. [`FEAT-15-ensemble-generation.md`](docs/design/completed/FEAT-15-ensemble-generation.md#1-randomness-one-stream-per-realisation-attribute-keyed-by-name)
+- **Ensemble output is long-format parquet, single file; `.xlsx` is a pivoted export.** The
+  pivot is forced, not preferred: a long-format ensemble of 1000 realisations is 8.76 M rows
+  against Excel's 1 048 576 limit, capping long format at ~119 realisations.
+  [`FEAT-15-ensemble-generation.md`](docs/design/completed/FEAT-15-ensemble-generation.md#3-output-one-long-format-parquet-file-flushed-per-day)
+- **Ensembles above 64 realisations do not reproduce a chained series bit-for-bit**, by
+  design: the quantile grids are built up front so members stay exchangeable. The shift is
+  ~0.02 % on a daily total, KS p = 1.0. Pass `precompute=` explicitly to compare ensembles
+  that straddle that boundary.
+  [`FEAT-15-ensemble-generation.md`](docs/design/completed/FEAT-15-ensemble-generation.md#2-draw-every-realisation-from-the-same-sampler)
+- **The draws are deliberately *not* batched across realisations.** Fitting and grid-building
+  are ~84 % of the per-day cost, so batching is worth at most ~1.2× more, and it would add a
+  second value-producing routine in the one place `CHORE-12` shows the suite cannot detect an
+  error. Deferred as `PERF-16`, which also records the higher-value target the measurements
+  exposed: the grid **build**, ~79 % of the per-day cost at N = 1000.
+
+---
+
 ## [0.3.0] — 2026-07-29
 
 **Breaking.** The training record is now an object with a format. `MetDataset` replaces
@@ -160,7 +233,7 @@ sampling ~8× faster, `FIX-1` was restated on measurement and deferred, and
   `examples/diagnostics-overshoot/` run from **16.6 min to 2.1 min**.
 
   Three design points, argued and measured in
-  [`docs/design/precomputed-conditional-quantiles.md`](docs/design/precomputed-conditional-quantiles.md):
+  [`docs/design/completed/PERF-1-precomputed-conditional-quantiles.md`](docs/design/completed/PERF-1-precomputed-conditional-quantiles.md):
   the **quantile function** is what is interpolated across `previous`, because averaging
   two CDFs of distributions centred in different places produces a bimodal blend of them;
   node spacing is **uniform, not quantile-based**, because irradiance's `previous` piles up

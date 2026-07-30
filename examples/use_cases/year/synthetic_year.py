@@ -1,49 +1,61 @@
 #%%
 """
-Use case: generate a complete synthetic year and write it to disk.
+Use case: generate an ensemble of synthetic years and write it to disk.
 
-One 8760-hour series per attribute for Heraklion, chained day by day across midnight,
-trained on the +/-15 day rolling window around each calendar day of the 2010-2020
-record. This script exists to *produce data*: the file it writes is the input to
-whatever comes next (a PV yield model, a battery sizing run, a demand simulation).
+``N_REALISATIONS`` independent 8760-hour series per attribute for Heraklion, each chained
+day by day across midnight, trained on the +/-15 day rolling window around each calendar
+day of the 2010-2020 record. This script exists to *produce data*: the file it writes is
+the input to whatever comes next (a PV yield model, a battery sizing run, a demand
+simulation).
 
 Plots are **off by default** for that reason. Set ``PLOT_HEATMAP = True`` for a
-year-at-a-glance figure -- day of year across, hour of day down, one panel per
-attribute -- which is the quickest way to see that the seasonal envelope and the
-lengthening summer day are both there.
+year-at-a-glance figure of the first realisation -- day of year across, hour of day down,
+one panel per attribute -- which is the quickest way to see that the seasonal envelope and
+the lengthening summer day are both there.
 
 What the output is, and is not:
 
-* It **is** one plausible realisation of a year at this site. Every hour is drawn, not
-  copied; the series never repeats a historical year.
-* It is **not** a forecast of any particular year, and one realisation is not a
-  Monte-Carlo study. Raise ``N_REALISATIONS`` for that -- each one is an independent
-  draw, and the spread between them is the quantity the whole exercise is for.
+* Each realisation **is** one plausible year at this site. Every hour is drawn, not copied;
+  no series repeats a historical year.
+* No realisation is a forecast of any particular year. The **spread between them** is the
+  quantity the whole exercise is for, which is why the ensemble rather than the single
+  series is the useful object.
+* Attributes are generated **independently**. Within a realisation a hot hour is not
+  thereby a sunny one -- cross-attribute correlation is not modelled. The file records
+  this in its own metadata.
 
 Mechanics worth knowing while it runs:
 
-* **Non-leap is the default.** ``generate_series`` walks 365 days from 1 January with
-  ``include_feb29=False``, so Feb 29 is simply never requested. There is no filtering
-  step and no exclusion list; ask for a leap year instead and Feb 29 generates like any
-  other day.
-* **Memory stays flat.** Holding all 366 fitted generators would cost ~126 MB per
-  attribute. ``DayWindowGenerator`` fits each day on demand behind a small LRU cache,
-  so the walk holds a few hundred KB however long it runs. Fitting dominates the
-  runtime, which is why a second realisation is nearly free if you raise
-  ``CACHE_SIZE`` to 366 and pay the memory instead.
+* **The calendar is walked once, not once per realisation.** ``write_ensemble`` fits each
+  day's models a single time and advances every realisation through them, which is what
+  makes hundreds of realisations affordable. Generating them one at a time refits every day
+  for every realisation, because an ordered walk never revisits a calendar slot and so the
+  LRU cache never hits.
+* **Memory stays flat regardless of N.** One day's generators are alive at a time, and the
+  ensemble is streamed to parquet one calendar day per row group rather than accumulated.
+* **Non-leap is the default.** The walk covers 365 days from 1 January with
+  ``include_feb29=False``, so Feb 29 is never requested -- no filtering step, no exclusion
+  list. Ask for a leap year instead and Feb 29 generates like any other day.
 * **Every midnight is a real transition.** Day 1 starts from 1 January's fitted pi(x0);
-  every later day's hour 0 comes from that day's cross-midnight model, conditioned on
-  the previous day's 23:00 value.
+  every later day's hour 0 comes from that day's cross-midnight model, conditioned on *that
+  realisation's own* previous 23:00 value.
+* **Reproducibility is per realisation and per attribute.** Realisation *i* of attribute *a*
+  depends on ``(SEED, i, a)`` and nothing else, so realisation 3 is the same series whether
+  you generate 10 or 10 000, and ``temp_air`` does not change when you add ``wind_speed``
+  alongside it. (One caveat, documented on ``generate_ensemble``: the sampler switches above
+  64 realisations, so pass ``precompute=`` explicitly if you need two *differently sized*
+  ensembles to agree to the last digit.)
 
-Output lands in ``examples/output/`` (git-ignored): one CSV per realisation, plus a
-monthly summary table checking the generated climatology against the observed one, and
-the heatmap if it was asked for.
+Output lands in ``examples/output/`` (git-ignored): one parquet ensemble, a monthly summary
+table checking the generated climatology against the observed one, and -- if asked for --
+an ``.xlsx`` copy and the heatmap.
 
 Run with::
 
     uv run --extra examples python examples/use_cases/year/synthetic_year.py
 
-Runtime: ~4 min per realisation for all three attributes.
+Runtime: roughly 21 min per attribute for a 1000-realisation year, against ~27 h to
+generate the same thing one series at a time -- a 77x reduction, measured.
 """
 
 import pathlib
@@ -52,7 +64,6 @@ import time
 
 import numpy as np
 import pandas as pd
-from tqdm.auto import tqdm
 
 # Make `examples/` importable however this file is run (script, -m, or an editor cell).
 _HERE = pathlib.Path(__file__).resolve().parent if "__file__" in globals() else pathlib.Path.cwd()
@@ -60,16 +71,18 @@ _EXAMPLES = next(p for c in (_HERE, *_HERE.parents) for p in (c, c / "examples")
                  if (p / "tools" / "site_data.py").is_file())
 sys.path.insert(0, str(_EXAMPLES))
 
-from meteosynth import DayWindowGenerator, MetDataset
-from tools.site_data import HERAKLION, HERAKLION_YEARS, load_site, save_figure, save_frame
+from meteosynth import MetDataset, read_ensemble, write_ensemble
+from tools.site_data import (HERAKLION, HERAKLION_YEARS, load_site, output_path,
+                             save_figure, save_frame)
 
 ATTRS = ["poa_global", "temp_air", "wind_speed"]
 REFERENCE_YEAR = 2023     # a non-leap calendar to hang timestamps on
-N_REALISATIONS = 1
+N_REALISATIONS = 10       # the point of the ensemble; raise to hundreds for a real study
+N_DAYS = 365              # lower it to try the script out without waiting for a full year
 WINDOW_DAYS = 15
-CACHE_SIZE = 8            # raise towards 366 to make extra realisations cheap
 SEED = 2026
-PLOT_HEATMAP = False      # True writes year_<site>_<year>_heatmap.png alongside the CSV
+PLOT_HEATMAP = False      # True writes year_<site>_<year>_heatmap.png alongside the data
+WRITE_XLSX = False        # True also writes an .xlsx (needs `uv sync --extra excel`)
 
 MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
           "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
@@ -77,32 +90,24 @@ MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
 #%%
 
 
-def hourly_index(year: int) -> pd.DatetimeIndex:
-    """The 8760 hourly timestamps of a non-leap reference year."""
-    index = pd.date_range(f"{year}-01-01", f"{year}-12-31 23:00", freq="h")
-    if len(index) != 8760:
+def hourly_index(year: int, n_days: int = N_DAYS) -> pd.DatetimeIndex:
+    """Hourly timestamps for the generated span, on a non-leap reference calendar."""
+    full = pd.date_range(f"{year}-01-01", f"{year}-12-31 23:00", freq="h")
+    if len(full) != 8760:
         raise ValueError(f"{year} is a leap year; pick a non-leap REFERENCE_YEAR")
-    return index
+    return full[: n_days * 24]
 
 
-def generate_year(ds: MetDataset, attr: str, seed: int) -> np.ndarray:
-    """One chained 365-day series for one attribute. Returns shape ``(365, 24)``.
+def realisation_frame(ensemble, index: pd.DatetimeIndex, i: int) -> pd.DataFrame:
+    """One realisation as a timestamped wide frame, the shape downstream tools expect.
 
-    The progress bar is worth having here because the walk is slow for a reason worth
-    seeing: each calendar day fits its own generators on first visit, so the bar moves
-    steadily rather than stalling, and a run that has stopped moving is a real signal
-    rather than ordinary patience.
+    The ensemble file is long by design -- that is what let it stream -- so pulling a
+    single realisation out is a view rather than a different product.
     """
-    generator = DayWindowGenerator(
-        ds, attr_str=attr, n_days=WINDOW_DAYS, cache_size=CACHE_SIZE
-    )
-    started = time.perf_counter()
-    days = generator.generate_series(start=(1, 1), n_days=365, seed=seed, progress=True)
-    tqdm.write(f"    {attr:12} {time.perf_counter() - started:5.0f}s   "
-               f"finite={np.isfinite(days).all()}  "
-               f"range {days.min():8.2f} .. {days.max():8.2f}  "
-               f"cached generators held: {len(generator._cache)}")
-    return days
+    one = ensemble.realisation(i)
+    frame = pd.DataFrame({attr: one[attr].to_numpy() for attr in ATTRS}, index=index)
+    frame.index.name = "timestamp"
+    return frame
 
 
 def monthly_summary(frame: pd.DataFrame, observed: pd.DataFrame) -> pd.DataFrame:
@@ -145,9 +150,28 @@ def print_summary(summary: pd.DataFrame, frame: pd.DataFrame, observed: pd.DataF
     print("\n  Individual months wander by a degree or two, and should: this is one draw,")
     print("  not a climatology. It is the annual totals and the shape correlation that")
     print("  have to hold up, and the month-to-month scatter is the variability the whole")
-    print("  exercise exists to sample. Average N realisations and it flattens out.")
-    print("  Treat absolute irradiance magnitudes as uncalibrated -- the generator")
-    print("  overshoots observed daily totals (see TODOs.md); the seasonal shape is sound.")
+    print("  exercise exists to sample.")
+
+
+def ensemble_spread(ensemble) -> pd.DataFrame:
+    """Annual totals and means per realisation -- the reason to generate more than one.
+
+    A single series cannot show this. The spread across realisations is the model's
+    statement about year-to-year variability, and it is what a P50/P90 is computed from.
+    """
+    rows = []
+    for attr in ATTRS:
+        wide = ensemble.to_wide(attr)                       # 8760 hours x N realisations
+        annual = wide.sum(axis=0) if attr == "poa_global" else wide.mean(axis=0)
+        rows.append({
+            "attr": attr,
+            "statistic": "annual total (kWh/m2)" if attr == "poa_global" else "annual mean",
+            "value": annual.mean() / (1000 if attr == "poa_global" else 1),
+            "p10": annual.quantile(0.10) / (1000 if attr == "poa_global" else 1),
+            "p90": annual.quantile(0.90) / (1000 if attr == "poa_global" else 1),
+            "cv_percent": 100 * annual.std() / annual.mean(),
+        })
+    return pd.DataFrame(rows)
 
 
 def plot_year(frame: pd.DataFrame):
@@ -175,50 +199,68 @@ def plot_year(frame: pd.DataFrame):
 def main():
     ds = load_site(HERAKLION, *HERAKLION_YEARS)
     print(ds.describe_time_range())
-    print(f"Generating {N_REALISATIONS} synthetic year(s) of {ATTRS} "
-          f"on a {REFERENCE_YEAR} (non-leap) calendar.\n")
+    print(f"Generating an ensemble of {N_REALISATIONS} synthetic year(s) of {ATTRS} "
+          f"on a {REFERENCE_YEAR} (non-leap) calendar.")
+    print("One calendar walk for the whole ensemble: each day's models are fitted once "
+          "and shared by every realisation.\n")
 
-    index = hourly_index(REFERENCE_YEAR)
-    written = []
-
-    # Outer bar over the whole run, inner bar over each attribute's 365-day walk. Two
-    # levels because the two questions are different: "how far through the job am I"
-    # and "is the current series still moving".
-    overall = tqdm(
-        total=N_REALISATIONS * len(ATTRS),
-        desc="synthetic years",
-        unit="series",
-        position=0,
+    index = hourly_index(REFERENCE_YEAR, N_DAYS)
+    path = output_path(
+        f"ensemble_{HERAKLION.key}_{REFERENCE_YEAR}_n{N_REALISATIONS}.parquet"
     )
-    for realisation in range(N_REALISATIONS):
-        tqdm.write(f"  realisation {realisation + 1}/{N_REALISATIONS}:")
-        frame = pd.DataFrame(index=index)
-        frame.index.name = "timestamp"
-        for attr in ATTRS:
-            # A distinct seed per (realisation, attribute): the attributes are modelled
-            # independently, so sharing one stream would not couple them anyway -- but a
-            # distinct seed makes each series reproducible on its own.
-            frame[attr] = generate_year(ds, attr, seed=SEED + 1000 * realisation
-                                        + ATTRS.index(attr)).ravel()
-            overall.update(1)
 
-        name = f"year_{HERAKLION.key}_{REFERENCE_YEAR}_r{realisation + 1:02d}.csv"
-        written.append(save_frame(frame, name))
+    started = time.perf_counter()
+    meta = write_ensemble(
+        ds, ATTRS, path,
+        start=(1, 1), n_days=N_DAYS, n_realisations=N_REALISATIONS,
+        seed=SEED, n_days_window=WINDOW_DAYS, include_feb29=False, progress=True,
+    )
+    elapsed = time.perf_counter() - started
+    size_mb = path.stat().st_size / 1024**2
+    print(f"\n  wrote {path.name}: {size_mb:.1f} MB, {elapsed/60:.1f} min "
+          f"({elapsed/max(N_REALISATIONS, 1):.0f}s per realisation for all "
+          f"{len(ATTRS)} attributes)")
+    print(f"  embedded metadata: seed={meta['seed']}, "
+          f"n_realisations={meta['n_realisations']}, window=+/-{meta['window_n_days']}d")
 
-        if realisation == 0:
-            summary = monthly_summary(frame, ds.met_data)
-            print_summary(summary, frame, ds.met_data)
-            save_frame(summary, f"year_{HERAKLION.key}_monthly_summary.csv", index=False)
-            if PLOT_HEATMAP:
-                save_figure(plot_year(frame),
-                            f"year_{HERAKLION.key}_{REFERENCE_YEAR}_heatmap.png")
+    ensemble = read_ensemble(path)
+    first = realisation_frame(ensemble, index, 0)
 
-    overall.close()
+    # The climatology checks below compare against *annual* observed statistics, so they
+    # only mean anything for a full year. A shortened N_DAYS is for trying the script out.
+    if N_DAYS == 365:
+        summary = monthly_summary(first, ds.met_data)
+        print_summary(summary, first, ds.met_data)
+        save_frame(summary, f"year_{HERAKLION.key}_monthly_summary.csv", index=False)
+
+        if N_REALISATIONS > 1:
+            spread = ensemble_spread(ensemble)
+            print(f"\n  spread across {N_REALISATIONS} realisations "
+                  f"-- the quantity a single series cannot give you:")
+            print(spread.to_string(index=False, float_format=lambda v: f"{v:.2f}"))
+            save_frame(spread, f"year_{HERAKLION.key}_ensemble_spread.csv", index=False)
+    else:
+        print(f"\n  N_DAYS={N_DAYS} rather than 365, so the monthly and annual checks are "
+              f"skipped -- they compare against annual observed statistics.")
+
+    # A single realisation as CSV, for anything that would rather read one series than an
+    # ensemble. The parquet file remains the record: it carries the provenance.
+    save_frame(first, f"year_{HERAKLION.key}_{REFERENCE_YEAR}_r01.csv")
+
+    if WRITE_XLSX:
+        from meteosynth import ensemble_to_xlsx
+        xlsx = path.with_suffix(".xlsx")
+        ensemble_to_xlsx(ensemble, xlsx)
+        print(f"  wrote {xlsx.name} (one sheet per attribute, hours x realisations)")
+
+    if PLOT_HEATMAP:
+        save_figure(plot_year(first),
+                    f"year_{HERAKLION.key}_{REFERENCE_YEAR}_heatmap.png")
 
     print(f"\n  Feb 29 present in the output: "
           f"{((index.month == 2) & (index.day == 29)).any()}")
-    print(f"\nDone. {len(written)} synthetic year(s) written to {written[0].parent}")
-    return written
+    print(f"\nDone. Ensemble at {path}")
+    return path
 
 
 if __name__ == "__main__":
