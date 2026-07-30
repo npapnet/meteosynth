@@ -47,6 +47,7 @@ Active / Architecture reference:
 | document | type | description |
 |---|---|---|
 | [architecture.md](architecture.md) | architecture reference | Concise overview of package essence, current state (v0.2.0), mathematical foundation, repository tree structure, module responsibilities, and developer/agent onboarding guide. |
+| [FEAT-15-ensemble-generation.md](FEAT-15-ensemble-generation.md) | design spec · **accepted, ready to implement** | `FEAT-15`: generating N synthetic years in one calendar walk instead of N walks — 24 h → 5 min at N = 1000, measured. Settles the randomness scheme (`SeedSequence.spawn`, so a realisation depends on its index and not on N), the output format (one long-format parquet file, one row group flushed per day, pivoted `.xlsx` as a lossy export), and why a long `.xlsx` is impossible past ~119 realisations. Closes with a plain-language record of why the draws are **not** batched — the prize is bounded at ~3× and the risk lands where the suite is blind (`CHORE-12`) — deferred to `PERF-16`. |
 | [FEAT-2-FEAT-1-column-resolution-and-provenance.md](FEAT-2-FEAT-1-column-resolution-and-provenance.md) | **superseded** · record only | Superseded by `FEAT-13` the same day, never implemented. Reduced to why the approach was backwards — provenance in the adapter's cache makes a dataset traceable only if you used the fetcher — plus the `DataFrame.attrs` propagation measurements, which `FEAT-13` no longer relies on and which are recorded nowhere else. **Not a live specification.** |
 
 
