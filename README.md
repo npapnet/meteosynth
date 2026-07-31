@@ -1,46 +1,44 @@
 # meteosynth
 
-`meteosynth` is a Python package designed to generate synthetic environmental time-series data (such as solar radiation, air temperature, wind speed) based on historical data. It implements a variety of Markov Chain models and includes utilities to interface with the PVGIS (Photovoltaic Geographical Information System) database.
+> ## Weather that never happened, from weather that did.
 
-Its primary target is **Monte-Carlo simulation of energy-project output and requirements**, where many statistically-plausible weather realisations are needed rather than a single deterministic profile.
+`meteosynth` simulates synthetic hourly environmental time series — solar irradiance, air
+temperature, wind speed — as a first-order Markov chain whose transition density is
+**re-estimated for every hour of every calendar day**, so the statistics drift with the
+season instead of being assumed.
+
+Each transition is fitted by kernel density estimation over the hour-to-hour value pairs
+observed in a rolling seasonal window across every year of the record, and sampled by
+inverse transform within the variable's declared physical support. Because the model is
+generative rather than a resampler, it emits hours that never appear in the historical
+record — while remaining physically admissible by construction.
+
+Its primary target is **Monte-Carlo simulation of energy-project output and requirements**,
+where many statistically-plausible weather realisations are needed rather than a single
+deterministic profile. The package also ships utilities to interface with the PVGIS
+(Photovoltaic Geographical Information System) database.
 
 ## Features
 
-- **Markov Chain Simulators** (shared `get_next_state` / `generate_sequence` interface):
-  - `MarkovChainSimulator2dKDE`: Continuous state simulation using 2D Kernel Density Estimation, with degenerate data handled via the `Kind` enum (`KDE_2D`, `KDE_1D`, `CONSTANT`) and sampling truncated to each variable's physical support. A simulator that turns out to be sampled often **caches its conditional inverse CDF**, making large ensembles ~8× faster without changing what a short run produces.
-  - `ContinuousMarkovChainSimulator`: Binned continuous state simulation using 1D Kernel Density Estimation.
-  - `MarkovChainSimulatorDiscrete`: Discrete state transition modeling.
-- **Daily Series Generators** (`meteosynth.generators`):
-  - `EnvSeriesGenerator`: one day's worth of model — a fitted initial distribution π(x₀) plus 23 hourly transitions — walked into a complete 24-hour profile by `gen_day()`.
-  - `DayWindowGenerator`: a generator per calendar day, trained on a rolling window and fitted lazily behind an LRU cache so a whole year never holds all 366 at once. `generate_series(start, n_days)` chains days across midnight.
-- **Meteorological Data Processing**:
-  - Pivoting hourly data into daily wide formats.
-  - Two selectable training strategies: by calendar month (`get_month_subset`) or by a **rolling ±n-day window** centred on a target day (`get_day_window_subset`).
-- **Seasonal day windows** (`meteosynth.day_window`):
-  - A circular `all_leap` (CF-conventions `366_day`) calendar, so windows wrap across New Year and **Feb 29 is an ordinary day** — never discarded, and requestable as a generation target.
-- **PVGIS Integration** (`meteosynth.adapters`):
-  - `fetch_pvgis` retrieves a real multi-year hourly record on the plane of array; `fetch_pvgis_tmy` retrieves a Typical Meteorological Year on the horizontal. Both normalise to the canonical schema, validate against each column's physical support, and optionally cache to disk.
-  - Adapters are optional. The contract with the rest of the package is an ordinary DataFrame, so a user who already has data never goes through one.
-- **A variable registry, not a column whitelist** (`meteosynth.variables`):
-  - A column is modellable if and only if it has a registered `VariableSpec` carrying its physical `support`, `units` and `long_name`. Plane-of-array irradiance, **horizontal irradiance** (`ghi`, `dni`, `dhi`), air temperature and wind speed ship registered; `register()` adds your own.
+- **Nonparametric hourly transitions** — a 2D KDE conditional density per hour, estimated from the record rather than assumed (`MarkovChainSimulator2dKDE`).
+- **A model per calendar day** — each day is trained on a rolling ±n-day window pooled across every year of the record, so the statistics drift smoothly through the season.
+- **A circular `all_leap` calendar** — windows wrap across New Year, and **Feb 29 is an ordinary day**: never discarded, and requestable as a generation target.
+- **Physically bounded by construction** — sampling is truncated to each variable's declared support, making out-of-range values impossible rather than merely unlikely.
+- **Degeneracy detected, not special-cased** — constant hours such as night-time irradiance collapse to 1D or constant models automatically, judged against the data's own scale.
+- **Chained multi-day series** — `generate_series(start, n_days)` runs any span from a single day to a full year, linked across midnight by a cross-midnight model fitted on real consecutive dates.
+- **Ensembles in one calendar walk** — `generate_ensemble` fits each day once and passes every realisation through it: **~77× faster** than N separate series at N = 1000.
+- **Reproducible realisations** — each is keyed on `(seed, index, attribute)`, so realisation 743 reproduces without generating the other 999, and an ensemble extends from 100 to 200 without invalidating the first 100.
+- **Ensembles on disk** — `write_ensemble` streams to a single long-format parquet file, one row group per day, with the full generating parameters and source provenance embedded.
+- **A validated training record** — `MetDataset` enforces schema, calendar validity and physical support on construction whatever route the data arrived by, and round-trips to parquet losslessly.
+- **A variable registry, not a column whitelist** — a column is modellable if and only if it has a registered `VariableSpec`; `register()` adds your own.
+- **Optional PVGIS integration** — `fetch_pvgis` and `fetch_pvgis_tmy` normalise, validate and cache; the contract with the core is an ordinary DataFrame, so a user who already has data never goes through an adapter.
+- **Alternative simulators** — binned 1D KDE and discrete transition-matrix implementations share the same `get_next_state` / `generate_sequence` interface.
+
+The full release history is in [`CHANGELOG.md`](CHANGELOG.md).
 
 ---
 
-## What has changed since 0.2.0
-
-The full record is in [`CHANGELOG.md`](CHANGELOG.md); these are the changes that alter
-what the package does rather than how it is arranged.
-
-| | |
-| :--- | :--- |
-| **Ensemble sampling is ~8× faster** | `get_next_state` used to evaluate a 1000-point KDE grid on *every* call — ~97 % of generation runtime. Hot simulators now cache their conditional inverse CDF. A short run is bit-for-bit unchanged; a large ensemble shifts by ~0.2 % on a daily total, an order of magnitude below anything the package can resolve. Argued in [`docs/design/precomputed-conditional-quantiles.md`](docs/design/precomputed-conditional-quantiles.md). |
-| **Degeneracy detection is scale-aware** | Night used to be recognised only when a source stored it as an exact `0.0`. Any resampled, interpolated or unit-converted record storing it as `1e-16` fell through to a 2D KDE fitted across a catastrophically ill-conditioned covariance. The test is now against the data's own scale. |
-| **A singular covariance no longer crashes** | Perfectly collinear `previous`/`current` degrades to the 1D path with a warning instead of dying several steps later on `np.sum(None)`. |
-| **Horizontal irradiance is a first-class quantity** | `ghi`, `dni` and `dhi` are registered against their own spec, so a TMY frame validates rather than being silently dropped at ingestion. |
-| **PVGIS fetching works again** | `pvlib` changed the arity of its PVGIS return value; both call sites were unpacking the old shape. |
-| **Absolute magnitudes are calibrated** | `FIX-1` recorded generated irradiance as "systematically too high" (+14 %). Measured against the pool the model is fitted to, on 19 years at four dates, the mean lands within 0.7 % and the claim does not reproduce. What is real is a **deficit of heavily overcast days** — see below. |
-
-### One known limitation, quantified
+## One known limitation, quantified
 
 The generator produces roughly **four times too few heavily overcast days** where a record
 holds any. It moves an annual P90 by **0.12 %**, so a yield study cannot see it — but it

@@ -271,8 +271,9 @@ sampling ~8× faster, `FIX-1` was restated on measurement and deferred, and
   What is real, and now what the item records, is a **deficit of heavily overcast days**:
   ~4× too few where a record holds any, confirmed at two dates and two thresholds. It is
   worth **0.12 % of an annual P90**, so yield work is unaffected; storage autonomy and
-  worst-case-day work are not. Deferred on that basis, with the limitation documented in
-  `README.md` and the use-case READMEs rather than left for a user to discover.
+  worst-case-day work are not, and a **daily P10 runs up to 9 % high**. Deferred on that
+  basis, with the limitation documented in `README.md` and the use-case READMEs rather
+  than left for a user to discover.
 - **`CHORE-1` gained numbers instead of an answer.** Within-window seasonal structure is
   3.8 % of pool variance at ±7 days and 10.4 % at ±15 on 21 March — but **19.3 % at ±7 on
   21 September**, because the same seasonal slope sits on a smaller day-to-day variance.
