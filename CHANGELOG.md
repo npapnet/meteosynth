@@ -19,7 +19,7 @@ Two project-specific conventions:
 
 ---
 
-## Current sprint (unreleased)
+## [0.3.1] — 2026-07-31
 
 **Ensembles are now a first-class operation, and the package's primary use case got ~77×
 faster.** Generating N synthetic years used to mean calling `generate_series` N times, which
@@ -44,7 +44,9 @@ passing (was 314). Design:
   metadata. A newer schema version is refused rather than guessed at, as `MetDataset.load`
   does. `Ensemble.realisation(i)` and `Ensemble.to_wide(attr)` are the views.
 - **`ensemble_to_xlsx`** — a lossy one-way export, **pivoted to wide**, one sheet per
-  attribute. Needs the new `meteosynth[excel]` extra; it refuses rather than truncates past a
+  attribute. The pivot is forced, not preferred: a long-format ensemble of 1000 realisations
+  is 8.76 M rows against Excel's 1 048 576 limit, capping long format at ~119 realisations.
+  Needs the new `meteosynth[excel]` extra; it refuses rather than truncates past a
   worksheet's limits.
 - **`realisation_stream(seed, realisation, attr_str)`** — the keying that makes a realisation
   identifiable. Streams are derived from `(seed, realisation index, crc32(attribute name))`,
@@ -52,7 +54,9 @@ passing (was 314). Design:
   depend on which others were requested alongside it.
 - **`EnvSeriesGenerator.precompute_grids()`** — build a day's cached quantile grids up front,
   so every member of an ensemble is drawn from the same sampler instead of the sampler
-  switching part-way through.
+  switching part-way through. This is why an ensemble **above 64 realisations** does not
+  reproduce a chained series bit-for-bit: the shift is ~0.02 % on a daily total, KS p = 1.0.
+  Pass `precompute=` explicitly to compare two ensembles that straddle that boundary.
 
 ### Changed
 
@@ -72,23 +76,24 @@ passing (was 314). Design:
 
 ### Decisions
 
-- **Random streams are keyed by realisation index and attribute *name*, never by position or
-  a shared stream.** Both alternatives make results depend on the shape of the request rather
-  than on the seed. [`FEAT-15-ensemble-generation.md`](docs/design/completed/FEAT-15-ensemble-generation.md#1-randomness-one-stream-per-realisation-attribute-keyed-by-name)
-- **Ensemble output is long-format parquet, single file; `.xlsx` is a pivoted export.** The
-  pivot is forced, not preferred: a long-format ensemble of 1000 realisations is 8.76 M rows
-  against Excel's 1 048 576 limit, capping long format at ~119 realisations.
-  [`FEAT-15-ensemble-generation.md`](docs/design/completed/FEAT-15-ensemble-generation.md#3-output-one-long-format-parquet-file-flushed-per-day)
-- **Ensembles above 64 realisations do not reproduce a chained series bit-for-bit**, by
-  design: the quantile grids are built up front so members stay exchangeable. The shift is
-  ~0.02 % on a daily total, KS p = 1.0. Pass `precompute=` explicitly to compare ensembles
-  that straddle that boundary.
-  [`FEAT-15-ensemble-generation.md`](docs/design/completed/FEAT-15-ensemble-generation.md#2-draw-every-realisation-from-the-same-sampler)
-- **The draws are deliberately *not* batched across realisations.** Fitting and grid-building
-  are ~84 % of the per-day cost, so batching is worth at most ~1.2× more, and it would add a
-  second value-producing routine in the one place `CHORE-12` shows the suite cannot detect an
-  error. Deferred as `PERF-16`, which also records the higher-value target the measurements
-  exposed: the grid **build**, ~79 % of the per-day cost at N = 1000.
+- **Random streams are keyed by realisation index and attribute name**, never by position or
+  a shared stream — both alternatives make a result depend on the shape of the request rather
+  than on the seed.
+  [Rationale](docs/design/completed/FEAT-15-ensemble-generation.md#1-randomness-one-stream-per-realisation-attribute-keyed-by-name).
+- **Ensemble output is one long-format parquet file; `.xlsx` is a pivoted export.**
+  [Rationale](docs/design/completed/FEAT-15-ensemble-generation.md#3-output-one-long-format-parquet-file-flushed-per-day).
+- **Every member of an ensemble is drawn from the same sampler**, at the cost of bit-for-bit
+  agreement with a chained series above 64 realisations, because exchangeability is what
+  makes members comparable.
+  [Rationale](docs/design/completed/FEAT-15-ensemble-generation.md#2-draw-every-realisation-from-the-same-sampler).
+- **Draws are not batched across realisations.** Fitting and grid-building are ~84 % of the
+  per-day cost, so batching is worth ~1.2× at most; deferred as `PERF-16`, which targets the
+  grid **build** (~79 % of per-day cost at N = 1000) instead.
+
+### Commits
+
+`399a330` generate ensembles in one calendar walk (`FEAT-15`) · `8674a58` finish
+`perf-for_n_realisations` · `4a72a37` plan · `20e12f9` README description and pruning.
 
 ---
 
@@ -355,30 +360,19 @@ sampling ~8× faster, `FIX-1` was restated on measurement and deferred, and
 
 ### Decisions
 
-- **A file is optional, and its format is still worth specifying.** `adapters.py` used to
-  reason that because a file is never a required step, *therefore* there is no on-disk
-  schema to design or version. That inference is what left provenance with nowhere to
-  live but a fetcher's cache, and validation with nowhere but a fetcher's boundary.
-  [Rationale](docs/design/completed/FEAT-13-met-dataset-format.md).
-- **Out-of-support values are repaired, not refused.** Structural defects raise;
-  physically impossible values are clipped and counted. Real records carry small negative
-  irradiance at night from sensor noise, and the check cannot catch the unit errors it was
-  written for anyway — 280 K and 20 °F both sit inside support, as the suite asserts.
-  [Rationale](docs/design/completed/FEAT-13-met-dataset-format.md).
-- **A mismatched cache raises rather than refetching.** The caller chooses the path, so a
-  mismatch is a mistake to surface rather than a stale entry to evict — and overwriting
-  would destroy a record that may have taken a long download. `force_refetch=True` is the
-  deliberate way to repurpose a path.
-  [Rationale](docs/design/completed/FEAT-13-met-dataset-format.md).
-- **The irradiance resolver refuses to reconstruct a total from components.** Resolution
-  is a lookup; summing components is a claim about the data, so it stays something a
-  caller does explicitly — `examples/tools/site_data.py` does exactly that, and records it
-  in provenance.
-  [Rationale](docs/design/completed/FEAT-13-met-dataset-format.md).
-- **`MetDataset` takes no `attr_str=None` "resolve it for me" default.** It would put the
-  solar quantity back at the centre of a package whose registry design makes it
-  variable-agnostic, and turn a missing argument into a guess.
-  [Rationale](docs/design/completed/FEAT-13-met-dataset-format.md).
+All five are argued in
+[`FEAT-13-met-dataset-format.md`](docs/design/completed/FEAT-13-met-dataset-format.md).
+
+- **A file is optional, and its format is still worth specifying** — the opposite inference
+  is what left provenance with nowhere to live but a fetcher's cache.
+- **Out-of-support values are repaired, not refused** — structural defects raise, physically
+  impossible values are clipped and counted.
+- **A mismatched cache raises rather than refetching** — the caller chose the path, so a
+  mismatch is a mistake to surface, not a stale entry to evict.
+- **The irradiance resolver refuses to reconstruct a total from components** — resolution is
+  a lookup; summing is a claim about the data, and stays explicit.
+- **`MetDataset` takes no `attr_str=None` "resolve it for me" default** — it would put the
+  solar quantity back at the centre of a variable-agnostic package.
 
 ### Known at release
 
@@ -491,14 +485,12 @@ supplied value. 252 tests passing (was 152). Design:
 
 ### Decisions
 
-- **`generate_series` is deliberately not on `EnvSeriesGenerator`.** A month subset has
-  one pooled π(x₀) and one set of transitions shared by every generated day, so "what does
-  day 32 look like" has no honest answer. The month path keeps single-day generation; the
-  absence is guarded by a test.
+- **`generate_series` is deliberately not on `EnvSeriesGenerator`** — a month subset shares
+  one π(x₀) across every generated day, so "what does day 32 look like" has no honest
+  answer. Guarded by a test.
   [Rationale](docs/design/completed/variable-specs-and-initialisation.md).
-- **Fitted generators are deliberately not persisted to disk.** Persisting them would
-  write numbers already in the source data, ~31× duplicated across overlapping windows, to
-  save ~58 ms of fitting.
+- **Fitted generators are deliberately not persisted** — it would write source data back to
+  disk, ~31× duplicated across overlapping windows, to save ~58 ms of fitting.
   [Rationale](docs/design/completed/rolling-day-window.md).
 
 ### Known at release
