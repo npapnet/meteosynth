@@ -19,6 +19,7 @@ walk a complete 8760-hour year. See :doc:`quickstart` for all three.
    quickstart
    concepts
    workflow
+   ensemble_format
    theory
    examples
 
