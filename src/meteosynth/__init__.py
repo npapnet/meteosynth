@@ -42,11 +42,20 @@ from meteosynth.day_window import (
 )
 from meteosynth.generators import (
     DayWindowGenerator,
+    EnsembleDay,
     EnvSeriesGenerator,
     build_cross_midnight_pairs,
     build_initial_values,
     build_transition_pairs,
     generate_hr_simulator,
+    realisation_stream,
+)
+from meteosynth.ensemble import (
+    ENSEMBLE_SCHEMA_VERSION,
+    Ensemble,
+    ensemble_to_xlsx,
+    read_ensemble,
+    write_ensemble,
 )
 
 __all__ = [
@@ -88,4 +97,12 @@ __all__ = [
     "build_initial_values",
     "build_cross_midnight_pairs",
     "generate_hr_simulator",
+    # Ensembles: many realisations in one calendar walk, and their on-disk format.
+    "EnsembleDay",
+    "realisation_stream",
+    "ENSEMBLE_SCHEMA_VERSION",
+    "Ensemble",
+    "write_ensemble",
+    "read_ensemble",
+    "ensemble_to_xlsx",
 ]

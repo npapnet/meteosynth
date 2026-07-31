@@ -31,7 +31,7 @@ The primary application of `meteosynth` is **Monte-Carlo simulation for renewabl
 - **Version**: `0.2.0` released 2026-07-22 (managed via `uv` and `hatchling`), with an
   unreleased sprint on top — see [Changes since v0.2.0](#changes-since-v020).
 - **Python Compatibility**: `>=3.10`.
-- **Test suite**: 280 tests across 16 modules, headless by construction.
+- **Test suite**: 345 tests across 17 modules, headless by construction.
 - **Key Architectural Features**:
   - **Decoupled Variable Specs**: Physical constraints (`support`, `units`, `long_name`) are registered centrally in `meteosynth.variables` independently of dataset-specific column names. A column is modellable if and only if it has a spec.
   - **Date-Indexed Pair Alignment**: Daily wide-format restructuring keys transition pairs on calendar dates, eliminating silent mispairing bugs caused by dataset re-sorting.
@@ -51,7 +51,8 @@ package would otherwise get wrong.
 
 | change | architectural consequence |
 | :--- | :--- |
-| **Cached conditional quantiles** (`PERF-1`) | `MarkovChainSimulator2dKDE` now has **two sampling paths**, not one: a direct KDE evaluation below an activation threshold and a cached quantile grid above it. Anything reasoning about sampling cost, memory, or exact reproducibility across ensemble sizes has to know this. ~8× on ensembles; nothing on a chained year, by design. See [`precomputed-conditional-quantiles.md`](precomputed-conditional-quantiles.md). |
+| **Cached conditional quantiles** (`PERF-1`) | `MarkovChainSimulator2dKDE` now has **two sampling paths**, not one: a direct KDE evaluation below an activation threshold and a cached quantile grid above it. Anything reasoning about sampling cost, memory, or exact reproducibility across ensemble sizes has to know this. ~8× on ensembles; nothing on a chained year, by design. See [`PERF-1-precomputed-conditional-quantiles.md`](completed/PERF-1-precomputed-conditional-quantiles.md). |
+| **One calendar walk per ensemble, not per realisation** (`FEAT-15`) | There are now **two generation entry points with different cost models**. `generate_series` walks the calendar and fits each day as it arrives; `generate_ensemble` / `write_ensemble` walk it **once** and pass every realisation through each day's single fit — ~77× at N = 1000. Both share `_walk_ensemble`, so calendar behaviour cannot diverge. Two consequences to know before reasoning about either: an ensemble **does** exercise `PERF-1`'s cached sampler (a chained year still does not), and randomness is keyed on `(seed, realisation index, attribute name)` rather than drawn from one stream. See [`completed/FEAT-15-ensemble-generation.md`](completed/FEAT-15-ensemble-generation.md). |
 | **Scale-aware degeneracy detection** (`FIX-2`) | `Kind` classification no longer assumes a source stores physical zero as exact `0.0`. This is what **unblocks ingesting providers other than PVGIS**, where resampling and unit conversion leave `1e-16` nights. |
 | **Singular covariance degrades instead of crashing** | Perfectly collinear `previous`/`current` is re-categorised `KDE_1D` with a warning. One unfittable hour can no longer take a whole synthetic year with it. |
 | **Horizontal irradiance registered** | `IRRADIANCE_HORIZONTAL` with `ghi`/`dni`/`dhi` is a *distinct spec object* from `IRRADIANCE` despite identical support and units, because `long_name` is quoted back to the user by `validate_support` — naming a horizontal quantity "plane-of-array" misinforms exactly when someone is debugging provenance. |
@@ -119,6 +120,14 @@ flowchart TD
         M -->|DayWindowGenerator LRU| O[generate_series]
         O --> P[Chained Synthetic Year/Multi-Day]
     end
+
+    subgraph Ensembles - N realisations in one calendar walk
+        M -->|"_walk_ensemble<br/>(one fit per day, reused by every realisation)"| Q[generate_ensemble]
+        Q --> R["ndarray (N, n_days, 24)"]
+        Q -->|write_ensemble| S["long-format parquet<br/>one row group per day"]
+        S -->|read_ensemble| T[Ensemble: realisation / to_wide]
+        T -->|ensemble_to_xlsx| U["pivoted .xlsx<br/>(lossy export)"]
+    end
 ```
 
 ---
@@ -179,6 +188,7 @@ meteosynth/
 │       ├── adapters.py      # Data source schema adapters
 │       ├── constants.py     # Index column definitions & attribute groups
 │       ├── day_window.py    # Circular 366-day calendar arithmetic
+│       ├── ensemble.py      # Ensembles on disk: long parquet, views, xlsx export
 │       ├── generators.py   # Daily & multi-day synthetic series generators
 │       ├── markov_chain_simulator_kde2d.py # 2D KDE Markov engine & fallbacks
 │       ├── markov_implementations/         # Alternative Markov simulators
@@ -213,7 +223,8 @@ meteosynth/
 | [`__init__.py`](../../src/meteosynth/__init__.py) | Exposes top-level public API symbols (`MetDataset`, `MarkovChainSimulator2dKDE`, `EnvSeriesGenerator`, `DayWindowGenerator`, `VariableSpec`, `register`, etc.). |
 | [`variables.py`](../../src/meteosynth/variables.py) | Defines `VariableSpec` dataclass (`support`, `units`, `long_name`), domain clamping logic (`clamp_domain`), and the global variable registry (`register`, `get_spec`). Pre-registers `IRRADIANCE` (plane-of-array), `IRRADIANCE_HORIZONTAL` (`ghi`/`dni`/`dhi`), `TEMP_AIR` and `WIND_SPEED`. A column is modellable if and only if it has a spec, which is what makes the package variable-agnostic. |
 | [`markov_chain_simulator_kde2d.py`](../../src/meteosynth/markov_chain_simulator_kde2d.py) | Main stochastic engine (`MarkovChainSimulator2dKDE`). Fits 2D Gaussian KDE over $(X_{h-1}, X_h)$ pairs, constructs cumulative conditional distributions $P(X_h \mid X_{h-1} = x)$, truncates evaluation grids to physical support, and handles degenerate data via `Kind.KDE_2D`, `Kind.KDE_1D`, and `Kind.CONSTANT`. **Two sampling paths**: a direct KDE evaluation, and a cached conditional-quantile grid built lazily once a simulator proves hot (`precompute_grid`, `has_quantile_grid`). |
-| [`generators.py`](../../src/meteosynth/generators.py) | High-level daily series orchestration. `EnvSeriesGenerator` manages 23 hourly transition simulators + 1 initial distribution. `DayWindowGenerator` manages rolling window generation with an LRU cache. Also builds date-aligned transition pairs (`build_transition_pairs`, `build_cross_midnight_pairs`). |
+| [`generators.py`](../../src/meteosynth/generators.py) | High-level daily series orchestration. `EnvSeriesGenerator` manages 23 hourly transition simulators + 1 initial distribution + 1 cross-midnight model. `DayWindowGenerator` manages rolling window generation with an LRU cache, and exposes both `generate_series` (one chained series) and `generate_ensemble` (N of them in **one** calendar walk). `_walk_ensemble` is the single implementation of that walk, shared by both and by the ensemble writer, so the calendar rules cannot drift between them. `realisation_stream` derives the per-`(realisation, attribute)` random stream. Also builds date-aligned transition pairs (`build_transition_pairs`, `build_cross_midnight_pairs`). |
+| [`ensemble.py`](../../src/meteosynth/ensemble.py) | The on-disk form of a generated ensemble. `write_ensemble` streams N realisations to **one long-format parquet file**, a row group per calendar day, with the full generating parameters and the source dataset's provenance embedded as key-value metadata; `read_ensemble` reads it back and refuses a newer `ensemble_schema_version` rather than guessing. `Ensemble` carries the views (`realisation`, `to_wide`), and `ensemble_to_xlsx` is a lossy pivoted export behind the optional `excel` extra. |
 | [`day_window.py`](../../src/meteosynth/day_window.py) | Pure-function circular 366-day `all_leap` calendar arithmetic (`day_slot`, `window_slots`, `circular_delta`, `slot_to_month_day`). Enables New Year wrapping and leap-year treatment without pandas timestamp overhead. |
 | [`dataset.py`](../../src/meteosynth/dataset.py) | **The core noun.** `MetDataset` owns schema v1 — canonical dtypes, calendar validity, unique `(year, month, day, hour)`, sorted order — enforced on construction whatever route the data arrived by. Structural defects raise; out-of-support values are clipped and counted. Lossless parquet `save`/`load` with provenance embedded as key-value metadata, plus `read_csv`/`to_csv` as explicitly lossy interchange. Also carries the wide-format pivot (`convert_to_daily_wide`) and the training slices (`get_month_subset`, `get_day_window_subset`). |
 | [`provenance.py`](../../src/meteosynth/provenance.py) | `Provenance`: source, site, coordinates, period, fetch date. Always present (`source="user"` when nobody claimed one). `from_dict` tolerates unknown keys so a newer writer cannot strand a reader — the opposite of `schema_version`, which refuses a future file rather than guessing. |

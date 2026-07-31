@@ -10,7 +10,7 @@ ordered by how much they block real use; within a group, most significant first.
 
 ## ID allocation
 
-> **Next ID: 14.**
+> **Next ID: 18.**
 
 IDs come from **one counter shared by every category**. The prefix says what an item
 *is*; the number says *which* item it is. Only the number is the identity.
@@ -30,7 +30,7 @@ IDs come from **one counter shared by every category**. The prefix says what an 
    full `PREFIX-N` string is the identity; they are **not** renumbered. From `#10` up, the
    number alone is unambiguous.
 
-**Retired numbers:** `FIX-2`, `FIX-3`, `FEAT-5`, `FEAT-13` → [`CHANGELOG.md`](CHANGELOG.md) ·
+**Retired numbers:** `FIX-2`, `FIX-3`, `FEAT-5`, `FEAT-13`, `FEAT-15` → [`CHANGELOG.md`](CHANGELOG.md) ·
 `FEAT-1` → superseded 2026-07-29 by `FEAT-13` ·
 `INBOX-1` … `INBOX-7` → [triaged 2026-07-27](#archived-items-from-todosmd).
 
@@ -39,10 +39,12 @@ IDs come from **one counter shared by every category**. The prefix says what an 
 | [PERF-2](#perf-2--four-copies-of-the-same-data-in-every-simulator)              | Four copies of the same data in every simulator | open · low priority   |
 | [PERF-3](#perf-3--fitted-generators-cannot-be-pickled-at-the-default-bandwidth) | Fitted generators cannot be pickled             | open · low priority   |
 | [PERF-11](#perf-11--grid-node-spacing-may-want-to-depend-on-the-variable)       | Grid node spacing may want to be per-variable   | open · low priority   |
+| [PERF-16](#perf-16--draw-samples-in-batches-across-realisations)                | Draw samples in batches across realisations     | open · **after CHORE-12** |
 | [FIX-1](#fix-1--the-overcast-tail-is-under-produced)                            | The overcast tail is under-produced             | open · **deferred**   |
 | [FEAT-2](#feat-2--irradiance-pick-one-column-by-availability)                   | Irradiance: pick one column by availability     | (3) and (4) open      |
 | [FEAT-3](#feat-3--chained-series-between-two-dates)                             | Chained series between two dates                | open · shape decided  |
 | [FEAT-4](#feat-4--downloads-cache-by-default-keyed-by-sourcesiteperiod)         | Downloads cache by default                      | open · **next**       |
+| [FEAT-17](#feat-17--choose-the-sampling-path-explicitly-not-by-a-hidden-counter) | Choose the sampling path explicitly             | open · **carries a shipped defect** |
 | [VISION-1](#vision-1--ingest-sources-other-than-pvgis)                          | Ingest sources other than PVGIS                 | future                |
 | [CHORE-1](#chore-1--default-window-half-width-needs-a-real-evaluation)          | Default window half-width needs evaluating      | open                  |
 | [CHORE-2](#chore-2--date_id-is-not-zero-padded)                                 | `date_id` is not zero-padded                    | open · breaking       |
@@ -63,6 +65,10 @@ which is not the same thing.
    **CHORE-1** stands on its own rather than folded into it; half of it is measured.
 
 **FEAT-3** is independent of all of it and can slot in anywhere.
+
+**PERF-16 and CHORE-12 are a pair, in that order reversed**: `PERF-16` puts a second
+value-producing routine into the sampler, and `CHORE-12` is the reason the suite would not
+notice if it were wrong. Do not take `PERF-16` before `CHORE-12`.
 
 ---
 
@@ -164,6 +170,98 @@ accuracy gain does not justify; a single better rule would.
 
 See [`docs/design/completed/PERF-1-precomputed-conditional-quantiles.md`](docs/design/completed/PERF-1-precomputed-conditional-quantiles.md)
 for the measurements behind the current choice.
+
+---
+
+## PERF-16 — Draw samples in batches across realisations
+
+**Status:** open · **unblocked** — `FEAT-15` landed 2026-07-30 · **gated on `CHORE-12`** ·
+**Deliberately deferred**, see
+[the closing section of the `FEAT-15` spec](docs/design/completed/FEAT-15-ensemble-generation.md#decided-draw-one-value-at-a-time)
+
+`get_next_state` returns **one** value per call. `FEAT-15` now passes all N realisations
+through the same fitted simulator at the same hour, so they could be drawn in a single
+vectorised operation instead of N Python calls.
+
+### Why it was deferred rather than done with `FEAT-15`
+
+**The prize is bounded at ~1.2×**, against the 77× `FEAT-15` delivers on its own. Two costs
+are floors that batching cannot touch: fitting each day's models (199 ms/day) and building
+their quantile grids (~3.3 s/day). Together those are **~84 %** of the per-day cost at
+N = 1000, so a 1000-realisation year goes 20.9 min → ~17 min even if drawing became free.
+
+> **Revised down 2026-07-30, from ~3×.** The original estimate was computed before the grid
+> build was measured. See the correction note on `FEAT-15`.
+
+**The risk lands where the suite is blind.** `CHORE-12` records that `PERF-1` introduced a
+whole new sampling path and **all 271 tests passed unmodified** — and would have passed had
+it been wrong. A batched sampler means two value-producing routines where there is now one,
+and a subtly wrong weather value still looks like a weather value. **Close `CHORE-12` first**;
+the two items are properly a pair, and doing this one first is how a silent modelling error
+gets shipped.
+
+### The measurement that shapes the options
+
+A first attempt converted only the `KDE_2D` path and got **1.4×** (4.9 → 3.5 min at
+N = 1000, `poa_global`). The remainder was dominated by the degenerate hours still looping in
+Python. **But degeneracy is almost entirely an irradiance property**, measured over four
+dates at a ±7-day window on Heraklion 2010–2020, 23 transitions per date:
+
+| attribute | degenerate transitions | by date |
+| :--- | --: | :--- |
+| `poa_global` | **49/92 (53 %)** | 43 % Jun · 52 % Mar · 52 % Sep · **65 % Dec** |
+| `temp_air` | **0/92** | never — no floor, no atom, varies at every hour |
+| `wind_speed` | **0/92** | never |
+
+**Consequence for scoping, and it is the useful part of this item:** converting the `KDE_2D`
+path alone is **the complete job for `temp_air` and `wind_speed`**, since all 23 of their
+transitions take it. The extra work of batching `KDE_1D` and `CONSTANT` buys speed on
+**irradiance only**, and most of it in winter, when the nights are longest. So the natural
+split is:
+
+1. **Batch `KDE_2D` only** — full benefit for two of three shipped attributes, 1.4× on
+   irradiance, one new path in the sampler.
+2. **Batch `KDE_1D` and `CONSTANT` too** — an `np.interp` and a fill, so cheap to write; it
+   is irradiance-specific speed, and the seasonal skew means a December ensemble gains most.
+
+Do **(1)** first and re-measure per attribute before deciding whether **(2)** is worth
+anything. The earlier reading that "(1) takes the risk for a third of the payoff" was
+measured on `poa_global` and **does not generalise** — for temperature and wind, (1) *is* the
+whole win.
+
+### The higher-value sibling: the grid **build**, not the draws
+
+**Measuring `FEAT-15` moved the bottleneck.** Building a day's quantile grids costs **~3.3 s**
+against 199 ms to fit the models and 0.68 ms to draw a realisation's day from them. It is
+**~79 % of the per-day cost at N = 1000 and nearly all of it at N = 100**, and it is paid per calendar day
+per attribute *regardless of N* — so a 365-day, three-attribute ensemble spends ~60 min on it
+whether it holds 100 realisations or 10 000.
+
+**Anyone reaching for this item should probably attack that instead.** It is 5× the prize,
+and it needs no new sampling path, so it does not walk into `CHORE-12`'s blind spot. Three
+directions, none investigated:
+
+- **Fewer nodes or coarser evaluation.** The build is one KDE evaluation over
+  `_CDF_GRID_NODES` × 1000 points. `PERF-1` measured 32 nodes at 0.04 % / 0.42 % error against
+  64 at 0.03 % / 0.04 % — half the build cost for an error still far below anything the
+  diagnostics can resolve. `PERF-11` is already asking a related question about node
+  *placement*; this is about node *count*, and the two should be answered together.
+- **Reuse across adjacent days.** Consecutive days' training windows overlap by ~93 % at
+  ±7 days, so consecutive grids are nearly the same object. Exploiting that would weaken the
+  "each day has its own fit" property the rolling window exists for, so it needs an argument
+  rather than just an implementation.
+- **Vectorising the build itself**, which is 11 independent KDE evaluations per day.
+
+### Also worth knowing about the draw batching
+
+The first attempt materialised a `(N, 1001)` quantile array **per hour** — ~8 MB per hour at
+N = 1000. A careful implementation must avoid that allocation. Given the revised ~1.2×
+ceiling, though, this is now the smaller half of an already small item.
+
+Both `_sample_from_grid` and `_get_next_state_kde1d` are already pure interpolation, so
+neither needs new *maths* — only a shape-aware rewrite. Whatever lands must keep
+`PERF-1`'s invariant that a sampling path consumes exactly one number from the generator per
+draw, or an ensemble's streams desynchronise from a single series'.
 
 ---
 
@@ -389,6 +487,139 @@ the key can be a hash and the match check still answers honestly.
 
 ---
 
+## FEAT-17 — Choose the sampling path explicitly, not by a hidden counter
+
+**Status:** open · **carries a shipped defect** (see §1) · **gated on `CHORE-12`** — this
+changes the default behaviour of a public sampling path, and the suite cannot presently
+detect a wrong sampler
+
+`MarkovChainSimulator2dKDE` has two ways to answer a draw: evaluate the conditional density
+live (**the exact path**), or read a precomputed quantile table (**the table path**). Which
+one is used today is decided by `_kde2d_calls`, a **hidden mutable counter** on the
+simulator: the 65th draw switches paths. The proposal is to decide it from **arguments**
+instead, and to demote the counter to advisory.
+
+> **Terminology.** "Exact path" means *no table*, not *no approximation* — it still
+> discretises the value axis to 1000 points and integrates the density by cumulative sum.
+> The table adds two approximations on top of those: interpolation across 64 nodes of
+> `previous`, and a quantile axis discretised to 1001 levels. Its approximations are a
+> strict superset of the exact path's, and that is the whole of the difference.
+
+### 1. The shipped defect: there is no way to ask for the exact path
+
+`generate_ensemble(..., precompute=False)` reads as "do not use the table". **It does not do
+that.** It only skips the *eager* build; the lazy counter still fires on the 65th draw and
+builds the table anyway, so 936 of 1000 realisations are drawn from it. Measured, N = 1000,
+`poa_global`, ±7-day window, 365-day year, one attribute:
+
+| what you ask for | what you actually get | cost |
+| :--- | :--- | --: |
+| `precompute=True` | table built up front | **20.2 min** |
+| `precompute=False` | *64 exact draws, then the table anyway* | **36.8 min** |
+| the exact path, genuinely (threshold disabled by hand) | no table ever built | **4.5 h** |
+
+The middle row is the defect: a parameter that reads like an opt-out lands within 1.8× of
+the opt-in and 7× away from what its name implies. Today the only way to get the exact path
+is to monkeypatch a private module constant.
+
+### 2. The cost of the choice, measured
+
+**Taking the exact path for a large ensemble costs ~13×** — 4.5 h against 20 min. That is
+the number this decision turns on. It is large enough that the exact path must be opted into
+deliberately rather than defaulted to *silently*, and small enough that someone who needs
+bit-reproducibility can afford it for a single authoritative run.
+
+At the other end the ordering reverses: a chained year takes **one** draw per simulator, so
+building tables would take it from ~2.3 min to ~22 min — a ~9× *pessimisation*. Neither path
+is right for both, which is exactly why the caller has to be able to say.
+
+### 3. What is *not* at stake: accuracy
+
+Recorded so it is not re-litigated as a precision question. The table's extra error is
+**0.03 % on the mean and 0.04–0.31 % on the standard deviation** over 20 000 draws, and
+−0.185 % on a 2000-day mean end-to-end with a two-sample KS test at **p = 1.0**. Against the
+package's own error budget:
+
+- `examples/diagnostics-overshoot/` has a **minimum detectable effect of 1.4–4.8 %** — the
+  table's error is ~100× below what this repo can measure at all;
+- `FIX-1`, the known modelling defect, is a **factor of ~4** on the overcast tail;
+- switching `bandwidth` from 0.1 to Scott's rule moves daily means by **1–6 %**.
+
+**So the exact path does not buy a better answer.** What it buys is **determinism and
+auditability** — "this number came from the live density, and it will be that number again
+next run". For a package whose output is a scientific record that is worth having, but it is
+a different axis from accuracy and should be named as one: *exact vs fast*, not *precise vs
+performant*.
+
+### 4. Decision to record: how each path is activated
+
+```python
+# Default — no table is ever built. Deterministic, exact path, slower at scale.
+dwg.generate_ensemble(start, n_days, n_realisations=1000, seed=1)
+
+# Opt in to the table by stating what you know: how many draws each model will see.
+dwg.generate_ensemble(..., n_expected_draws=1000)
+dwg.for_day(5, 21, n_expected_draws=1000)     # the gen_day-in-a-loop case
+simulator.precompute_grid()                    # already exists; unchanged
+```
+
+- **Default is the exact path.** Fail toward predictability, not toward speed. The failure
+  mode becomes *"slower than it needed to be"* — visible, measurable, fixed by one argument
+  — instead of *"silently different numbers depending on call history"*, which is invisible
+  and which caused two real defects during `FEAT-15`, recorded as deviations 2 and 3 of its
+  [archive note](docs/design/completed/FEAT-15-ensemble-generation.md).
+- **The hint is a draw count, not a boolean.** `n_expected_draws=1000` asks the caller for
+  something they know; `precompute=True` asks them to have already done the 64-node cost
+  arithmetic. A count also stays correct if `_CDF_GRID_NODES` changes for accuracy reasons
+  (`PERF-11`), because the crossover is recomputed rather than re-guessed by every caller.
+- **It reaches wherever models are obtained** — `generate_ensemble`, `write_ensemble`,
+  `for_day`/`for_slot`, `EnvSeriesGenerator`. `generate_ensemble` may default it from
+  `n_realisations`, since there it is a fact rather than a guess.
+- **Retire `precompute=`**, or keep it only as a thin alias. It is the misnamed parameter of
+  §1, and it encodes a conclusion rather than a fact.
+
+### 5. Keep the counter — as a hint, not as behaviour
+
+The counter knows something worth knowing: *this simulator has answered 5 000 draws on the
+exact path and nobody asked for a table.* Do not discard that; **demote it**. Keep counting,
+never switch paths, and emit a one-time log line when the threshold passes unhinted:
+
+```text
+simulator drew 64+ times on the exact path; pass n_expected_draws= for the
+cached table (~13x faster for a large ensemble)
+```
+
+Numbers never change, reproducibility is absolute, and the optimisation stays discoverable
+instead of being silently forgone. That is the synthesis: **explicit control as the
+mechanism, the counter retained purely as advice.**
+
+### 6. Why `CHORE-12` gates it
+
+This changes which sampler a draw comes from **by default, for every caller**. `CHORE-12`
+records that when `PERF-1` introduced the second sampling path, all 271 tests passed
+unmodified — and would have passed had it been wrong. Landing a default change on top of
+that blind spot is how a silent modelling error ships. Close `CHORE-12` first; it is the
+same gate `PERF-16` sits behind, for the same reason.
+
+### 7. Callers that need updating
+
+Only two, both in `examples/`, both loops whose bound the callee cannot see:
+
+```text
+examples/tools/envelope.py:139                        [day_generator.gen_day(rng=rng) for _ in iterator]
+examples/diagnostics-overshoot/step2_simulate.py:197  [day_generator.gen_day(rng=rng) for _ in draws]
+```
+
+The second is the repo's calibration harness at n = 1000. It currently gets the table for
+free from the counter and would need `n_expected_draws` to keep its runtime — `PERF-1`
+measured that path at 16.6 min → 2.1 min, so the regression would be severe and would look
+like a harness problem rather than an API change.
+
+**No library-internal caller is affected**: every path inside `src/` either knows its draw
+count (`_walk_ensemble`) or takes exactly one (`generate_series`).
+
+---
+
 
 # Direction — where the package is going
 
@@ -488,7 +719,9 @@ Do this pass *after* the items it depends on, so it is one edit rather than two.
 ## CHORE-12 — Nothing pins what the sampler produces
 
 **Status:** open · **raised for review, not yet agreed** · **Recommended priority:
-medium-low** — worth deciding on, not worth dropping other work for
+medium-low** — worth deciding on, not worth dropping other work for · **now gates
+[`PERF-16`](#perf-16--draw-samples-in-batches-across-realisations)**, which would add a
+second sampling path this gap cannot police
 
 ### The observation
 
@@ -557,3 +790,9 @@ diagnostics or convenience function.
 ## INBOX-13 : make sure progress bar exists in example scripts and its functional 
 
 `tdqm` is now part of core dependencies. I need to make sure that the code is able to visualize the concepts. Check whether this package is ok to put this functionality of a higher level one. 
+
+
+## INBOX-14 : Implement cli
+
+This package could benefit from cli subcommands `meteosyn fetch ...`, `meteosyn train ...` (for training a new model), `meteosyn generate ...`. Blocked by location of data files. 
+
