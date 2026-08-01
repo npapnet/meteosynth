@@ -475,12 +475,13 @@ def run(n_realisations: int = cfg.N_REALISATIONS, resume: bool = False) -> bool:
     cfg.ensure_dirs()
 
     meta = json.loads(cfg.RECORD_META.read_text(encoding="utf-8"))
-    record = pd.read_csv(meta["cache"])
-    years = [int(y) for y in meta["years"]]
 
-    # Built once and shared: every configuration trains on the whole record, so there is
-    # nothing configuration-specific about the processor.
-    ds = MetDataset(record)
+    # Load through MetDataset rather than pd.read_csv: the cache is parquet, so it
+    # carries exact dtypes and the provenance step1 checked. Reading it as a frame would
+    # also silently discard the record of which site and period this instrument measured.
+    ds = MetDataset.load(meta["cache"])
+    record = ds.met_data
+    years = [int(y) for y in meta["years"]]
 
     configs = build_configs()
     done = _done_config_ids() if resume else set()

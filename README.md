@@ -32,6 +32,7 @@ deterministic profile. The package also ships utilities to interface with the PV
 - **A validated training record** — `MetDataset` enforces schema, calendar validity and physical support on construction whatever route the data arrived by, and round-trips to parquet losslessly.
 - **A variable registry, not a column whitelist** — a column is modellable if and only if it has a registered `VariableSpec`; `register()` adds your own.
 - **Optional PVGIS integration** — `fetch_pvgis` and `fetch_pvgis_tmy` normalise, validate and cache; the contract with the core is an ordinary DataFrame, so a user who already has data never goes through an adapter.
+- **Collect once per site** — downloads cache by default and are found again by provenance, not by remembering a filename; a wider record answers a narrower request by narrowing, so one download serves every training period.
 - **Alternative simulators** — binned 1D KDE and discrete transition-matrix implementations share the same `get_next_state` / `generate_sequence` interface.
 
 The full release history is in [`CHANGELOG.md`](CHANGELOG.md).
@@ -153,23 +154,34 @@ year = dwg.generate_series(start=(1, 1), n_days=365, seed=1)   # (365, 24)
 > window buys *centring* and *smoothness*, not sample size. See
 > [`docs/design/completed/rolling-day-window.md`](docs/design/completed/rolling-day-window.md).
 
-Fetch real data from PVGIS with `meteosynth.adapters`:
+Fetch real data from PVGIS with `meteosynth.adapters`. **Collect once per site, then
+work locally** — the download is cached by default, so only the first call is networked:
 
 ```python
 from meteosynth.adapters import fetch_pvgis
 
-# Paris, 2011-2012. Pass `cache=` and the dataset is written on the first call and
-# read on every later one -- collection is slow and networked, modelling is not.
-ds = fetch_pvgis(48.8566, 2.3522, 2011, 2012, cache="data/paris_2011_2012.parquet")
+# First time: downloads every year PVGIS serves for Paris and caches it under ./data/.
+ds = fetch_pvgis(48.8566, 2.3522, site="paris")
+
+# Afterwards: no network. The label resolves the coordinates, and the years select a
+# view of the record already on disk rather than a new download.
+ds = fetch_pvgis(site="paris", start=2011, end=2012)
 ```
 
-You get a `MetDataset` directly: the four calendar columns plus `poa_global`, `temp_air`
-and `wind_speed`, canonicalised and validated. Ask for a different irradiance component
-with `irradiance="direct"` — the emitted column keeps its specific name, so **the name
-records the quantity**.
+You get a `MetDataset` directly: the four calendar columns plus every irradiance quantity
+PVGIS supplied, `temp_air` and `wind_speed`, canonicalised and validated. Each column
+keeps its specific name, so **the name records the quantity**.
+
+`start`/`end` select a *view*, not the size of the download. The default fetch takes the
+provider's widest range and keeps all three plane-of-array components, so one file per
+site answers every later question about it — `poa_global` is derived from the components
+by summation, which for PVGIS is exact to **0.01 W/m²** (its own two-decimal rounding)
+and is recorded as derived in the dataset's provenance. Pass `components=False` for the
+provider's own total instead, or `full_range=False` to download only the years asked for.
 
 What a column name *cannot* record is which site and which years produced it, so each
-dataset also carries a `Provenance`. That is what a warm cache is matched against:
+dataset also carries a `Provenance`. That is what a cache is matched against — both when
+you name a file and when the package finds one for you:
 
 ```python
 ds.provenance          # Provenance(source='pvgis_hourly', latitude=48.8566, ...)
@@ -179,6 +191,27 @@ ds.irradiance_column   # 'poa_global' -- resolved, so a TMY record answers 'ghi'
 fetch_pvgis(35.3387, 25.1442, 2011, 2012, cache="data/paris_2011_2012.parquet")
 # CacheMismatchError: site (48.8566, 2.3522) != requested (35.3387, 25.1442)
 ```
+
+**The store is project-local.** It is `./data/` under the folder you are working in, and
+nothing else — no user-level location, no environment variable, no global setting. Two
+projects side by side keep two independent stores, and a script reads the folder it sits
+next to regardless of which shell launched it. Say otherwise per call with
+`data_dir="inputs"` (another folder, files still named for you), `cache="exact/file.parquet"`
+(one named file) or `cache=False` (nothing read, nothing written).
+
+To see what you have collected:
+
+```python
+import meteosynth
+print(meteosynth.store.describe_store())
+# data: 2 cached dataset(s)
+#   pvgis_hourly_heraklion_2005_2023.parquet  [2005-2023]  poa_global, temp_air, wind_speed
+#   pvgis_hourly_paris_2011_2012.parquet      [2011-2012]  poa_direct, ..., wind_speed
+```
+
+If two collected records could both answer a request, the package **refuses and lists
+them** rather than choosing — which record a result was trained on is part of the result,
+and picking for you would make that depend on what else is in the folder.
 
 Any dataset saves and loads losslessly, whatever built it:
 

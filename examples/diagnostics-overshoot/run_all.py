@@ -40,7 +40,7 @@ def _rule(title: str, detail: str = "") -> None:
 
 def _describe_fetch() -> str:
     """Say up front whether this will hit the network or read a file."""
-    matches = sorted(cfg.RECORD_CACHE.parent.glob("pvgis_hourly_heraklion_*.csv"))
+    matches = sorted(cfg.RECORD_CACHE.parent.glob("pvgis_hourly_heraklion_*.parquet"))
     if matches:
         newest = max(matches, key=lambda p: p.stat().st_mtime)
         size_mb = newest.stat().st_size / 1e6

@@ -55,6 +55,7 @@ import json
 import os
 import pathlib
 import warnings
+from dataclasses import replace
 from typing import Any, Dict, Optional, Tuple, Union
 
 import pandas as pd
@@ -475,6 +476,90 @@ class MetDataset:
         self.met_data.to_csv(path, index=False, **kwargs)
 
     # -- views -----------------------------------------------------------------------
+
+    def get_period_subset(
+        self, start: int, end: int, origin: Optional[str] = None
+    ) -> "MetDataset":
+        """
+        The years ``start``-``end`` inclusive, as a dataset in their own right.
+
+        This is what makes **one download per site** enough: a record covering 2005-2023
+        answers a request for 2010-2020 by narrowing, so a training period does not have
+        to be decided before the data is collected.
+
+        Parameters
+        ----------
+        start, end : int
+            Inclusive year range. Must be fully contained in what this dataset holds.
+        origin : str, optional
+            Where the wider record came from -- a filename, usually. Recorded in the
+            result's provenance notes, so a narrowed dataset still says what it was
+            narrowed from.
+
+        Returns
+        -------
+        MetDataset
+            Carrying provenance for **the period it now holds**, not the one it was cut
+            from, plus a note naming the origin.
+
+        Raises
+        ------
+        ValueError
+            If the requested period is not fully contained. Returning the overlap would
+            answer a different question than the one asked -- silently, and with a
+            plausible-looking result -- which is the failure this format exists to
+            prevent. Whether a cache is wide enough is
+            :func:`meteosynth.store.resolve`'s job, and it applies the same rule.
+
+        Notes
+        -----
+        Unlike :meth:`get_month_subset` and :meth:`get_day_window_subset`, which return
+        bare frames because they are *training slices* consumed immediately by a
+        generator, this returns a full :class:`MetDataset`. The difference is that the
+        result is still a record of a site over a period -- it can be saved, re-sliced,
+        and asked where it came from -- so dropping its provenance would lose exactly
+        what the format exists to carry.
+
+        **The narrowing is exact.** Measured on a real 19-year PVGIS record narrowed to
+        its middle 11 years against the same 11 years fetched separately: identical row
+        count, index columns aligned exactly, ``temp_air`` and ``wind_speed``
+        bit-identical, and ``poa_global`` within 0.01 W/m2 -- PVGIS's own two-decimal
+        rounding.
+
+        Examples
+        --------
+        >>> ds.describe_time_range()                       # doctest: +SKIP
+        'Data ranges from 2005 to 2023'
+        >>> ds.get_period_subset(2010, 2020).describe_time_range()   # doctest: +SKIP
+        'Data ranges from 2010 to 2020'
+        """
+        if start > end:
+            raise ValueError(f"start {start} is after end {end}")
+
+        held_start = int(self.met_data["year"].min())
+        held_end = int(self.met_data["year"].max())
+        if start < held_start or end > held_end:
+            raise ValueError(
+                f"this dataset holds {held_start}-{held_end}, which does not contain "
+                f"the requested {start}-{end}. Returning the overlap would quietly "
+                f"answer a different question -- fetch the missing years instead."
+            )
+
+        subset = self.met_data[self.met_data["year"].between(start, end)]
+
+        note = (
+            f"subset from {origin}"
+            if origin
+            else f"subset from a {held_start}-{held_end} record"
+        )
+        existing = self.provenance.notes
+        provenance = replace(
+            self.provenance,
+            start_year=start,
+            end_year=end,
+            notes=f"{existing}; {note}" if existing else note,
+        )
+        return MetDataset(subset.reset_index(drop=True), provenance=provenance)
 
     def get_month_subset(self, month_ind: int) -> pd.DataFrame:
         """
