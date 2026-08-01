@@ -8,15 +8,17 @@ few minutes.
 `meteosynth` is managed with [uv](https://docs.astral.sh/uv/).
 
 ```bash
-# Install core dependencies (numpy, pandas, scipy, pvlib, matplotlib, seaborn)
+# Runtime dependencies + the dev group. Enough to run everything, examples included.
 uv sync
 
-# Add the extras used by the example scripts (tqdm progress bars)
-uv sync --extra examples
+# Optional: Excel export of an ensemble (`ensemble_to_xlsx`) -- the only extra there is
+uv sync --extra excel
 ```
 
 This installs `meteosynth` in editable mode, so edits under `src/meteosynth/`
-take effect immediately.
+take effect immediately. `uv sync` on its own is enough to run every script under
+`examples/` — `tqdm` is a core dependency, because progress bars are a library
+feature rather than an example one.
 
 ```{note}
 The dev dependency group (`uv sync` installs it by default) also brings in

@@ -21,7 +21,7 @@ these scripts print or plot.
 ## Before the first run
 
 ```bash
-uv sync --extra examples
+uv sync                                           # everything these scripts need
 uv run python examples/tools/fetch_site_data.py   # ~10 s, downloads once
 ```
 
@@ -44,11 +44,11 @@ question**, because the scale changes what can be asked — see
 | [`use_cases/year/synthetic_year.py`](use_cases/year/synthetic_year.py) | Generate a complete 8760-hour year of all three and write it out | ~4 min |
 
 ```bash
-uv run --extra examples python examples/use_cases/day/day_envelope_pv.py
-uv run --extra examples python examples/use_cases/day/day_envelope_temp.py
-uv run --extra examples python examples/use_cases/day/day_envelope_wind.py
-uv run --extra examples python examples/use_cases/month/monthly_statistics.py
-uv run --extra examples python examples/use_cases/year/synthetic_year.py
+uv run python examples/use_cases/day/day_envelope_pv.py
+uv run python examples/use_cases/day/day_envelope_temp.py
+uv run python examples/use_cases/day/day_envelope_wind.py
+uv run python examples/use_cases/month/monthly_statistics.py
+uv run python examples/use_cases/year/synthetic_year.py
 ```
 
 The three `day_envelope_*` scripts share one comparison (`tools/envelope.py`) run on

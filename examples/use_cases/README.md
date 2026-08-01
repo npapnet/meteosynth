@@ -23,9 +23,9 @@ whatever consumes it.
 # Optional: prime the download cache once, so no script waits on PVGIS
 uv run python examples/tools/fetch_site_data.py
 
-uv run --extra examples python examples/use_cases/day/day_envelope_pv.py
-uv run --extra examples python examples/use_cases/month/monthly_statistics.py
-uv run --extra examples python examples/use_cases/year/synthetic_year.py
+uv run python examples/use_cases/day/day_envelope_pv.py
+uv run python examples/use_cases/month/monthly_statistics.py
+uv run python examples/use_cases/year/synthetic_year.py
 ```
 
 New to *ensemble*, *realisation*, *envelope*, *P90*? Read

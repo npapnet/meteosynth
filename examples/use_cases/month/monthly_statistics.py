@@ -33,7 +33,7 @@ or taken into another tool without re-running the generator.
 
 Run with::
 
-    uv run --extra examples python examples/use_cases/month/monthly_statistics.py
+    uv run python examples/use_cases/month/monthly_statistics.py
 
 Runtime: ~3 min for 12 realisations of all three attributes. Fitting is paid once --
 ``CACHE_SIZE`` holds the whole month, so later realisations only pay for sampling.

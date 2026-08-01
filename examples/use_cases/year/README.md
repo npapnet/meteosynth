@@ -5,7 +5,7 @@
 | [`synthetic_year.py`](synthetic_year.py) | One 8760-hour series per attribute, chained day by day across midnight, written to CSV | ~4 min per realisation |
 
 ```bash
-uv run --extra examples python examples/use_cases/year/synthetic_year.py
+uv run python examples/use_cases/year/synthetic_year.py
 ```
 
 This script exists to **produce data**, not to make a point: the file it writes is the

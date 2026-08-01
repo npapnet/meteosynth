@@ -52,7 +52,7 @@ an ``.xlsx`` copy and the heatmap.
 
 Run with::
 
-    uv run --extra examples python examples/use_cases/year/synthetic_year.py
+    uv run python examples/use_cases/year/synthetic_year.py
 
 Runtime: roughly 21 min per attribute for a 1000-realisation year, against ~27 h to
 generate the same thing one series at a time -- a 77x reduction, measured.

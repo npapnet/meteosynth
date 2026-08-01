@@ -22,12 +22,12 @@ uv run python examples/concepts/example_rolling_window.py
 uv run python examples/concepts/example_leap_year_windows.py                 # no PVGIS needed
 
 # Use cases
-uv run --extra examples python examples/use_cases/day/day_envelope_pv.py     # also _temp, _wind
-uv run --extra examples python examples/use_cases/month/monthly_statistics.py  # ~3 min
-uv run --extra examples python examples/use_cases/year/synthetic_year.py     # ~4 min
+uv run python examples/use_cases/day/day_envelope_pv.py     # also _temp, _wind
+uv run python examples/use_cases/month/monthly_statistics.py  # ~3 min
+uv run python examples/use_cases/year/synthetic_year.py     # ~4 min
 
 # Diagnostics
-uv run --extra examples python examples/diagnostics-overshoot/run_all.py     # ~5 min
+uv run python examples/diagnostics-overshoot/run_all.py     # ~5 min
 ```
 
 Sections 1–4 below walk through the concept scripts; section 5 covers the use

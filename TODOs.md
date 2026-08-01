@@ -10,7 +10,7 @@ ordered by how much they block real use; within a group, most significant first.
 
 ## ID allocation
 
-> **Next ID: 18.**
+> **Next ID: 20.**
 
 IDs come from **one counter shared by every category**. The prefix says what an item
 *is*; the number says *which* item it is. Only the number is the identity.
@@ -32,35 +32,51 @@ IDs come from **one counter shared by every category**. The prefix says what an 
 
 **Retired numbers:** `FIX-2`, `FIX-3`, `FEAT-5`, `FEAT-13`, `FEAT-15` → [`CHANGELOG.md`](CHANGELOG.md) ·
 `FEAT-1` → superseded 2026-07-29 by `FEAT-13` ·
-`INBOX-1` … `INBOX-7` → [triaged 2026-07-27](#archived-items-from-todosmd).
+`INBOX-1` … `INBOX-7` → [triaged 2026-07-27](CHANGELOG.md#changed) ·
+`INBOX-10`, `INBOX-13`, `INBOX-14` → triaged 2026-08-01, see the note below.
 
-| ID                                                                              | Item                                            | Status                |
-| :------------------------------------------------------------------------------ | :---------------------------------------------- | :-------------------- |
-| [PERF-2](#perf-2--four-copies-of-the-same-data-in-every-simulator)              | Four copies of the same data in every simulator | open · low priority   |
-| [PERF-3](#perf-3--fitted-generators-cannot-be-pickled-at-the-default-bandwidth) | Fitted generators cannot be pickled             | open · low priority   |
-| [PERF-11](#perf-11--grid-node-spacing-may-want-to-depend-on-the-variable)       | Grid node spacing may want to be per-variable   | open · low priority   |
-| [PERF-16](#perf-16--draw-samples-in-batches-across-realisations)                | Draw samples in batches across realisations     | open · **after CHORE-12** |
-| [FIX-1](#fix-1--the-overcast-tail-is-under-produced)                            | The overcast tail is under-produced             | open · **deferred**   |
-| [FEAT-2](#feat-2--irradiance-pick-one-column-by-availability)                   | Irradiance: pick one column by availability     | (3) and (4) open      |
-| [FEAT-3](#feat-3--chained-series-between-two-dates)                             | Chained series between two dates                | open · shape decided  |
-| [FEAT-4](#feat-4--downloads-cache-by-default-keyed-by-sourcesiteperiod)         | Downloads cache by default                      | open · **next**       |
-| [FEAT-17](#feat-17--choose-the-sampling-path-explicitly-not-by-a-hidden-counter) | Choose the sampling path explicitly             | open · **carries a shipped defect** |
-| [VISION-1](#vision-1--ingest-sources-other-than-pvgis)                          | Ingest sources other than PVGIS                 | future                |
-| [CHORE-1](#chore-1--default-window-half-width-needs-a-real-evaluation)          | Default window half-width needs evaluating      | open                  |
-| [CHORE-2](#chore-2--date_id-is-not-zero-padded)                                 | `date_id` is not zero-padded                    | open · breaking       |
-| [CHORE-3](#chore-3--document-the-on-disk-format)                                | Document the on-disk format                     | one question left     |
-| [CHORE-4](#chore-4--bring-docssource-back-in-line-with-the-repo)                | Bring `docs/source/` back in line with the repo | open · do last        |
-| [CHORE-12](#chore-12--nothing-pins-what-the-sampler-produces)                   | Nothing pins what the sampler produces          | open · **for review** |
+> **`INBOX-13` could not keep its number.** `13` was already spent by `FEAT-13`, which
+> landed in 0.3.0 and is cited by `CHANGELOG.md`, a design-doc filename and several
+> `TODOs.md` entries. Rule 2 outranks rule 4: a number is never reused, so the item was
+> re-allocated from the counter instead of graduating in place. It also split in two, so
+> it would have needed a fresh ID regardless — it is now `FIX-18` and `CHORE-19`.
+> `INBOX-10` and `INBOX-14` were clean and kept their numbers.
+
+| ID                                                                                 | Item                                                | Status                                 |
+| :--------------------------------------------------------------------------------- | :-------------------------------------------------- | :------------------------------------- |
+| [PERF-2](#perf-2--four-copies-of-the-same-data-in-every-simulator)                 | Four copies of the same data in every simulator     | open · low priority                    |
+| [PERF-3](#perf-3--fitted-generators-cannot-be-pickled-at-the-default-bandwidth)    | Fitted generators cannot be pickled                 | open · low priority                    |
+| [PERF-11](#perf-11--grid-node-spacing-may-want-to-depend-on-the-variable)          | Grid node spacing may want to be per-variable       | open · low priority                    |
+| [PERF-16](#perf-16--draw-samples-in-batches-across-realisations)                   | Draw samples in batches across realisations         | open · **after CHORE-12**              |
+| [FIX-1](#fix-1--the-overcast-tail-is-under-produced)                               | The overcast tail is under-produced                 | open · **deferred**                    |
+| [FIX-18](#fix-18--the-documented-install-command-fails-there-is-no-examples-extra) | `uv sync --extra examples` fails — no such extra    | open · **cheap, user-facing**          |
+| [FEAT-2](#feat-2--irradiance-pick-one-column-by-availability)                      | Irradiance: pick one column by availability         | (3) and (4) open                       |
+| [FEAT-3](#feat-3--chained-series-between-two-dates)                                | Chained series between two dates                    | open · shape decided                   |
+| [FEAT-4](#feat-4--downloads-cache-by-default-keyed-by-sourcesiteperiod)            | Downloads cache by default                          | open · **next**                        |
+| [FEAT-10](#feat-10--promote-the-envelope-diagnostics-out-of-examples)              | Promote the envelope diagnostics out of `examples/` | open · **rescoped by measurement**     |
+| [FEAT-14](#feat-14--a-cli-subcommand-set)                                          | A CLI subcommand set                                | open · low priority · **after FEAT-4** |
+| [FEAT-17](#feat-17--choose-the-sampling-path-explicitly-not-by-a-hidden-counter)   | Choose the sampling path explicitly                 | open · **carries a shipped defect**    |
+| [VISION-1](#vision-1--ingest-sources-other-than-pvgis)                             | Ingest sources other than PVGIS                     | future                                 |
+| [CHORE-1](#chore-1--default-window-half-width-needs-a-real-evaluation)             | Default window half-width needs evaluating          | open                                   |
+| [CHORE-2](#chore-2--date_id-is-not-zero-padded)                                    | `date_id` is not zero-padded                        | open · breaking                        |
+| [CHORE-3](#chore-3--document-the-on-disk-format)                                   | Document the on-disk format                         | one question left                      |
+| [CHORE-4](#chore-4--bring-docssource-back-in-line-with-the-repo)                   | Bring `docs/source/` back in line with the repo     | open · do last                         |
+| [CHORE-12](#chore-12--nothing-pins-what-the-sampler-produces)                      | Nothing pins what the sampler produces              | open · **for review**                  |
+| [CHORE-19](#chore-19--progress-feedback-is-missing-where-the-wait-is-longest)      | Progress feedback missing where the wait is longest | open · low priority                    |
 
 ## Order of work
 
 Groups are ordered by how much they block real use; this is the order to *take them in*,
 which is not the same thing.
 
-1. **FEAT-4**, which now needs only its location decision — `FEAT-13` landed and
+1. **FIX-18** first, whenever anything else is being touched — it is a two-line change,
+   and until it lands the documented first command a new user types does not work.
+2. **FEAT-4**, which now needs only its location decision — `FEAT-13` landed and
    defines everything else it consumes.
-2. **CHORE-4** last, so the docs pass is one edit rather than two.
-3. **FIX-1**, whenever the cost is worth paying — the tail deficit is real, measured and
+3. **CHORE-4** last, so the docs pass is one edit rather than two. **FIX-18** and
+   **CHORE-19** both touch docs and examples, so fold them in if `CHORE-4` gets there
+   first — but do not hold `FIX-18` for it.
+4. **FIX-1**, whenever the cost is worth paying — the tail deficit is real, measured and
    documented, and it does not affect any quantity the package currently advertises.
    **CHORE-1** stands on its own rather than folded into it; half of it is measured.
 
@@ -69,6 +85,14 @@ which is not the same thing.
 **PERF-16 and CHORE-12 are a pair, in that order reversed**: `PERF-16` puts a second
 value-producing routine into the sampler, and `CHORE-12` is the reason the suite would not
 notice if it were wrong. Do not take `PERF-16` before `CHORE-12`.
+
+**FEAT-10 and FEAT-17 overlap in one file.** `FEAT-17` §7 lists
+`examples/tools/envelope.py:139` as a caller needing a new argument; `FEAT-10` proposes
+deleting that call site entirely in favour of `generate_ensemble`. Whichever runs first
+should check the other — doing `FEAT-10` first removes one of `FEAT-17`'s two callers.
+
+**FEAT-14 (the CLI) is last of the features**, and gated on `FEAT-4`: a command-line
+`fetch` has to know where files go before it can have a sensible default.
 
 ---
 
@@ -207,11 +231,11 @@ N = 1000, `poa_global`). The remainder was dominated by the degenerate hours sti
 Python. **But degeneracy is almost entirely an irradiance property**, measured over four
 dates at a ±7-day window on Heraklion 2010–2020, 23 transitions per date:
 
-| attribute | degenerate transitions | by date |
-| :--- | --: | :--- |
-| `poa_global` | **49/92 (53 %)** | 43 % Jun · 52 % Mar · 52 % Sep · **65 % Dec** |
-| `temp_air` | **0/92** | never — no floor, no atom, varies at every hour |
-| `wind_speed` | **0/92** | never |
+| attribute    | degenerate transitions | by date                                         |
+| :----------- | ---------------------: | :---------------------------------------------- |
+| `poa_global` |       **49/92 (53 %)** | 43 % Jun · 52 % Mar · 52 % Sep · **65 % Dec**   |
+| `temp_air`   |               **0/92** | never — no floor, no atom, varies at every hour |
+| `wind_speed` |               **0/92** | never                                           |
 
 **Consequence for scoping, and it is the useful part of this item:** converting the `KDE_2D`
 path alone is **the complete job for `temp_air` and `wind_speed`**, since all 23 of their
@@ -281,13 +305,13 @@ The fix is expensive: reflection, a log/sqrt transform or beta kernels all chang
 `MarkovChainSimulator2dKDE`'s density, which means re-baselining every golden test and
 re-validating all three attributes. The benefit, measured on the 19-year Heraklion record:
 
-| question | effect of the defect |
-| :------- | :------------------- |
-| Mean daily total, monthly or annual energy | **none** — ratio 0.994–1.007, no date excluding 1 |
-| Daily P50, P90, and the daily maximum | **≤ 1–4 %**, and the mean of daily maxima is within 2 % |
+| question                                                    | effect of the defect                                       |
+| :---------------------------------------------------------- | :--------------------------------------------------------- |
+| Mean daily total, monthly or annual energy                  | **none** — ratio 0.994–1.007, no date excluding 1          |
+| Daily P50, P90, and the daily maximum                       | **≤ 1–4 %**, and the mean of daily maxima is within 2 %    |
 | **Annual P90** (the exceedance figure a yield study quotes) | **0.12 % of the mean** — 2.3 kWh/m² on a mean year of 1879 |
-| Daily P10 | biased **high by up to 9 %** |
-| Frequency of overcast days | **~4× too few** where the record has any |
+| Daily P10                                                   | biased **high by up to 9 %**                               |
+| Frequency of overcast days                                  | **~4× too few** where the record has any                   |
 
 The annual figure is why this is cheap to postpone. Days below 1 kWh/m² are 3.47 % of the
 record but carry **0.50 % of its energy**, and Heraklion's year-to-year CV is only 1.71 %,
@@ -357,6 +381,46 @@ no error bar. It did fix generated negatives, 1.29 % → 0.00 %, which was its a
 The padding is gone from both the 1D and 2D paths.
 
 ---
+
+## FIX-18 — The documented install command fails: there is no `examples` extra
+
+**Status:** open · **cheap** · **Impact:** a new user's second command · *split from
+`INBOX-13` on triage, 2026-08-01*
+
+Four documents instruct the reader to install an optional extra that does not exist.
+Verified 2026-08-01:
+
+```console
+$ uv sync --extra examples
+error: Extra `examples` is not defined in the project's `optional-dependencies` table
+```
+
+`pyproject.toml` declares exactly one extra, `excel`. **`tqdm` moved into the core
+`dependencies` list** (`pyproject.toml:26`), which is what made the extra redundant — the
+documentation was simply never updated to match, so it now names something that was
+removed rather than something merely unnecessary.
+
+### Where it appears
+
+| file                                          | what it says                                                      |
+| :-------------------------------------------- | :---------------------------------------------------------------- |
+| `README.md:59`, `:67`                         | "Add the extras used by the example scripts (tqdm progress bars)" |
+| `docs/source/quickstart.md:14`                | same line                                                         |
+| `examples/diagnostics-overshoot/README.md:69` | "Progress bars need `tqdm`, which is in the `examples` extra"     |
+| `docs/design/architecture.md`                 | **fixed 2026-08-01**, with a pointer to this item                 |
+
+### The fix, and the one decision in it
+
+Delete the instruction and the sentences justifying it: `uv sync` alone is now sufficient
+to run everything under `examples/`.
+
+**Decide first whether that is the outcome wanted.** `tqdm`, `matplotlib` and `seaborn` are
+all hard runtime dependencies of a library whose core job — fitting KDEs and sampling — needs
+none of them. The alternative is to *reinstate* an `examples` extra and move `tqdm` back into
+it, which makes the documentation correct by making the package lighter. That is the larger
+change and needs its own argument, because `generators.py:662` and `ensemble.py:231` both
+import `tqdm` from library code today. **Doing nothing is not an option; the current state
+is documentation that names a removed thing.**
 
 # Features — planned work
 
@@ -487,6 +551,112 @@ the key can be a hash and the match check still answers honestly.
 
 ---
 
+## FEAT-10 — Promote the envelope diagnostics out of `examples/`
+
+**Status:** open · **rescoped by measurement, and it shrank** · *graduated from `INBOX-10`,
+2026-08-01* · **overlaps `FEAT-17` §7**
+
+`examples/tools/envelope.py` (360 lines, 8 functions) holds machinery that reads like
+library code and has **two independent consumers already** — the three
+`use_cases/day/day_envelope_*.py` scripts and `diagnostics-overshoot/step2_simulate.py`,
+which imports `day_matrix` across folder boundaries. Two consumers is usually the point at
+which something stops being an example.
+
+### What triage changed: half of it is already in the library
+
+The obvious candidate for promotion was `envelope.synthetic_ensemble` — draw `n`
+independent synthetic days for one calendar date. **`FEAT-15` already shipped that**, and
+nobody noticed:
+
+```python
+# examples/tools/envelope.py:135-139
+day_generator = generator.for_day(month, day)
+return np.vstack([day_generator.gen_day(rng=rng) for _ in range(n)])
+
+# the library equivalent, since 0.3.1 -- (n, 1, 24), squeeze to (n, 24)
+generator.generate_ensemble(start=(month, day), n_days=1, n_realisations=n, seed=seed)
+```
+
+The two differ in **which sampler and which streams**, not in what they mean:
+`generate_ensemble` keys a stream per realisation (`realisation_stream`) instead of sharing
+one `rng`, and it settles `precompute` by realisation count instead of letting `PERF-1`'s
+hidden counter flip mid-ensemble. Both differences are improvements, and the second one is
+precisely the defect `FEAT-17` §1 describes.
+
+**So the first move is not to promote `synthetic_ensemble` but to delete it**, repointing
+the three day scripts and the diagnostic at `generate_ensemble`. That is a small change,
+it removes `envelope.py:139` from `FEAT-17`'s list of callers to update, and it must be
+done with the drawn values compared before and after — different streams mean different
+numbers, and `diagnostics-overshoot/` is the repo's calibration instrument, so a silent
+shift there is exactly the failure `CHORE-12` warns about. Re-run the anchor cell.
+
+### What is left, and it is the harder question
+
+The remainder splits cleanly, and the split is the decision:
+
+| function                                 | kind                                                                | promote?                                                         |
+| :--------------------------------------- | :------------------------------------------------------------------ | :--------------------------------------------------------------- |
+| `day_matrix`, `ensemble_frame`           | reshaping — overlaps `convert_to_daily_wide` and `Ensemble.to_wide` | probably; check for genuine duplication first                    |
+| `_percentiles`, `_daily_aggregate`       | four lines of `numpy` each                                          | not worth a public name                                          |
+| `report_day_stats`                       | prints a formatted comparison                                       | only as a value-returning function; a library should not `print` |
+| `apply_chart_style`, `plot_day_envelope` | opinionated `matplotlib` figures                                    | **the real question**                                            |
+
+**The question to settle before writing anything: does this package ship figures?**
+`sup_plot_lib.py` says yes, so there is precedent — but it is the module nothing else
+imports, and `plot_day_envelope` is considerably more opinionated (a validated
+colour-blind-safe two-hue scheme, a two-panel layout, path effects). Shipping it means
+committing to it as API. **Reshaping helpers and a figure library are two different items;
+decide whether this is one or the other before starting.**
+
+---
+
+## FEAT-14 — A CLI subcommand set
+
+**Status:** open · **low priority** · **gated on `FEAT-4`** · *graduated from `INBOX-14`,
+2026-08-01*
+
+A console-script entry point wrapping the three things a user currently writes a script
+for:
+
+```console
+meteosynth fetch     ...   # adapters.fetch_pvgis / fetch_pvgis_tmy -> a saved MetDataset
+meteosynth generate  ...   # a MetDataset -> a series or an ensemble on disk
+```
+
+### Why it is *low* priority and not *no* priority
+
+The package's audience writes Python — a synthetic year is an input to a yield model, not
+an end product — so nobody is blocked. What a CLI buys is a **reproducible one-line
+invocation**: a command in a paper's methods section, a step in a Makefile or CI job, a way
+to regenerate a dataset without shipping the script that made it. That is real, and it is
+worth having *after* the pieces underneath it stop moving.
+
+### Why `FEAT-4` gates it
+
+Every subcommand's first question is *where does the file go?* — and that is exactly the
+one open question in `FEAT-4` (a working-directory `./data/<source>/` against a user-level
+cache directory). A CLI that guesses differently from the library would be a second answer
+to a question the package has not answered once. **Do not start before `FEAT-4` decides.**
+
+### The scope decision to take when it starts
+
+`fetch` and `generate` are thin wrappers over existing calls and are the whole of the
+value. A `train` subcommand was in the original note and should be **dropped unless
+something changes**: the package has no persisted fitted model to train *into*.
+`DayWindowGenerator` fits lazily per calendar day behind an LRU cache, and persisting fitted
+generators was measured and rejected twice — see `PERF-3` and
+[`rolling-day-window.md`](docs/design/completed/rolling-day-window.md). So `train` would
+either do nothing durable or force a model-serialisation format the package has decided it
+does not want. If a fitted-model artefact is genuinely wanted, that is a design question of
+its own, not a subcommand.
+
+Implementation notes, none of them decided: `argparse` keeps the dependency list unchanged
+and is enough for two subcommands; the entry point is a `[project.scripts]` line in
+`pyproject.toml`; the exit codes matter more than the output formatting, since the point is
+scripted use. Spelling is `meteosynth`, not the `meteosyn` of the original note.
+
+---
+
 ## FEAT-17 — Choose the sampling path explicitly, not by a hidden counter
 
 **Status:** open · **carries a shipped defect** (see §1) · **gated on `CHORE-12`** — this
@@ -512,11 +682,11 @@ that.** It only skips the *eager* build; the lazy counter still fires on the 65t
 builds the table anyway, so 936 of 1000 realisations are drawn from it. Measured, N = 1000,
 `poa_global`, ±7-day window, 365-day year, one attribute:
 
-| what you ask for | what you actually get | cost |
-| :--- | :--- | --: |
-| `precompute=True` | table built up front | **20.2 min** |
-| `precompute=False` | *64 exact draws, then the table anyway* | **36.8 min** |
-| the exact path, genuinely (threshold disabled by hand) | no table ever built | **4.5 h** |
+| what you ask for                                       | what you actually get                   |         cost |
+| :----------------------------------------------------- | :-------------------------------------- | -----------: |
+| `precompute=True`                                      | table built up front                    | **20.2 min** |
+| `precompute=False`                                     | *64 exact draws, then the table anyway* | **36.8 min** |
+| the exact path, genuinely (threshold disabled by hand) | no table ever built                     |    **4.5 h** |
 
 The middle row is the defect: a parameter that reads like an opt-out lands within 1.8× of
 the opt-in and 7× away from what its name implies. Today the only way to get the exact path
@@ -655,12 +825,12 @@ Whether 15, 7 or a sample-size-aware default is right still needs a real evaluat
 window's variance explained by position *within* the window — the cost of pooling a window
 rather than a date:
 
-| date   |    ±7 |    ±15 |
-| :----- | ----: | -----: |
-| 21 Mar | 3.8 % | 10.4 % |
-| 21 Jun | 1.0 % |      — |
-| 21 Sep | **19.3 %** |  — |
-| 21 Dec | 0.4 % |      — |
+| date   |         ±7 |    ±15 |
+| :----- | ---------: | -----: |
+| 21 Mar |      3.8 % | 10.4 % |
+| 21 Jun |      1.0 % |      — |
+| 21 Sep | **19.3 %** |      — |
+| 21 Dec |      0.4 % |      — |
 
 Two findings, neither of which settles the default:
 
@@ -760,12 +930,12 @@ A **calibration test**, not a golden-value test. Fit on the existing `synthetic_
 fixture (two years, a known generative process, all four attributes, already used across
 the suite), draw a few hundred days, and assert against the training pool:
 
-| assertion | suggested tolerance | what it catches |
-| :--- | :--- | :--- |
-| mean of daily total vs pool | within 5 % | a level shift — the `FIX-1` class of defect |
-| sd of daily total vs pool | within 15 % | a dispersion collapse, e.g. a mis-built grid |
-| every value inside support | exact | already covered; keep it here too |
-| no NaN or inf anywhere | exact | the failure mode `FIX-2` produced |
+| assertion                   | suggested tolerance | what it catches                              |
+| :-------------------------- | :------------------ | :------------------------------------------- |
+| mean of daily total vs pool | within 5 %          | a level shift — the `FIX-1` class of defect  |
+| sd of daily total vs pool   | within 15 %         | a dispersion collapse, e.g. a mis-built grid |
+| every value inside support  | exact               | already covered; keep it here too            |
+| no NaN or inf anywhere      | exact               | the failure mode `FIX-2` produced            |
 
 Estimated cost: **one test file, a few tens of seconds**. The tolerances are the whole
 design problem — too tight and it becomes a maintenance tax, too loose and it asserts
@@ -775,6 +945,55 @@ nothing. The numbers above are a starting point, not a measurement.
 different structure — no floor, no degenerate hours — and a defect confined to one of
 them is exactly what a single-attribute test would miss.
 
+## CHORE-19 — Progress feedback is missing where the wait is longest
+
+**Status:** open · low priority · *split from `INBOX-13` on triage, 2026-08-01* · **the
+install half of that note is `FIX-18`**
+
+The library side is fine: `generate_series`, `generate_ensemble` and `write_ensemble` all
+take `progress=`, and the bar persists for an ensemble and does not for a series — the
+right way round, since an ensemble is one walk and a series is one of hundreds.
+
+**The gap is in the scripts.** Surveyed 2026-08-01:
+
+| script                                                        | bar?                                                            |
+| :------------------------------------------------------------ | :-------------------------------------------------------------- |
+| `use_cases/day/day_envelope_{pv,temp,wind}.py`                | yes — `show_progress=True`                                      |
+| `use_cases/year/synthetic_year.py`                            | yes — `progress=True`                                           |
+| `diagnostics-overshoot/step2_simulate.py`, `step3_analyse.py` | yes, nested                                                     |
+| **`use_cases/month/monthly_statistics.py`**                   | **no**                                                          |
+| `concepts/*.py`                                               | no — they fit a month subset and return promptly; correct as is |
+
+### Why `monthly_statistics.py` is the one that matters
+
+It is the **only script with a real wait and no feedback**, and the reason is the same as
+the fix:
+
+```python
+# examples/use_cases/month/monthly_statistics.py:99-101
+[generator.generate_series(start=(MONTH, 1), n_days=n_days, rng=rng).ravel()
+ for _ in range(N_REALISATIONS)]
+```
+
+That is `generate_series` in a loop — **the exact pattern `FEAT-15` exists to replace**,
+refitting all 31 days of May once per realisation. `year/synthetic_year.py` was converted
+when `FEAT-15` landed and this one was missed.
+
+**So the fix is not to add a bar; it is to call `generate_ensemble(start=(MONTH, 1),
+n_days=n_days, n_realisations=N_REALISATIONS, seed=…, progress=True)`**, which walks the
+calendar once and brings the bar with it. `FEAT-15` measured ~77× at N = 1000 on a full
+year; this script's `N_REALISATIONS` is small, so expect much less — **measure it rather
+than quoting that figure.** Note the values will change: per-realisation streams replace
+the shared `rng`. The script reports level, spread and P50/P90 against observed years, so
+compare those before and after rather than the raw arrays.
+
+### The other half of the note, answered
+
+*"Check whether this package is ok to put this functionality at a higher level."* It
+already is: `tqdm` is a core dependency and `progress=` is a library parameter on all three
+entry points. Nothing further is needed there — but see `FIX-18`, because the *documented
+install instructions* still describe the arrangement that preceded it.
+
 ---
 
 # Inbox — not yet triaged
@@ -782,17 +1001,13 @@ them is exactly what a single-attribute test would miss.
 Raw notes land here — refined but not yet costed or classified — and leave by
 graduating into a group above with a real ID, or by being dropped. Nothing stays long.
 
-## INBOX-10 : Move envelope functionality from the examples into the code
-
-`examples/tools/` contains functionality that could be part of the main library as a
-diagnostics or convenience function.
-
-## INBOX-13 : make sure progress bar exists in example scripts and its functional 
-
-`tdqm` is now part of core dependencies. I need to make sure that the code is able to visualize the concepts. Check whether this package is ok to put this functionality of a higher level one. 
+*Empty. Last triaged 2026-08-01: `INBOX-10` → [`FEAT-10`](#feat-10--promote-the-envelope-diagnostics-out-of-examples) ·
+`INBOX-13` → split into [`FIX-18`](#fix-18--the-documented-install-command-fails-there-is-no-examples-extra)
+and [`CHORE-19`](#chore-19--progress-feedback-is-missing-where-the-wait-is-longest), renumbered
+because `13` was already spent ·
+`INBOX-14` → [`FEAT-14`](#feat-14--a-cli-subcommand-set).*
 
 
-## INBOX-14 : Implement cli
+## INBOX - XX : Year argument does not make sense in the output. 
 
-This package could benefit from cli subcommands `meteosyn fetch ...`, `meteosyn train ...` (for training a new model), `meteosyn generate ...`. Blocked by location of data files. 
-
+The synthetic year seems to output a realisation year for a specific year (e.g. 2023), however that does not make any sense for the intended use of the output (i.e. year 2023 has already been realised, a synthetic year is next ot impossible to be year 2023).  Therefore the column does not make any sense and should be removed (at least in the default output -- there may be use cases that handle that but that is not the general use case). Also decide what to do with the year argument. I would hypothesize   a leap_year bool argument would be more intuitive.

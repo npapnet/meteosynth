@@ -5,7 +5,7 @@
 | [`monthly_statistics.py`](monthly_statistics.py) | 12 independent synthetic Mays, all three attributes, reported against the eleven observed Mays | ~3 min |
 
 ```bash
-uv run --extra examples python examples/use_cases/month/monthly_statistics.py
+uv run python examples/use_cases/month/monthly_statistics.py
 ```
 
 Nothing is plotted — the output is a statistics table.

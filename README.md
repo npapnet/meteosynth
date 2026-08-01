@@ -53,19 +53,20 @@ daily P10 runs up to 9 % high. Tracked as `FIX-1`, deliberately deferred, and me
 This package is managed using the `uv` tool. To install the package and its dependencies:
 
 ```bash
-# Sync core dependencies (numpy, pandas, scipy, pvlib, matplotlib, seaborn) + dev group
+# Runtime dependencies + the dev group. Enough to run everything, examples included.
 uv sync
 
-# Add the extras used by the example scripts (tqdm progress bars)
-uv sync --extra examples
+# Optional: Excel export of an ensemble (`ensemble_to_xlsx`) — the only extra there is
+uv sync --extra excel
 ```
 
 `matplotlib` and `seaborn` are core dependencies (the simulators and plotting helpers expose plotting methods directly).
+So is `tqdm`: progress bars are a library feature, not an example one — `generate_series`,
+`generate_ensemble` and `write_ensemble` all take `progress=`. **`uv sync` on its own is
+therefore enough to run every script under [`examples/`](examples/)**; no extra is needed.
 The `dev` dependency group — installed by default with `uv sync` — provides the
 documentation toolchain (Sphinx, furo, Mermaid, MyST) and an interactive
 workflow (`jupyter`, `notebook`, `ipykernel`) for VS Code / JupyterLab.
-The optional `examples` extra adds `tqdm`, needed only by the longer-running
-example scripts; nothing in the package itself requires it.
 
 ---
 
@@ -205,15 +206,15 @@ cached under `examples/data/` and everything generated is written to the git-ign
 uv run python examples/tools/fetch_site_data.py
 
 # Use cases: Heraklion 2010-2020, grouped by time scale (day / month / year)
-uv run --extra examples python examples/use_cases/day/day_envelope_pv.py
-uv run --extra examples python examples/use_cases/day/day_envelope_temp.py
-uv run --extra examples python examples/use_cases/day/day_envelope_wind.py
+uv run python examples/use_cases/day/day_envelope_pv.py
+uv run python examples/use_cases/day/day_envelope_temp.py
+uv run python examples/use_cases/day/day_envelope_wind.py
 
 # An ensemble of synthetic Mays, reported as statistics against the observed years (~3 min)
-uv run --extra examples python examples/use_cases/month/monthly_statistics.py
+uv run python examples/use_cases/month/monthly_statistics.py
 
 # A complete 8760-hour synthetic year of all three attributes, written to CSV (~4 min)
-uv run --extra examples python examples/use_cases/year/synthetic_year.py
+uv run python examples/use_cases/year/synthetic_year.py
 
 # Concepts: exploratory plots, rolling windows, leap days
 uv run python examples/concepts/example_exploratory_analysis.py
@@ -221,7 +222,7 @@ uv run python examples/concepts/example_rolling_window.py
 uv run python examples/concepts/example_leap_year_windows.py                 # no PVGIS needed
 
 # Diagnostics: does the generator reproduce the distribution it was fitted to? (~5 min)
-uv run --extra examples python examples/diagnostics-overshoot/run_all.py
+uv run python examples/diagnostics-overshoot/run_all.py
 ```
 
 See the **Examples** page in the documentation for a full walk-through.

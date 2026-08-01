@@ -12,9 +12,9 @@ climate rather than 200 consecutive days.
 | [`day_envelope_wind.py`](day_envelope_wind.py) | `wind_speed` — wind speed | ~60 s |
 
 ```bash
-uv run --extra examples python examples/use_cases/day/day_envelope_pv.py
-uv run --extra examples python examples/use_cases/day/day_envelope_temp.py
-uv run --extra examples python examples/use_cases/day/day_envelope_wind.py
+uv run python examples/use_cases/day/day_envelope_pv.py
+uv run python examples/use_cases/day/day_envelope_temp.py
+uv run python examples/use_cases/day/day_envelope_wind.py
 ```
 
 ## Three checks, because a generator can pass one and fail another
