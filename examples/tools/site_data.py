@@ -98,12 +98,15 @@ def load_site(
     The examples need both forms: the use cases model ``poa_global``, the concept scripts
     model ``poa_direct``.
 
-    **The cache path is named explicitly rather than discovered**, which is the one thing
-    this does not delegate. ``examples/data/`` holds two overlapping Heraklion records
+    **The file is named explicitly rather than discovered**, which is the one thing this
+    does not delegate. ``examples/data/`` holds two overlapping Heraklion records
     (2005-2023 for the diagnostics, 2010-2020 for the use cases), and letting the default
     discovery choose between them would raise
-    :exc:`~meteosynth.cache.CacheAmbiguityError` -- correctly, since the two are genuinely
-    different training records. Naming the file says which is wanted.
+    :exc:`~meteosynth.store.AmbiguousRecordError` -- correctly, since the two are
+    genuinely different training records. Naming the file says which is wanted.
+
+    It also means these scripts keep their own ``examples/data/`` store regardless of the
+    directory they are run from, which the default ``./data`` would not.
     """
     default_years = HERAKLION_YEARS if site is HERAKLION else PARIS_YEARS
     start_year = default_years[0] if start_year is None else start_year

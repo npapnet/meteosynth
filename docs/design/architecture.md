@@ -32,7 +32,7 @@ The primary application of `meteosynth` is **Monte-Carlo simulation for renewabl
   release history is [`CHANGELOG.md`](../../CHANGELOG.md); open work is
   [`TODOs.md`](../../TODOs.md).
 - **Python Compatibility**: `>=3.10`.
-- **Test suite**: 357 tests across 18 modules, headless by construction.
+- **Test suite**: 439 tests across 19 modules, headless by construction -- `conftest.py` selects the `Agg` backend at import, so no environment variable is needed.
 - **Runtime dependencies**: `numpy`, `pandas`, `scipy`, `pvlib`, `matplotlib`, `seaborn`,
   `tqdm`, `pyarrow` — all required. One optional extra, `excel` (`openpyxl`), for
   `ensemble_to_xlsx` alone.
@@ -228,7 +228,7 @@ meteosynth/
 │       └── variables.py     # VariableSpec registry: support, units, long names
 ├── tests/                   # Automated test suite (pytest)
 │   ├── conftest.py          # Shared fixtures; selects a headless backend at import
-│   └── test_*.py            # 18 modules, 357 tests
+│   └── test_*.py            # 19 modules, 439 tests
 ├── .gitignore
 ├── .python-version          # Interpreter pin for uv
 ├── CHANGELOG.md             # Version release history
@@ -356,10 +356,26 @@ uv sync --extra excel
 
 ### 2. Verification & Testing
 ```bash
-# Run full test suite in headless mode
-$env:MPLBACKEND = "Agg"; uv run pytest    # Windows (PowerShell)
-MPLBACKEND=Agg uv run pytest              # Linux / macOS
+# Run the full test suite. Headless by construction -- no environment to set.
+uv run pytest
 ```
+
+> **`MPLBACKEND=Agg` is not needed for the suite**, and has not been since 0.2.0:
+> `tests/conftest.py` calls `matplotlib.use("Agg")` at import, before any test module
+> pulls in `pyplot`. Verified — the suite passes with the variable unset, and reports the
+> `Agg` backend.
+>
+> **It *is* needed to run an example script non-interactively.** Six of them end in
+> `plt.show()`, and the default backend on a desktop is interactive (`tkagg` here), so an
+> unattended run blocks forever waiting for a window to be closed. Measured: `plt.show()`
+> under `tkagg` never returns; under `Agg` it warns and continues. So use it for CI and
+> scripted runs — and *not* when running an example yourself, where blocking on the
+> figure is the point.
+>
+> ```bash
+> MPLBACKEND=Agg uv run python examples/use_cases/year/synthetic_year.py   # unattended
+> uv run python examples/use_cases/year/synthetic_year.py                  # interactive
+> ```
 
 ### 3. Key Extension Points
 - **Adding a New Environmental Quantity**:

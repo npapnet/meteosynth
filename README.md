@@ -277,10 +277,12 @@ Verify the installation by running the test suite:
 uv run pytest
 ```
 
-280 tests across 16 modules, about nine minutes — most of it fitting KDEs. No environment
+439 tests across 19 modules, about eight minutes — most of it fitting KDEs. No environment
 variables are needed: `tests/conftest.py` selects a headless matplotlib backend at import,
 so the suite is headless by construction under `pytest`, an IDE runner or CI alike. (This
-used to require setting `MPLBACKEND=Agg` by hand; that instruction is obsolete.)
+used to require setting `MPLBACKEND=Agg` by hand; that instruction is obsolete for the
+suite. It is still worth setting to run an *example script* unattended, since several end
+in `plt.show()`, which blocks under an interactive backend.)
 
 ---
 
