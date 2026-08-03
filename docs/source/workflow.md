@@ -168,10 +168,13 @@ Three rules make one download per site enough:
    every later choice — the total is recoverable by summation, exact to 0.01 W/m² against
    a fetched one, and marked as derived in provenance.
 
-Where files go is **`./data/` under the working directory**, and nothing else — the store
-is project-local by construction, with no environment variable or global setting that
-could point it elsewhere. `data_dir=` chooses another folder for one call, `cache=<path>`
-names one exact file, and `cache=False` turns the store off in both directions.
+Where files go is **`data/` under a workspace root**, and nothing else — the store is
+project-local by construction, with no environment variable or global setting that could
+point it elsewhere. The root is the working directory unless a caller says otherwise;
+a script says otherwise with `workspace(__file__)` and gets its own folder however it was
+launched. `data_dir=` chooses another folder for one call (a relative path being read from
+the working directory), `cache=<path>` names one exact file, and `cache=False` turns the
+store off in both directions.
 
 ```{note}
 If two collected records could both answer a request, the package raises

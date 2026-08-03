@@ -16,10 +16,12 @@ This is none of those things.
   numbers -- the file *is* part of the analysis, not an accelerator for it.
 * **It is not transparent.** You name sites, list what you hold, and get an error rather
   than a silent choice when two records could answer the same question.
-* **It is not shared.** :func:`default_data_dir` is ``./data`` under the working
-  directory and nothing else. Two projects side by side keep two independent stores;
-  there is no user-level location, and **no environment variable or global setting** by
-  which one could reach into the other.
+* **It is not shared.** The store is ``data/`` under a **workspace root** -- the folder a
+  script lives in, or the folder a command was run from, chosen by
+  :func:`meteosynth.paths.workspace` and by nothing else. Two projects side by side
+  keep two independent stores; there is no user-level location, and **no environment
+  variable or global setting** by which one could reach into the other.
+  :func:`default_data_dir` is the working-directory case of that rule.
 
 Discovery, as distinct from validation
 --------------------------------------
@@ -79,6 +81,7 @@ from typing import List, Optional, Sequence, Union
 from .constants import INDEX_COLS
 from .dataset import _METADATA_KEY, _pyarrow
 from .provenance import Provenance
+from .paths import DATA_DIR_NAME as _DATA_DIR_NAME
 
 __all__ = [
     "COORD_DP",
@@ -92,10 +95,11 @@ __all__ = [
     "scan",
 ]
 
-#: Folder the store lives in, relative to the working directory. A plain constant, not a
+#: Folder the store lives in, relative to the workspace root. A plain constant, not a
 #: setting: where a project's data sits is a property of the project, so it is chosen by
-#: where you run rather than by anything ambient.
-DATA_DIR_NAME = "data"
+#: where you run rather than by anything ambient. Re-exported from
+#: :mod:`meteosynth.workspace`, which owns the layout, so the name has one definition.
+DATA_DIR_NAME = _DATA_DIR_NAME
 
 #: Decimal places coordinates are compared to. ~11 m: finer than any provider's grid,
 #: coarser than float noise, so 35.3387 and 35.33870000001 are the same site. A false
@@ -194,6 +198,11 @@ def default_data_dir() -> pathlib.Path:
     pathlib.Path
         :data:`DATA_DIR_NAME` under the **current working directory**.
 
+    See Also
+    --------
+    meteosynth.paths.workspace : chooses a root; this is its ``data_dir`` for the
+        no-anchor case.
+
     Notes
     -----
     **There is deliberately no environment variable and no global setting.** Where a
@@ -205,12 +214,21 @@ def default_data_dir() -> pathlib.Path:
 
     The working directory rather than the calling script's folder, because a library
     cannot reliably find its caller's file -- it would have to walk the call stack, which
-    breaks in a REPL, in a notebook and in anything frozen. A script that wants its own
-    folder regardless of where it is run from can be explicit::
+    breaks in a REPL, in a notebook and in anything frozen. **A script that wants its own
+    folder regardless of where it is run from passes its anchor in**::
 
-        fetch_pvgis(..., data_dir=pathlib.Path(__file__).parent / "data")
+        from meteosynth import workspace
+
+        WS = workspace(__file__)
+        fetch_pvgis(..., data_dir=WS.data_dir)
+
+    which is this function's rule with the root chosen explicitly rather than taken from
+    the terminal. This function is defined as ``workspace().data_dir`` so the two cannot
+    drift apart.
     """
-    return pathlib.Path.cwd() / DATA_DIR_NAME
+    from .paths import workspace
+
+    return workspace().data_dir
 
 
 def record_filename(provenance: Provenance) -> str:

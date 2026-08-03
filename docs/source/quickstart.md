@@ -280,16 +280,29 @@ meteosynth.default_data_dir()             # PosixPath('data') under the working 
 print(meteosynth.store.describe_store())  # what you have collected so far
 ```
 
-The store is **`./data` under the folder you are working in**, and nothing else. Two
-projects side by side keep two independent stores; there is no user-level location, no
-environment variable and no global setting, so a script reads the folder it sits next to
-regardless of which shell launched it.
+The store is `data/` under a **workspace root**, and nothing else. Two projects side by
+side keep two independent stores; there is no user-level location, no environment variable
+and no global setting.
+
+The root is the folder you are working in — which is what you mean when you type a
+command. A **script** usually means its own folder instead, and says so:
+
+```python
+from meteosynth import workspace
+
+WS = workspace(__file__)   # this script's folder, however the script was launched
+WS.data_dir                # <script folder>/data   -- collected records
+WS.output("year.csv")      # <script folder>/output -- generated files, created on demand
+```
+
+Passing `__file__` is what makes a script read the same store whichever directory you run
+it from; without it the answer follows your terminal.
 
 Three ways to say otherwise, in increasing order of specificity:
 
 | you want | how |
 | :--- | :--- |
-| a different folder | `data_dir="inputs"` — files are still named for you |
+| a different folder | `data_dir="inputs"` — files are still named for you. A **relative** path is read from the working directory, like any path you type |
 | one specific file | `cache="archive/paris.parquet"` — the path is used verbatim |
 | nothing written or read | `cache=False` |
 

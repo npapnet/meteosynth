@@ -85,7 +85,6 @@ from __future__ import annotations
 
 import json
 import os
-import pathlib
 import platform
 import statistics
 import time
@@ -94,7 +93,7 @@ from datetime import datetime, timezone
 import pandas as pd
 
 import meteosynth
-from meteosynth import store
+from meteosynth import workspace
 from meteosynth.adapters import fetch_pvgis
 from meteosynth.ensemble import write_ensemble
 
@@ -153,14 +152,15 @@ PROGRESS = True
 #: that is recorded before they go. True keeps them for inspection.
 KEEP_PARQUET = False
 
-#: Where results land. Beside this file, not under the working directory -- a benchmark
-#: belongs with the benchmark that produced it.
-_HERE = (
-    pathlib.Path(__file__).resolve().parent
-    if "__file__" in globals()
-    else pathlib.Path.cwd()
-)
-BENCHMARK_DIR = _HERE / "benchmarks"
+#: This script's own folder. Everything it touches -- the training record in `data/`, the
+#: timings in `benchmarks/` -- sits beside it rather than under the working directory: a
+#: benchmark belongs with the benchmark that produced it.
+WS = workspace(globals().get("__file__"))
+
+#: Timing results, and the throwaway parquets whose only interesting property is size.
+#: Its own folder rather than `output/`, because these are machine-specific measurements
+#: compared against each other over time, not a product of a run.
+BENCHMARK_DIR = WS.root / "benchmarks"
 
 #: Hostname, lowercased and stripped to something safe in a filename.
 MACHINE_SLUG = "".join(
@@ -210,9 +210,11 @@ print(f"benchmark version {BENCHMARK_VERSION}, results -> {BENCHMARK_DIR}")
 # collection and every row trains on identical data.
 
 print(f"\nTraining record for {SITE} ({LATITUDE}, {LONGITUDE})")
-print(f"  store: {store.default_data_dir()}")
+print(f"  {WS.describe()}")
 
-dataset = fetch_pvgis(LATITUDE, LONGITUDE, site=SITE, force_refetch=FORCE_REFETCH)
+dataset = fetch_pvgis(
+    LATITUDE, LONGITUDE, site=SITE, data_dir=WS.data_dir, force_refetch=FORCE_REFETCH
+)
 
 print(f"  {dataset.describe_time_range()}, {len(dataset.met_data):,} hourly rows")
 

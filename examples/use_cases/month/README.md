@@ -32,7 +32,7 @@ synthetic-to-observed standard-deviation ratio, while monthly mean **wind spread
 price a tail the record does not support. It is the kind of thing only an ensemble
 reveals; no amount of looking at individual days shows it.
 
-## Written to `examples/output/`
+## Written to `output/`, beside this script
 
 ```
 month_heraklion_05_ensemble.csv     every realisation, long format

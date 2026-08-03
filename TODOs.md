@@ -10,7 +10,7 @@ ordered by how much they block real use; within a group, most significant first.
 
 ## ID allocation
 
-> **Next ID: 21.**
+> **Next ID: 22.**
 
 IDs come from **one counter shared by every category**. The prefix says what an item
 *is*; the number says *which* item it is. Only the number is the identity.
@@ -30,7 +30,7 @@ IDs come from **one counter shared by every category**. The prefix says what an 
    full `PREFIX-N` string is the identity; they are **not** renumbered. From `#10` up, the
    number alone is unambiguous.
 
-**Retired numbers:** `FIX-2`, `FIX-3`, `FIX-18`, `FEAT-4`, `FEAT-5`, `FEAT-13`, `FEAT-15` → [`CHANGELOG.md`](CHANGELOG.md) ·
+**Retired numbers:** `FIX-2`, `FIX-3`, `FIX-18`, `FEAT-4`, `FEAT-5`, `FEAT-13`, `FEAT-15`, `FEAT-21` → [`CHANGELOG.md`](CHANGELOG.md) ·
 `FEAT-1` → superseded 2026-07-29 by `FEAT-13` ·
 `INBOX-1` … `INBOX-7` → [triaged 2026-07-27](CHANGELOG.md#changed) ·
 `INBOX-10`, `INBOX-13`, `INBOX-14` → triaged 2026-08-01, see the note below.
@@ -52,7 +52,7 @@ IDs come from **one counter shared by every category**. The prefix says what an 
 | [FEAT-2](#feat-2--irradiance-pick-one-column-by-availability)                      | Irradiance: pick one column by availability         | (3) open · **now on the default path** |
 | [FEAT-3](#feat-3--chained-series-between-two-dates)                                | Chained series between two dates                    | open · shape decided                   |
 | [FEAT-10](#feat-10--promote-the-envelope-diagnostics-out-of-examples)              | Promote the envelope diagnostics out of `examples/` | open · **rescoped by measurement**     |
-| [FEAT-14](#feat-14--a-cli-subcommand-set)                                          | A CLI subcommand set                                | open · low priority · **unblocked**    |
+| [FEAT-14](#feat-14--a-cli-subcommand-set)                                          | A CLI subcommand set, and its name                  | open · low priority · **unblocked**    |
 | [FEAT-17](#feat-17--choose-the-sampling-path-explicitly-not-by-a-hidden-counter)   | Choose the sampling path explicitly                 | open · **carries a shipped defect**    |
 | [VISION-1](#vision-1--ingest-sources-other-than-pvgis)                             | Ingest sources other than PVGIS                     | future                                 |
 | [CHORE-1](#chore-1--default-window-half-width-needs-a-real-evaluation)             | Default window half-width needs evaluating          | open                                   |
@@ -87,7 +87,7 @@ notice if it were wrong. Do not take `PERF-16` before `CHORE-12`.
 deleting that call site entirely in favour of `generate_ensemble`. Whichever runs first
 should check the other — doing `FEAT-10` first removes one of `FEAT-17`'s two callers.
 
-**FEAT-14 (the CLI) is unblocked** — `FEAT-4` landed 2026-08-01 and settled where files
+**FEAT-14 (the CLI) is unblocked** — `FEAT-4` and `FEAT-21` landed and settled where files
 go, which was its only gate. Still last of the features by priority, not by dependency.
 
 ---
@@ -542,7 +542,8 @@ decide whether this is one or the other before starting.**
 
 ## FEAT-14 — A CLI subcommand set
 
-**Status:** open · **low priority** · **unblocked** — `FEAT-4` landed 2026-08-01 ·
+**Status:** open · **low priority** · **unblocked** — `FEAT-4` landed 2026-08-01 and
+`FEAT-21` 2026-08-03 ·
 *graduated from `INBOX-14`, 2026-08-01*
 
 A console-script entry point wrapping the three things a user currently writes a script
@@ -553,6 +554,19 @@ meteosynth fetch     ...   # adapters.fetch_pvgis / fetch_pvgis_tmy -> a saved M
 meteosynth generate  ...   # a MetDataset -> a series or an ensemble on disk
 ```
 
+### The first line of this item: what the command is called
+
+**The spelling is not settled.** This item and the design docs say `meteosynth`; the
+request that prompted `FEAT-21` said `meteogen`. Settle it before writing the
+`[project.scripts]` line in `pyproject.toml`, because the entry-point name is the one part
+of a CLI that cannot be changed later without breaking every invocation already written
+into a Makefile, a CI job or a paper's methods section.
+
+Nothing else turns on it — the workspace rule, `data/`, `output/` and the relative-path
+rule are identical either way, and `meteosynth.workspace()` is what either spelling would
+call. That is why it was left open when `FEAT-21` landed rather than argued in the
+abstract: a name tends to get re-argued once the thing exists.
+
 ### Why it is *low* priority and not *no* priority
 
 The package's audience writes Python — a synthetic year is an input to a yield model, not
@@ -561,15 +575,19 @@ invocation**: a command in a paper's methods section, a step in a Makefile or CI
 to regenerate a dataset without shipping the script that made it. That is real, and it is
 worth having *after* the pieces underneath it stop moving.
 
-### What `FEAT-4` already built for it
+### What `FEAT-4` and `FEAT-21` already built for it
 
-Every subcommand's first question is *where does the file go?*, and that is now answered:
-`./data/` under the working directory, with no environment variable able to override it.
-So the CLI does not have to invent a policy, only expose one. `meteosynth.store` supplies the pieces:
+Every subcommand's first question is *where does the file go?*, and that is now answered
+in full: `data/` and `output/` under the folder the command was run from, with no
+environment variable able to override it. So the CLI does not have to invent a policy,
+only expose one — `workspace()` with no argument *is* the command case, and it is the same
+call the example scripts make with `__file__`. `meteosynth.store` and `meteosynth.paths`
+supply the pieces:
 
 | need | already there |
 | :--- | :--- |
-| where files go | `store.default_data_dir()`, or `data_dir=` for one call |
+| where files go | `workspace()` — `.data_dir`, `.output_dir`, `.output(name)` |
+| honouring `--data-dir` | `pathlib.Path(args.data_dir)`; a relative one resolves against the working directory, which is the documented rule (`FEAT-21` §2) |
 | what a file is called | `store.record_filename` / `store.record_path_for` |
 | `--list` | `store.describe_store()` |
 | resolving `--site heraklion` | `store.resolve`, and `fetch_pvgis(site=...)` on top of it |
@@ -593,9 +611,8 @@ does not want. If a fitted-model artefact is genuinely wanted, that is a design 
 its own, not a subcommand.
 
 Implementation notes, none of them decided: `argparse` keeps the dependency list unchanged
-and is enough for two subcommands; the entry point is a `[project.scripts]` line in
-`pyproject.toml`; the exit codes matter more than the output formatting, since the point is
-scripted use. Spelling is `meteosynth`, not the `meteosyn` of the original note.
+and is enough for two subcommands; the exit codes matter more than the output formatting,
+since the point is scripted use.
 
 ---
 

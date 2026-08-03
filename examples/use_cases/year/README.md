@@ -66,7 +66,7 @@ is why "make the ensemble bigger" is cheap while "make the year longer" is not.
   depend on how many realisations were requested — with one documented exception, the
   sampler switch above 64 realisations, noted in `generate_ensemble`'s docstring.
 
-## Written to `examples/output/`
+## Written to `output/`, beside this script
 
 ```
 ensemble_heraklion_2023_n10.parquet   the record: 10 realisations x 8760 h x 3 attributes,

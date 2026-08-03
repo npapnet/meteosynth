@@ -1,4 +1,4 @@
-Status: accepted · Author: Antigravity Agent · Date: 2026-07-27 · Last revised: 2026-08-01
+Status: accepted · Author: Antigravity Agent · Date: 2026-07-27 · Last revised: 2026-08-03
 
 # Package Architecture & Design Overview
 
@@ -32,7 +32,7 @@ The primary application of `meteosynth` is **Monte-Carlo simulation for renewabl
   release history is [`CHANGELOG.md`](../../CHANGELOG.md); open work is
   [`TODOs.md`](../../TODOs.md).
 - **Python Compatibility**: `>=3.10`.
-- **Test suite**: 439 tests across 19 modules, headless by construction -- `conftest.py` selects the `Agg` backend at import, so no environment variable is needed.
+- **Test suite**: 447 tests across 20 modules, headless by construction -- `conftest.py` selects the `Agg` backend at import, so no environment variable is needed.
 - **Runtime dependencies**: `numpy`, `pandas`, `scipy`, `pvlib`, `matplotlib`, `seaborn`,
   `tqdm`, `pyarrow` — all required. One optional extra, `excel` (`openpyxl`), for
   `ensemble_to_xlsx` alone.
@@ -41,10 +41,13 @@ The primary application of `meteosynth` is **Monte-Carlo simulation for renewabl
     format (schema v1), validated on construction whatever route the data arrived by, and
     round-trippable to parquet without loss. Provenance is a field on it, not a property
     of a fetcher's cache path.
-  - **Collect once per site, project-locally.** Downloads are stored in `./data` beside the work and found again by
+  - **Collect once per site, project-locally.** Downloads are stored in a `data/` folder
+    beside the work and found again by
     provenance rather than by filename; a wider record answers a narrower request by
     narrowing (`get_period_subset`), so one download serves every training period. When
-    two records could answer, the package refuses and lists them.
+    two records could answer, the package refuses and lists them. *Which* folder is "beside
+    the work" is answered by [Where Files Go](#where-files-go): the script's own folder for
+    a script, the working directory for a command.
   - **Decoupled Variable Specs**: Physical constraints (`support`, `units`, `long_name`) are registered centrally in `meteosynth.variables` independently of dataset-specific column names. A column is modellable if and only if it has a spec.
   - **Date-Indexed Pair Alignment**: Daily wide-format restructuring keys transition pairs on calendar dates, eliminating silent mispairing bugs caused by dataset re-sorting.
   - **Lazy LRU-Cached Generators**: `DayWindowGenerator` dynamically instantiates daily models behind an LRU cache, permitting full-year simulations without excessive memory consumption. The cache serves *repeated* requests for the same day (`gen_day`); an ordered calendar walk visits each slot once and gets no hits from it.
@@ -141,12 +144,67 @@ flowchart TD
 
 ---
 
+## Where Files Go
+
+Read this before adding a script, or a subcommand, that writes anything. The rationale is
+[`FEAT-21`](completed/FEAT-21-workspace-and-file-locations.md).
+
+### The rule
+
+**One workspace root per run**, with two folders hanging off it — `data/` for what was
+collected, `output/` for what was generated, both git-ignored. What the root *is* depends
+on how the code was entered, and on nothing else:
+
+| entry point | workspace root |
+| :--- | :--- |
+| a script — `workspace(__file__)` | **the script's own folder**, whatever directory it was launched from |
+| a command — `workspace()` | **the working directory**, the folder you are standing in. What `FEAT-14`'s subcommands will call |
+| a notebook or REPL, where there is no script file | the working directory, via the `workspace(globals().get("__file__"))` idiom |
+| an explicitly given path — `data_dir=`, `--data-dir` | that path; a **relative** one is read from the **working directory**, never from the workspace root |
+
+The last row is the one that surprises people, and it is deliberate: a path someone typed
+should mean what their shell would make of it. The workspace root applies only when the
+caller says nothing.
+
+`meteosynth.paths` owns this. `store.default_data_dir()` is defined as
+`workspace().data_dir`, so the store and the rule cannot drift; **there is still no
+environment variable and no global setting**, for the reason `store.py` gives at length.
+
+The module is `paths` while the function is `workspace` on purpose — a `workspace.py`
+exporting a `workspace()` would leave `meteosynth.workspace` bound to the function and the
+module unreachable by import.
+
+### Records are found by provenance, not by filename
+
+The package's normal path, and — since each example folder holds a single-record store —
+what the examples now demonstrate rather than work around:
+
+- **Give a folder, not a file.** `fetch_pvgis(..., data_dir=...)` scans parquet footers and
+  matches on what each record says it is — site, period, columns. A wider record answers a
+  narrower request; two that both answer raise `AmbiguousRecordError` rather than one being
+  chosen.
+- **Naming a file (`cache=<path>`) is the exception, and needs a reason.** The examples all
+  named files until `FEAT-21`, because the shared `examples/data/` held two overlapping
+  Heraklion records and discovery would rightly refuse to choose. One store per folder
+  removed the collision and with it the workaround.
+- **The reason that survives is collection method, not site or period.**
+  `diagnostics-overshoot/` keeps `cache=` because its record is fetched with
+  `components=False` — PVGIS's own `poa_global` rather than the summed components — and
+  `StoredRecord.holds` (`store.py:177-185`) deliberately treats those as interchangeable,
+  exact to the provider's rounding. That equivalence is right for the package and wrong for
+  a measuring instrument whose findings are cited by date. It is the only `cache=` left in
+  `examples/`, and `tests/test_store.py` pins the behaviour it guards against.
+
+So: **name a file when *how* a record was collected is load-bearing; give a folder when
+only its site and period are.**
+
+---
+
 ## Repository & Folder Structure
 
 ```
 meteosynth/
 ├── .github/                 # CI/CD workflows and automated actions
-├── data/                    # Cached sample data (git-ignored)
 ├── docs/                    # Package documentation root
 │   ├── Makefile / make.bat  # Sphinx build entry points
 │   ├── build/               # Generated HTML output target (git-ignored)
@@ -155,6 +213,7 @@ meteosynth/
 │   │   ├── architecture.md  # [This File] Architecture & current state overview
 │   │   ├── FEAT-2-FEAT-1-column-resolution-and-provenance.md  # superseded; record only
 │   │   └── completed/       # Implemented design specs archive
+│   │       ├── FEAT-21-workspace-and-file-locations.md  # where data/ and output/ live
 │   │       ├── FEAT-15-ensemble-generation.md      # one calendar walk per ensemble
 │   │       ├── FEAT-13-met-dataset-format.md       # MetDataset & schema v1
 │   │       ├── PERF-1-precomputed-conditional-quantiles.md  # the cached sampling path
@@ -173,14 +232,12 @@ meteosynth/
 │       └── conf.py
 ├── examples/                # Runnable scripts, split by purpose (see examples/README.md)
 │   ├── README.md            # Index: what each folder and script is for
-│   ├── data/                # Cached PVGIS downloads (git-ignored)
-│   ├── output/              # Generated series and figures (git-ignored)
+│   │                        # Each script folder below holds its own data/ (collected) and
+│   │                        # output/ (generated), both git-ignored. See "Where Files Go".
 │   ├── tools/               # Shared helpers imported by the scripts; not importable from src/
 │   │   ├── __init__.py
-│   │   ├── site_data.py     # Sites, cached PVGIS records, output paths
-│   │   ├── envelope.py      # Observed-vs-synthetic comparison and figures
-│   │   ├── fetch_site_data.py  # Runnable: prime the download cache
-│   │   └── migrate_cache.py    # Runnable: convert legacy CSV caches to parquet
+│   │   ├── site_data.py     # Site definitions and loading; takes the caller's Workspace
+│   │   └── envelope.py      # Observed-vs-synthetic comparison and figures
 │   ├── concepts/            # How the package behaves (Paris 2011-2012)
 │   │   ├── example_exploratory_analysis.py
 │   │   ├── example_leap_year_windows.py
@@ -213,6 +270,7 @@ meteosynth/
 │       ├── __init__.py      # Package public API exports
 │       ├── adapters.py      # Data source schema adapters
 │       ├── store.py         # The project data store: footer scan, containment, refusal
+│       ├── paths.py         # Workspace: which folder is the root of this run, and its data/ + output/
 │       ├── constants.py     # Index column definitions & attribute groups
 │       ├── dataset.py       # MetDataset: schema, validation, parquet I/O, slicing
 │       ├── day_window.py    # Circular 366-day calendar arithmetic
@@ -257,7 +315,8 @@ meteosynth/
 | [`dataset.py`](../../src/meteosynth/dataset.py) | **The core noun.** `MetDataset` owns schema v1 — canonical dtypes, calendar validity, unique `(year, month, day, hour)`, sorted order — enforced on construction whatever route the data arrived by. Structural defects raise; out-of-support values are clipped and counted. Lossless parquet `save`/`load` with provenance embedded as key-value metadata, plus `read_csv`/`to_csv` as explicitly lossy interchange. Also carries the wide-format pivot (`convert_to_daily_wide`) and the training slices (`get_month_subset`, `get_day_window_subset`). |
 | [`provenance.py`](../../src/meteosynth/provenance.py) | `Provenance`: source, site, coordinates, period, fetch date. Always present (`source="user"` when nobody claimed one). `from_dict` tolerates unknown keys so a newer writer cannot strand a reader — the opposite of `schema_version`, which refuses a future file rather than guessing. |
 | [`adapters.py`](../../src/meteosynth/adapters.py) | Optional collection helpers, returning a `MetDataset` with provenance filled in. `fetch_pvgis` (hourly, plane-of-array) and `fetch_pvgis_tmy` (TMY, horizontal) call `pvlib.iotools` and **cache by default**, matching an existing cache against the request rather than trusting its path — a mismatch is `CacheMismatchError`, not a silent wrong answer. A default fetch takes the provider's widest range (`probe_year_range`) and keeps every column returned, deriving `poa_global` by summation; `start`/`end` select a view. `normalise` maps provider columns to canonical names per source; `validate_support` remains as an opt-in hard check for callers who would rather be stopped than repaired. |
-| [`store.py`](../../src/meteosynth/store.py) | **The project's data store, and discovery as distinct from validation.** `adapters` answers *"is this named file the one I want?"*; this answers *"which file in this folder is?"* — `scan` and `resolve` read provenance and column names from parquet **footers** (1.3 ms/file against 113 ms to load), so no manifest or sidecar is needed and nothing can drift from the records it describes. Owns `default_data_dir` — `./data` under the working directory, **with no environment variable or global setting**, so two projects keep independent stores — the filename convention, and `period_contains`, the single definition of "wide enough" called by both this module and `adapters`. Refuses with `AmbiguousRecordError` when several records answer, rather than choosing. Deliberately not called a *cache*: the records are not expendable (a provider may revise its archive), not transparent, and not shared. |
+| [`store.py`](../../src/meteosynth/store.py) | **The project's data store, and discovery as distinct from validation.** `adapters` answers *"is this named file the one I want?"*; this answers *"which file in this folder is?"* — `scan` and `resolve` read provenance and column names from parquet **footers** (1.3 ms/file against 113 ms to load), so no manifest or sidecar is needed and nothing can drift from the records it describes. Owns `default_data_dir` — `./data` under the working directory, **with no environment variable or global setting**, so two projects keep independent stores — the filename convention, and `period_contains`, the single definition of "wide enough" called by both this module and `adapters`. Refuses with `AmbiguousRecordError` when several records answer, rather than choosing. Deliberately not called a *cache*: the records are not expendable (a provider may revise its archive), not transparent, and not shared. Note `StoredRecord.holds` treats a record carrying all three POA components as able to answer a `poa_global` request — right for the package, and the one case where naming a file is still correct (see [Where Files Go](#where-files-go)). |
+| [`paths.py`](../../src/meteosynth/paths.py) | Answers one question: *which folder is the root of this run?* The script's own folder when given `__file__`, the working directory when given nothing. `Workspace.data_dir` / `.output_dir` hang `data/` and `output/` off it. Exists so the rule is written once rather than copied into every script and again into the CLI; `store.default_data_dir()` is defined as `workspace().data_dir`. Module named `paths` while the function is `workspace`, so neither shadows the other. See [`completed/FEAT-21-workspace-and-file-locations.md`](completed/FEAT-21-workspace-and-file-locations.md). |
 | [`constants.py`](../../src/meteosynth/constants.py) | Package constants including index column names (`year`, `month`, `day`, `hour`) and shipped attribute sets. |
 | [`sup_plot_lib.py`](../../src/meteosynth/sup_plot_lib.py) | Visual diagnostic functions for plotting fitted 2D KDE surfaces, conditional CDFs, and synthetic time-series comparisons. |
 | [`markov_implementations/`](../../src/meteosynth/markov_implementations) | Alternative Markov models: `ContinuousMarkovChainSimulator` (binned 1D KDE) and `MarkovChainSimulatorDiscrete` (binned matrix transitions). |

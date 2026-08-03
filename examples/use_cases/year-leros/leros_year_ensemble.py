@@ -10,18 +10,21 @@ It produces data and nothing else. No plots, no diagnostics, no observed-vs-synt
 comparison: those live in `use_cases/year/` and `diagnostics-overshoot/`. Run this when
 you want the file a yield model, a storage-sizing run or a demand simulation consumes.
 
-Everything lands in the **default data store**, `./data/` under the directory you run
-from:
+Everything lands **beside this file**, whichever directory you launch it from:
 
-    data/pvgis_hourly_leros_2005_2023.parquet     the training record, fetched once
-    data/ensemble_leros_2023_n<N>.parquet         the generated ensemble
+    <this folder>/data/pvgis_hourly_leros_2005_2023.parquet   the training record, once
+    <this folder>/output/ensemble_leros_2023_n<N>.parquet     the generated ensemble
+
+`data/` for what was collected and `output/` for what was generated, both git-ignored.
+The folder is chosen by ``meteosynth.workspace(__file__)`` -- the script's own location,
+not the terminal's -- so running this from the repository root and from this directory
+give the same answer and neither downloads twice.
 
 The training record holds every quantity PVGIS returned, so switching ``ATTRS`` to
 another variable needs no refetch -- it is already on disk.
 
-Both are parquet and both sit in one folder, but they cannot be confused: a training
-record and an ensemble carry different parquet metadata keys, so `meteosynth.store` lists
-only the former and `read_ensemble` accepts only the latter.
+The split by lifetime is the point: a record is collected once and re-read, an ensemble is
+rewritten every run. Delete `output/` freely; `data/` is the input a result was built on.
 
 On runtime -- and what does *not* drive it
 -----------------------------------------
@@ -74,9 +77,15 @@ from __future__ import annotations
 
 import time
 
-from meteosynth import read_ensemble, store
+from meteosynth import read_ensemble, workspace
 from meteosynth.adapters import fetch_pvgis
 from meteosynth.ensemble import write_ensemble
+
+#: This script's own folder. `data/` and `output/` sit beside it, wherever the script is
+#: launched from -- so this example is self-contained and can be copied anywhere.
+#: `globals().get` rather than `__file__` because this also runs as `#%%` cells, where
+#: there is no file and the working directory is the honest answer.
+WS = workspace(globals().get("__file__"))
 
 #%%
 # --- Configuration -------------------------------------------------------------------
@@ -131,14 +140,16 @@ PROGRESS = True
 
 #%%
 # --- 1. The training record ----------------------------------------------------------
-# No cache= and no data_dir=, so this uses the default store: ./data/ under the working
-# directory. The first run downloads every year PVGIS serves for the site; later runs
-# find that same record by provenance and never touch the network.
+# `data_dir=` names the folder, not the file: the first run downloads every year PVGIS
+# serves for the site, and later runs find that same record by reading the provenance
+# inside it. No filename is constructed here, and none needs to be.
 
 print(f"Training record for {SITE} ({LATITUDE}, {LONGITUDE})")
-print(f"  store: {store.default_data_dir()}")
+print(f"  {WS.describe()}")
 
-dataset = fetch_pvgis(LATITUDE, LONGITUDE, site=SITE, force_refetch=FORCE_REFETCH)
+dataset = fetch_pvgis(
+    LATITUDE, LONGITUDE, site=SITE, data_dir=WS.data_dir, force_refetch=FORCE_REFETCH
+)
 #%%
 print(f"  {dataset.describe_time_range()}, {len(dataset.met_data):,} hourly rows")
 print(f"  columns: {list(dataset.variables)}")
@@ -156,7 +167,7 @@ if missing:
 # Streamed one calendar day at a time, so peak memory holds a day rather than the whole
 # ensemble. This is the long step.
 
-ensemble_path = store.default_data_dir() / (
+ensemble_path = WS.output(
     f"ensemble_{SITE}_{REFERENCE_YEAR}_n{N_REALISATIONS}.parquet"
 )
 

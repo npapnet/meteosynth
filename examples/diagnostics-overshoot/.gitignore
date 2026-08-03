@@ -1,3 +1,10 @@
+# This example collects its training record into `data/` and writes what it generates
+# into `output/`. Both are re-creatable by re-running the script, so neither is committed.
+# The repository-wide .gitignore already excludes them at any depth; this file says so
+# here, where someone reading the folder will see it.
+data/
+output/
+
 # Raw per-realisation dumps and figures are regenerable from the scripts, and large.
 # FINDINGS.md and results/summary_*.csv are committed: they are the evidence FIX-1 cites.
 results/raw/

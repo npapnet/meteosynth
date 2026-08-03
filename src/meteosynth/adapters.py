@@ -461,7 +461,14 @@ def fetch_pvgis(
     data_dir : str or Path, optional
         The project's data store. Defaults to
         :func:`meteosynth.store.default_data_dir` -- ``./data`` under the working
-        directory. Ignored when ``cache`` names a file or is ``False``.
+        directory. **A relative path here is read from the working directory**, not from
+        the calling script's folder, because a path you typed should mean what your shell
+        would make of it. A script that wants its own folder says so with
+        :func:`meteosynth.paths.workspace`::
+
+            fetch_pvgis(..., data_dir=workspace(__file__).data_dir)
+
+        Ignored when ``cache`` names a file or is ``False``.
     force_refetch : bool, optional
         Ignore any cache, fetch, and overwrite. The explicit way to repurpose a path.
     site : str, optional

@@ -22,6 +22,7 @@ from meteosynth.adapters import (
 )
 from meteosynth.store import AmbiguousRecordError
 from meteosynth.dataset import MetDataset
+from meteosynth.paths import workspace
 from meteosynth.provenance import Provenance
 
 #: What the stubbed PVGIS claims to serve. Requests outside it fail the way the real API
@@ -747,6 +748,47 @@ def test_data_dir_relocates_the_store_per_call(stub_pvlib, tmp_path):
         "pvgis_hourly_paris_2005_2023.parquet"
     ]
     assert not (tmp_path / "data").exists(), "the default was not used"
+
+
+def test_a_relative_data_dir_is_read_from_the_working_directory(stub_pvlib, tmp_path, monkeypatch):
+    """A path you typed means what your shell would make of it -- `FEAT-21`, rule 2.
+
+    Not the calling script's folder: `workspace(__file__)` is how a script asks for that,
+    and it is a different question from "where does `inputs` point?".
+    """
+    monkeypatch.chdir(tmp_path)
+    fetch_pvgis(48.86, 2.35, site="paris", data_dir="inputs")
+
+    assert (tmp_path / "inputs" / "pvgis_hourly_paris_2005_2023.parquet").exists()
+
+
+def test_a_relative_data_dir_follows_the_working_directory(stub_pvlib, tmp_path, monkeypatch):
+    """The same relative path in two directories is two stores, not one."""
+    for project in ("project_a", "project_b"):
+        (tmp_path / project).mkdir()
+        monkeypatch.chdir(tmp_path / project)
+        stub_pvlib.clear()
+        fetch_pvgis(48.86, 2.35, site="paris", data_dir="inputs")
+
+    assert (tmp_path / "project_a" / "inputs" / "pvgis_hourly_paris_2005_2023.parquet").exists()
+    assert (tmp_path / "project_b" / "inputs" / "pvgis_hourly_paris_2005_2023.parquet").exists()
+
+
+def test_a_workspace_data_dir_does_not_follow_the_working_directory(stub_pvlib, tmp_path, monkeypatch):
+    """How a script pins its own folder: hand `fetch_pvgis` a workspace's `data_dir`.
+
+    The end-to-end form of `FEAT-21`'s point -- the record lands beside the script whether
+    or not the terminal is standing there.
+    """
+    script_dir = tmp_path / "use_case"
+    script_dir.mkdir()
+    (tmp_path / "launched_from").mkdir()
+    monkeypatch.chdir(tmp_path / "launched_from")
+
+    fetch_pvgis(48.86, 2.35, site="paris", data_dir=workspace(script_dir).data_dir)
+
+    assert (script_dir / "data" / "pvgis_hourly_paris_2005_2023.parquet").exists()
+    assert not (tmp_path / "launched_from" / "data").exists()
 
 
 def test_a_record_is_found_again_in_the_same_data_dir(stub_pvlib, tmp_path):
