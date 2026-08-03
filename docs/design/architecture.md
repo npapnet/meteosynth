@@ -242,6 +242,9 @@ meteosynth/
 │   │   ├── example_exploratory_analysis.py
 │   │   ├── example_leap_year_windows.py
 │   │   └── example_rolling_window.py
+│   ├── benchmark/           # What drives generation time? Answered in ratios, ~9-10 min
+│   │   ├── leros_timing_benchmark.py  # Four sweeps: N scaling, attribute split, noise, additivity
+│   │   └── benchmarks/      # Per-machine JSON history, git-ignored and compared run to run
 │   ├── diagnostics-overshoot/  # The repo's measuring instrument, not a demonstration
 │   │   ├── README.md            # What it is, how the comparison works, what guards it
 │   │   ├── PLAN.md              # Why it is measured this way; pre-registered decision rule
