@@ -6,7 +6,7 @@ Status: accepted · Author: Antigravity Agent · Date: 2026-07-27 · Last revise
 
 This document provides a concise, high-level architectural overview of the `meteosynth` package. It serves as the primary entry point and technical orientation for human developers and AI agents working on, extending, or integrating `meteosynth`.
 
-- **In Scope**: Package essence, domain focus, current architectural state (v0.3.1), component boundaries, data flow pipelines, folder tree structure, module responsibilities, and developer onboarding workflows.
+- **In Scope**: Package essence, domain focus, current architectural state (v0.3.2), component boundaries, data flow pipelines, folder tree structure, module responsibilities, and developer onboarding workflows.
 - **Out of Scope**: Detailed API parameter references (see Sphinx docs in [`docs/source/`](../source/)), end-user quickstart tutorials (see [`README.md`](../../README.md)), and historical design decision records (see [`docs/design/completed/`](completed/)).
 
 ---
@@ -26,9 +26,9 @@ The primary application of `meteosynth` is **Monte-Carlo simulation for renewabl
 
 ---
 
-## Current Package State (v0.3.1)
+## Current Package State (v0.3.2)
 
-- **Version**: `0.3.1`, released 2026-07-31 (managed via `uv` and `hatchling`). The
+- **Version**: `0.3.2`, released 2026-08-03 (managed via `uv` and `hatchling`). The
   release history is [`CHANGELOG.md`](../../CHANGELOG.md); open work is
   [`TODOs.md`](../../TODOs.md).
 - **Python Compatibility**: `>=3.10`.
@@ -242,8 +242,9 @@ meteosynth/
 │   │   ├── example_exploratory_analysis.py
 │   │   ├── example_leap_year_windows.py
 │   │   └── example_rolling_window.py
-│   ├── benchmark/           # What drives generation time? Answered in ratios, ~9-10 min
-│   │   ├── leros_timing_benchmark.py  # Four sweeps: N scaling, attribute split, noise, additivity
+│   ├── benchmark/           # What drives generation time? Answered in ratios, ~14 min
+│   │   ├── README.md        # The design: four sweeps, two controls, the runtime budget
+│   │   ├── leros_timing_benchmark.py  # N scaling, attribute split, noise floor, additivity
 │   │   └── benchmarks/      # Per-machine JSON history, git-ignored and compared run to run
 │   ├── diagnostics-overshoot/  # The repo's measuring instrument, not a demonstration
 │   │   ├── README.md            # What it is, how the comparison works, what guards it

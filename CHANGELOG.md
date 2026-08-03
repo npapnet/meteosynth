@@ -19,14 +19,20 @@ Two project-specific conventions:
 
 ---
 
-## Current sprint — unreleased
+## [0.3.2] — 2026-08-03
 
-**Collect once per site, then work locally.** A download used to be cached only if you
-named a file for it, and a cached file only answered the exact period it was fetched for —
-so a second training range meant a second download, and finding either meant remembering
-its filename. Now `fetch_pvgis` takes the provider's widest range by default, keeps every
-column it returns, caches it, and finds it again by **provenance**. A record covering
-2005–2023 answers a request for 2010–2020 by narrowing. 418 tests passing (was 357).
+**Collect once per site, then work locally — and put the files where the work is.** Two
+changes, in that order. A download used to be cached only if you named a file for it, and
+a cached file only answered the exact period it was fetched for, so a second training
+range meant a second download and finding either meant remembering its filename. Now
+`fetch_pvgis` takes the provider's widest range by default, keeps every column it returns,
+caches it, and finds it again by **provenance** — a record covering 2005–2023 answers a
+request for 2010–2020 by narrowing (`FEAT-4`).
+
+That settled *how* a record is found; `FEAT-21` settled *where*. A run has one workspace
+root — the script's own folder when you run a script, the folder you are standing in when
+you run a command — with `data/` for what was collected and `output/` for what was
+generated hanging off it. **447 tests passing (was 357).**
 
 ### Added
 
@@ -66,6 +72,34 @@ column it returns, caches it, and finds it again by **provenance**. A record cov
 
 ### Changed
 
+- **The timing benchmark runs in a third of the time, and moved to `examples/benchmark/`.**
+  It answered "does cost scale with the number of realisations?" by running all three
+  attributes at three realisation counts — two-thirds of its budget spent establishing, at
+  triple price, a fact its own measurements explain: cost is **attributes × days and
+  independent of N**, because it is dominated by a per-day-per-attribute grid build. The
+  N sweep now runs the cheapest attribute alone, the additivity control that used to fall
+  out of it for free is an explicit fourth sweep (`CROSS_CHECK`), and `N_DAYS` dropped
+  from 5. **24.7 min → ~14 min with every ratio intact**: N scaling 1.03× → 0.98×, the
+  attribute split 3.24× → 3.36×/3.37×, additivity 1.001 → 1.014.
+
+  Shortening the runs cost sensitivity at first — Sweep C's noise floor, the threshold
+  every comparison is judged by, widened from 2.0 % to 7.7 % at three days — but a control
+  bought it back. **The first generation in a process runs ~12 % slow**, and it landed on
+  Sweep A's baseline, which every other Sweep A row is divided by, making 100× the
+  realisations read as *0.91× the time*. It was invisible while Sweep A's rows were 330 s
+  of three-attribute work. A discarded warm-up run (`WARMUP`) now pays it off for ~3 % of
+  the total, which straightened Sweep A to 1.00× / 1.01× / 1.07× and — since Sweep C's
+  first repeat carried the same overhead — **restored the 2.0 % floor**. The shipped
+  build measures the original sensitivity at 57 % of the original runtime.
+
+  Also recorded for the first time: **the first calendar *day* of every run costs ~16 %
+  more** than the rest, reproducibly, which inflates absolute seconds-per-day at low
+  `N_DAYS` but cancels in every ratio.
+
+  `BENCHMARK_VERSION` 2.1 → 4.1, so the history comparison refuses earlier files outright
+  rather than reporting a phantom regression against a different measurement. The
+  rationale moved out of the module docstring into `examples/benchmark/README.md`, leaving
+  the docstring at a quarter of its length.
 - **Every example folder is self-contained** (`FEAT-21`). A script collects its record
   into a `data/` folder beside itself and writes into an `output/` folder beside itself,
   both git-ignored, replacing the shared `examples/data/` and `examples/output/`. The

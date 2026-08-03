@@ -15,7 +15,7 @@ ordered by how much they block real use; within a group, most significant first.
 
 ## ID allocation
 
-> **Next ID: 22.**
+> **Next ID: 23.**
 
 IDs come from **one counter shared by every category**. The prefix says what an item
 *is*; the number says *which* item it is. Only the number is the identity.
@@ -56,6 +56,7 @@ IDs come from **one counter shared by every category**. The prefix says what an 
 | [FEAT-10](#feat-10--promote-the-envelope-diagnostics-out-of-examples) | Promote the envelope diagnostics | open · first move is a deletion |
 | [FEAT-3](#feat-3--chained-series-between-two-dates) | Chained series between two dates | open · shape decided · independent |
 | [FEAT-2](#feat-2--is-a-derived-irradiance-column-distinguishable-from-a-fetched-one) | Is a derived column distinguishable? | (3) open · needed before VISION-1 |
+| [CHORE-22](#chore-22--the-benchmarks-noise-floor-measures-the-wrong-scatter) | Benchmark noise floor measures the wrong scatter | open · low priority |
 | [CHORE-1](#chore-1--default-window-half-width-needs-a-real-evaluation) | Default window half-width | open · half measured |
 | [PERF-16](#perf-16--the-grid-build-not-the-draws) | The grid **build**, not the draws | open · **after CHORE-12** |
 | [PERF-11](#perf-11--grid-node-spacing-may-want-to-depend-on-the-variable) | Grid node spacing per variable | open · low priority |
@@ -602,6 +603,38 @@ N = 1000 on a full year; this script's realisation count is 12, so expect much l
 streams replace the shared `rng`: the script reports level, spread and P50/P90 against
 observed years, so compare those rather than raw arrays. **Take this with `FEAT-10`**,
 which deletes the same pattern from `examples/tools/envelope.py`.
+
+## CHORE-22 — The benchmark's noise floor measures the wrong scatter
+
+**Status:** open · low priority · *raised 2026-08-03 from a demonstrated false positive*
+
+`examples/benchmark/` derives its change threshold from `NOISE_REPEATS` runs of one
+configuration **back to back inside a single process** — same thermal state, same
+background load. It then applies that threshold to comparisons **between** runs, hours or
+days apart, where exactly those things differ.
+
+The gap is demonstrated twice over, both on 2026-08-03:
+
+- **Between runs.** One run flagged **9 of 9 rows as changed**, by 3.2–11.9 % and all in
+  the same direction, against a within-run CV of 0.17 % that had floored the threshold at
+  2.0 %. Nothing in the package had changed; the earlier run had been sharing the machine.
+- **Within one run.** The additivity control — Sweep D, the longest row and the last —
+  read 0.921 where two earlier runs read 1.001 and 1.007, and `wind_speed` moved 6 % in
+  the same run. The floor is measured on short cheap rows early in the process and cannot
+  see drift fourteen minutes in.
+
+The second case is the sharper one: a threshold measured from back-to-back repeats says
+nothing about rows separated by ten minutes of sustained load, and Sweep D is the row that
+suffers most because it is the one that runs last.
+
+An instrument that reports a change when nothing changed gets ignored when something does
+— the same argument `CHORE-12` makes about the test suite.
+
+Options, none costed: estimate a between-run term from the JSON history the folder already
+keeps; report the delta without a verdict when only cross-session data exists; record
+machine load with each run and decline the comparison when it differs materially; or —
+cheapest, and it addresses the within-run half — interleave the sweeps so no single row is
+always last, or repeat Sweep C at the end and take the spread across both.
 
 ## CHORE-1 — Default window half-width needs a real evaluation
 
