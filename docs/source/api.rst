@@ -58,6 +58,18 @@ layer the data has to pass through.
    :undoc-members:
    :show-inheritance:
 
+The Download Cache
+------------------
+
+Finding a collected record without opening it. Where the adapters' cache lives, what a
+cached file is called, and which one answers a given request -- read from parquet
+footers, so a folder is discoverable without loading any data.
+
+.. automodule:: meteosynth.store
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 Variables and the Spec Registry
 -------------------------------
 

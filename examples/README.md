@@ -41,7 +41,7 @@ question**, because the scale changes what can be asked — see
 | [`use_cases/day/day_envelope_temp.py`](use_cases/day/day_envelope_temp.py) | The same, for **air temperature** | ~60 s |
 | [`use_cases/day/day_envelope_wind.py`](use_cases/day/day_envelope_wind.py) | The same, for **wind speed** | ~60 s |
 | [`use_cases/month/monthly_statistics.py`](use_cases/month/monthly_statistics.py) | What does an ensemble of synthetic Mays say, and does it vary like the real ones? | ~3 min |
-| [`use_cases/year/synthetic_year.py`](use_cases/year/synthetic_year.py) | Generate a complete 8760-hour year of all three and write it out | ~4 min |
+| [`use_cases/year/synthetic_year.py`](use_cases/year/synthetic_year.py) | Generate an ensemble of 10 complete 8760-hour years of all three and write them out | **~45–50 min** |
 
 ```bash
 uv run python examples/use_cases/day/day_envelope_pv.py

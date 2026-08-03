@@ -27,10 +27,30 @@ import pandas as pd
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 from meteosynth import MetDataset, Provenance          # noqa: E402
-from tools.site_data import DATA_DIR, SITES, add_poa_global   # noqa: E402
+from tools.site_data import DATA_DIR, SITES           # noqa: E402
 
 #: What the legacy filenames looked like: pvgis_hourly_<site>_<start>_<end>.csv
 LEGACY = re.compile(r"^pvgis_hourly_(?P<site>[a-z_]+)_(?P<start>\d{4})_(?P<end>\d{4})$")
+
+#: The three plane-of-array components whose sum is ``poa_global``.
+POA_COMPONENTS = ["poa_direct", "poa_sky_diffuse", "poa_ground_diffuse"]
+
+
+def add_poa_global(data: pd.DataFrame) -> pd.DataFrame:
+    """Add ``poa_global`` as the sum of the three plane-of-array components.
+
+    Lives here rather than in ``site_data.py`` because this is now its only caller:
+    :func:`meteosynth.adapters.fetch_pvgis` derives the total itself, so nothing on the
+    live path reconstructs one by hand any more. What remains is this legacy conversion,
+    where the components are all a stored CSV has.
+    """
+    missing = [col for col in POA_COMPONENTS if col not in data.columns]
+    if missing:
+        raise KeyError(
+            f"cannot build poa_global: missing {missing}. Fetch with components=True."
+        )
+    data["poa_global"] = data[POA_COMPONENTS].sum(axis=1)
+    return data
 
 
 def convert(path: pathlib.Path) -> pathlib.Path | None:

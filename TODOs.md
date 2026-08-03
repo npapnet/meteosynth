@@ -10,7 +10,7 @@ ordered by how much they block real use; within a group, most significant first.
 
 ## ID allocation
 
-> **Next ID: 20.**
+> **Next ID: 21.**
 
 IDs come from **one counter shared by every category**. The prefix says what an item
 *is*; the number says *which* item it is. Only the number is the identity.
@@ -30,7 +30,7 @@ IDs come from **one counter shared by every category**. The prefix says what an 
    full `PREFIX-N` string is the identity; they are **not** renumbered. From `#10` up, the
    number alone is unambiguous.
 
-**Retired numbers:** `FIX-2`, `FIX-3`, `FEAT-5`, `FEAT-13`, `FEAT-15` → [`CHANGELOG.md`](CHANGELOG.md) ·
+**Retired numbers:** `FIX-2`, `FIX-3`, `FIX-18`, `FEAT-4`, `FEAT-5`, `FEAT-13`, `FEAT-15` → [`CHANGELOG.md`](CHANGELOG.md) ·
 `FEAT-1` → superseded 2026-07-29 by `FEAT-13` ·
 `INBOX-1` … `INBOX-7` → [triaged 2026-07-27](CHANGELOG.md#changed) ·
 `INBOX-10`, `INBOX-13`, `INBOX-14` → triaged 2026-08-01, see the note below.
@@ -49,12 +49,10 @@ IDs come from **one counter shared by every category**. The prefix says what an 
 | [PERF-11](#perf-11--grid-node-spacing-may-want-to-depend-on-the-variable)          | Grid node spacing may want to be per-variable       | open · low priority                    |
 | [PERF-16](#perf-16--draw-samples-in-batches-across-realisations)                   | Draw samples in batches across realisations         | open · **after CHORE-12**              |
 | [FIX-1](#fix-1--the-overcast-tail-is-under-produced)                               | The overcast tail is under-produced                 | open · **deferred**                    |
-| [FIX-18](#fix-18--the-documented-install-command-fails-there-is-no-examples-extra) | `uv sync --extra examples` fails — no such extra    | open · **cheap, user-facing**          |
-| [FEAT-2](#feat-2--irradiance-pick-one-column-by-availability)                      | Irradiance: pick one column by availability         | (3) and (4) open                       |
+| [FEAT-2](#feat-2--irradiance-pick-one-column-by-availability)                      | Irradiance: pick one column by availability         | (3) open · **now on the default path** |
 | [FEAT-3](#feat-3--chained-series-between-two-dates)                                | Chained series between two dates                    | open · shape decided                   |
-| [FEAT-4](#feat-4--downloads-cache-by-default-keyed-by-sourcesiteperiod)            | Downloads cache by default                          | open · **next**                        |
 | [FEAT-10](#feat-10--promote-the-envelope-diagnostics-out-of-examples)              | Promote the envelope diagnostics out of `examples/` | open · **rescoped by measurement**     |
-| [FEAT-14](#feat-14--a-cli-subcommand-set)                                          | A CLI subcommand set                                | open · low priority · **after FEAT-4** |
+| [FEAT-14](#feat-14--a-cli-subcommand-set)                                          | A CLI subcommand set                                | open · low priority · **unblocked**    |
 | [FEAT-17](#feat-17--choose-the-sampling-path-explicitly-not-by-a-hidden-counter)   | Choose the sampling path explicitly                 | open · **carries a shipped defect**    |
 | [VISION-1](#vision-1--ingest-sources-other-than-pvgis)                             | Ingest sources other than PVGIS                     | future                                 |
 | [CHORE-1](#chore-1--default-window-half-width-needs-a-real-evaluation)             | Default window half-width needs evaluating          | open                                   |
@@ -69,16 +67,14 @@ IDs come from **one counter shared by every category**. The prefix says what an 
 Groups are ordered by how much they block real use; this is the order to *take them in*,
 which is not the same thing.
 
-1. **FIX-18** first, whenever anything else is being touched — it is a two-line change,
-   and until it lands the documented first command a new user types does not work.
-2. **FEAT-4**, which now needs only its location decision — `FEAT-13` landed and
-   defines everything else it consumes.
-3. **CHORE-4** last, so the docs pass is one edit rather than two. **FIX-18** and
-   **CHORE-19** both touch docs and examples, so fold them in if `CHORE-4` gets there
-   first — but do not hold `FIX-18` for it.
-4. **FIX-1**, whenever the cost is worth paying — the tail deficit is real, measured and
+1. **CHORE-4** last, so the docs pass is one edit rather than two. **CHORE-19** touches
+   docs and examples too, so fold it in if `CHORE-4` gets there first.
+2. **FIX-1**, whenever the cost is worth paying — the tail deficit is real, measured and
    documented, and it does not affect any quantity the package currently advertises.
    **CHORE-1** stands on its own rather than folded into it; half of it is measured.
+3. **FEAT-2 (3)** moved up when `FEAT-4` landed: a summed `poa_global` is now what a
+   default fetch produces, so "is a derived column distinguishable from a fetched one?"
+   stopped being a question about the examples.
 
 **FEAT-3** is independent of all of it and can slot in anywhere.
 
@@ -91,8 +87,8 @@ notice if it were wrong. Do not take `PERF-16` before `CHORE-12`.
 deleting that call site entirely in favour of `generate_ensemble`. Whichever runs first
 should check the other — doing `FEAT-10` first removes one of `FEAT-17`'s two callers.
 
-**FEAT-14 (the CLI) is last of the features**, and gated on `FEAT-4`: a command-line
-`fetch` has to know where files go before it can have a sensible default.
+**FEAT-14 (the CLI) is unblocked** — `FEAT-4` landed 2026-08-01 and settled where files
+go, which was its only gate. Still last of the features by priority, not by dependency.
 
 ---
 
@@ -382,52 +378,13 @@ The padding is gone from both the 1D and 2D paths.
 
 ---
 
-## FIX-18 — The documented install command fails: there is no `examples` extra
-
-**Status:** open · **cheap** · **Impact:** a new user's second command · *split from
-`INBOX-13` on triage, 2026-08-01*
-
-Four documents instruct the reader to install an optional extra that does not exist.
-Verified 2026-08-01:
-
-```console
-$ uv sync --extra examples
-error: Extra `examples` is not defined in the project's `optional-dependencies` table
-```
-
-`pyproject.toml` declares exactly one extra, `excel`. **`tqdm` moved into the core
-`dependencies` list** (`pyproject.toml:26`), which is what made the extra redundant — the
-documentation was simply never updated to match, so it now names something that was
-removed rather than something merely unnecessary.
-
-### Where it appears
-
-| file                                          | what it says                                                      |
-| :-------------------------------------------- | :---------------------------------------------------------------- |
-| `README.md:59`, `:67`                         | "Add the extras used by the example scripts (tqdm progress bars)" |
-| `docs/source/quickstart.md:14`                | same line                                                         |
-| `examples/diagnostics-overshoot/README.md:69` | "Progress bars need `tqdm`, which is in the `examples` extra"     |
-| `docs/design/architecture.md`                 | **fixed 2026-08-01**, with a pointer to this item                 |
-
-### The fix, and the one decision in it
-
-Delete the instruction and the sentences justifying it: `uv sync` alone is now sufficient
-to run everything under `examples/`.
-
-**Decide first whether that is the outcome wanted.** `tqdm`, `matplotlib` and `seaborn` are
-all hard runtime dependencies of a library whose core job — fitting KDEs and sampling — needs
-none of them. The alternative is to *reinstate* an `examples` extra and move `tqdm` back into
-it, which makes the documentation correct by making the package lighter. That is the larger
-change and needs its own argument, because `generators.py:662` and `ensemble.py:231` both
-import `tqdm` from library code today. **Doing nothing is not an option; the current state
-is documentation that names a removed thing.**
-
 # Features — planned work
 
 
 ## FEAT-2 — Irradiance: pick one column by availability
 
-**Status:** **(1) and (2) landed** with `FEAT-13` · (3) and (4) open · **Needed before VISION-1**
+**Status:** **(1) and (2) landed** with `FEAT-13` · (3) open and **more pressing since
+`FEAT-4`** · (4) partly landed with `FEAT-15` · **Needed before VISION-1**
 
 Questions (1) and (2) landed with `FEAT-13` — see
 [the design doc](docs/design/completed/FEAT-13-met-dataset-format.md).
@@ -474,16 +431,22 @@ one-attribute-at-a-time engine, not a bug.
 
 1. ~~How is the column selected?~~ **Landed:** `MetDataset.irradiance_column`.
 2. ~~What does a cache hold?~~ **Landed:** `MetDataset.provenance`.
-3. **Is a derived column distinguishable from a fetched one?** Today it is not.
-   `adapters.py` states the position — *"the column name is the provenance… no metadata
-   sidecar"* — and a summed `poa_global` sits byte-for-byte alongside a fetched one.
-   `Provenance.notes` can *say* so — `examples/tools/site_data.py` writes exactly that
-   — but nothing enforces or checks it, so a summed `poa_global` still sits byte-for-byte
-   alongside a fetched one. Options: a dedicated provenance field, a naming convention, or
-   accepting that the summation is exact enough for PVGIS. It will matter for a provider
-   where the identity does not hold exactly.
+3. **Is a derived column distinguishable from a fetched one?** Today, only by a sentence.
+   **`FEAT-4` made this the default path rather than an example's quirk**: `fetch_pvgis`
+   now collects the three components and derives `poa_global` by summation on every
+   ordinary call, writing `"poa_global summed from the three POA components"` into
+   `Provenance.notes`. So a derived total is *stated* but not *typed* — nothing enforces
+   the note, nothing checks it, and a summed `poa_global` still sits byte-for-byte
+   alongside a fetched one (`components=False`).
+
+   Options unchanged: a dedicated provenance field, a naming convention, or accepting
+   that the summation is exact enough. The measured difference is **0.01 W/m²**, PVGIS's
+   own two-decimal rounding — so nothing is wrong today. It will matter for a provider
+   where the identity does not hold exactly, which is `VISION-1`.
 4. **What does a saved synthetic series carry?** Whatever answers (1) and (3) for observed
    data should ride along with generated data, or a result cannot be audited later.
+   *(Partly landed with `FEAT-15`: `write_ensemble` embeds the source dataset's
+   provenance, so a derived total is at least carried through to the output.)*
 
 ---
 
@@ -515,39 +478,6 @@ Three things the implementation has to settle, all visible in that loop:
   `n_days` must skip it the same way or the series overshoots by a day.
 - **`end=(2, 29)` with `include_feb29=False`** should raise, mirroring the existing
   guard on `start=(2, 29)` at `generators.py:660-664`.
-
----
-
-## FEAT-4 — Downloads cache by default, keyed by source/site/period
-
-**Status:** open · **next** · **Impact:** the user-facing half of caching
-
-`FEAT-13` landed the *record* — what a saved dataset says about itself, and the match
-predicate `fetch_pvgis` now applies to a warm cache. This is the **policy**: for any
-fetch, not only the examples,
-
-- write to a cache subfolder **by default**, rather than only when handed an explicit
-  path,
-- **skip the download** when a matching file already exists,
-- unless a `force_refetch` says otherwise.
-
-Tracked separately because the two fail differently: a wrong record is a correctness bug,
-a wrong default location is an ergonomics one. Only the location question is left.
-
-**Assessment, post-FEAT-13.** `adapters.fetch_pvgis` still caches only when handed an
-explicit `cache=` path — but it now *matches* what it finds there against the request and
-raises `CacheMismatchError` rather than answering the wrong question, so the correctness
-half is done. The examples still keep their own cache (`examples/tools/site_data.py`,
-keyed by filename via `Site.cache_path`), which this would subsume.
-
-**The one open question: where does a default cache live?** `./data/<source>/` relative to
-the working directory (matches the examples, visible, easy to git-ignore) or a user-level
-cache directory (survives moving between projects, but is invisible from any of them)?
-**Decide this before starting** — it shapes the API surface, and `FEAT-13` deliberately
-did not settle it.
-
-Note the file *name* no longer has to encode anything: provenance is inside the file, so
-the key can be a hash and the match check still answers honestly.
 
 ---
 
@@ -612,8 +542,8 @@ decide whether this is one or the other before starting.**
 
 ## FEAT-14 — A CLI subcommand set
 
-**Status:** open · **low priority** · **gated on `FEAT-4`** · *graduated from `INBOX-14`,
-2026-08-01*
+**Status:** open · **low priority** · **unblocked** — `FEAT-4` landed 2026-08-01 ·
+*graduated from `INBOX-14`, 2026-08-01*
 
 A console-script entry point wrapping the three things a user currently writes a script
 for:
@@ -631,12 +561,24 @@ invocation**: a command in a paper's methods section, a step in a Makefile or CI
 to regenerate a dataset without shipping the script that made it. That is real, and it is
 worth having *after* the pieces underneath it stop moving.
 
-### Why `FEAT-4` gates it
+### What `FEAT-4` already built for it
 
-Every subcommand's first question is *where does the file go?* — and that is exactly the
-one open question in `FEAT-4` (a working-directory `./data/<source>/` against a user-level
-cache directory). A CLI that guesses differently from the library would be a second answer
-to a question the package has not answered once. **Do not start before `FEAT-4` decides.**
+Every subcommand's first question is *where does the file go?*, and that is now answered:
+`./data/` under the working directory, with no environment variable able to override it.
+So the CLI does not have to invent a policy, only expose one. `meteosynth.store` supplies the pieces:
+
+| need | already there |
+| :--- | :--- |
+| where files go | `store.default_data_dir()`, or `data_dir=` for one call |
+| what a file is called | `store.record_filename` / `store.record_path_for` |
+| `--list` | `store.describe_store()` |
+| resolving `--site heraklion` | `store.resolve`, and `fetch_pvgis(site=...)` on top of it |
+| refusing an ambiguous folder | `store.AmbiguousRecordError`, with the candidates in the message |
+
+**A `generate` subcommand's `--site`/`--years` map onto `fetch_pvgis`'s own arguments**,
+so the CLI is genuinely thin. The remaining work is argument parsing, exit codes, and
+deciding what `generate` writes by default (`write_ensemble`'s parquet is the obvious
+answer, and `ensemble_to_xlsx` the obvious `--format` alternative).
 
 ### The scope decision to take when it starts
 
@@ -868,12 +810,13 @@ the convenience is worth that.
 
 ## CHORE-4 — Bring `docs/source/` back in line with the repo
 
-**Status:** open · **Do last**, after CHORE-3 and FEAT-4
+**Status:** open · **Do last**, after CHORE-3 · *`FEAT-4` no longer gates it — it landed
+2026-08-01 and brought its own documentation with it*
 
 **Assessment.** Less drift than feared. `quickstart.md` and `workflow.md` already describe
 π(x₀), `generate_series` and the registry; every stale example path has been repointed;
-and the PVGIS sections of `quickstart.md` and `README.md` have been rewritten, with
-`adapters` and `variables` added to `api.rst`. What is left:
+the PVGIS sections of `quickstart.md` and `README.md` have been rewritten; and `adapters`,
+`variables` and `cache` all have `api.rst` entries. What is left:
 
 - **`examples.md` still carries the walk-through inline.** Now that every use-case
   folder has its own README, decide whether that page should summarise and link rather
@@ -947,8 +890,8 @@ them is exactly what a single-attribute test would miss.
 
 ## CHORE-19 — Progress feedback is missing where the wait is longest
 
-**Status:** open · low priority · *split from `INBOX-13` on triage, 2026-08-01* · **the
-install half of that note is `FIX-18`**
+**Status:** open · low priority · *split from `INBOX-13` on triage, 2026-08-01* · the
+install half of that note was `FIX-18`, which **landed 2026-08-01**
 
 The library side is fine: `generate_series`, `generate_ensemble` and `write_ensemble` all
 take `progress=`, and the bar persists for an ensemble and does not for a series — the
@@ -991,8 +934,9 @@ compare those before and after rather than the raw arrays.
 
 *"Check whether this package is ok to put this functionality at a higher level."* It
 already is: `tqdm` is a core dependency and `progress=` is a library parameter on all three
-entry points. Nothing further is needed there — but see `FIX-18`, because the *documented
-install instructions* still describe the arrangement that preceded it.
+entry points. Nothing further is needed there. The documentation that still described the
+arrangement preceding it was `FIX-18`, and it landed — so what remains here is only the
+script-side gap above.
 
 ---
 
@@ -1001,13 +945,13 @@ install instructions* still describe the arrangement that preceded it.
 Raw notes land here — refined but not yet costed or classified — and leave by
 graduating into a group above with a real ID, or by being dropped. Nothing stays long.
 
-*Empty. Last triaged 2026-08-01: `INBOX-10` → [`FEAT-10`](#feat-10--promote-the-envelope-diagnostics-out-of-examples) ·
-`INBOX-13` → split into [`FIX-18`](#fix-18--the-documented-install-command-fails-there-is-no-examples-extra)
+*Last triaged 2026-08-01: `INBOX-10` → [`FEAT-10`](#feat-10--promote-the-envelope-diagnostics-out-of-examples) ·
+`INBOX-13` → split into `FIX-18` (landed, see [`CHANGELOG.md`](CHANGELOG.md))
 and [`CHORE-19`](#chore-19--progress-feedback-is-missing-where-the-wait-is-longest), renumbered
 because `13` was already spent ·
-`INBOX-14` → [`FEAT-14`](#feat-14--a-cli-subcommand-set).*
+`INBOX-14` → [`FEAT-14`](#feat-14--a-cli-subcommand-set). One item raised since, below.*
 
 
-## INBOX - XX : Year argument does not make sense in the output. 
+## INBOX-20 : Year argument does not make sense in the output. 
 
 The synthetic year seems to output a realisation year for a specific year (e.g. 2023), however that does not make any sense for the intended use of the output (i.e. year 2023 has already been realised, a synthetic year is next ot impossible to be year 2023).  Therefore the column does not make any sense and should be removed (at least in the default output -- there may be use cases that handle that but that is not the general use case). Also decide what to do with the year argument. I would hypothesize   a leap_year bool argument would be more intuitive.

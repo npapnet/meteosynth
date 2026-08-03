@@ -32,7 +32,7 @@ The primary application of `meteosynth` is **Monte-Carlo simulation for renewabl
   release history is [`CHANGELOG.md`](../../CHANGELOG.md); open work is
   [`TODOs.md`](../../TODOs.md).
 - **Python Compatibility**: `>=3.10`.
-- **Test suite**: 357 tests across 18 modules, headless by construction.
+- **Test suite**: 439 tests across 19 modules, headless by construction -- `conftest.py` selects the `Agg` backend at import, so no environment variable is needed.
 - **Runtime dependencies**: `numpy`, `pandas`, `scipy`, `pvlib`, `matplotlib`, `seaborn`,
   `tqdm`, `pyarrow` — all required. One optional extra, `excel` (`openpyxl`), for
   `ensemble_to_xlsx` alone.
@@ -41,6 +41,10 @@ The primary application of `meteosynth` is **Monte-Carlo simulation for renewabl
     format (schema v1), validated on construction whatever route the data arrived by, and
     round-trippable to parquet without loss. Provenance is a field on it, not a property
     of a fetcher's cache path.
+  - **Collect once per site, project-locally.** Downloads are stored in `./data` beside the work and found again by
+    provenance rather than by filename; a wider record answers a narrower request by
+    narrowing (`get_period_subset`), so one download serves every training period. When
+    two records could answer, the package refuses and lists them.
   - **Decoupled Variable Specs**: Physical constraints (`support`, `units`, `long_name`) are registered centrally in `meteosynth.variables` independently of dataset-specific column names. A column is modellable if and only if it has a spec.
   - **Date-Indexed Pair Alignment**: Daily wide-format restructuring keys transition pairs on calendar dates, eliminating silent mispairing bugs caused by dataset re-sorting.
   - **Lazy LRU-Cached Generators**: `DayWindowGenerator` dynamically instantiates daily models behind an LRU cache, permitting full-year simulations without excessive memory consumption. The cache serves *repeated* requests for the same day (`gen_day`); an ordered calendar walk visits each slot once and gets no hits from it.
@@ -208,6 +212,7 @@ meteosynth/
 │   └── meteosynth/          # Core Python library package
 │       ├── __init__.py      # Package public API exports
 │       ├── adapters.py      # Data source schema adapters
+│       ├── store.py         # The project data store: footer scan, containment, refusal
 │       ├── constants.py     # Index column definitions & attribute groups
 │       ├── dataset.py       # MetDataset: schema, validation, parquet I/O, slicing
 │       ├── day_window.py    # Circular 366-day calendar arithmetic
@@ -223,7 +228,7 @@ meteosynth/
 │       └── variables.py     # VariableSpec registry: support, units, long names
 ├── tests/                   # Automated test suite (pytest)
 │   ├── conftest.py          # Shared fixtures; selects a headless backend at import
-│   └── test_*.py            # 18 modules, 357 tests
+│   └── test_*.py            # 19 modules, 439 tests
 ├── .gitignore
 ├── .python-version          # Interpreter pin for uv
 ├── CHANGELOG.md             # Version release history
@@ -251,7 +256,8 @@ meteosynth/
 | [`day_window.py`](../../src/meteosynth/day_window.py) | Pure-function circular 366-day `all_leap` calendar arithmetic (`day_slot`, `window_slots`, `circular_delta`, `slot_to_month_day`). Enables New Year wrapping and leap-year treatment without pandas timestamp overhead. |
 | [`dataset.py`](../../src/meteosynth/dataset.py) | **The core noun.** `MetDataset` owns schema v1 — canonical dtypes, calendar validity, unique `(year, month, day, hour)`, sorted order — enforced on construction whatever route the data arrived by. Structural defects raise; out-of-support values are clipped and counted. Lossless parquet `save`/`load` with provenance embedded as key-value metadata, plus `read_csv`/`to_csv` as explicitly lossy interchange. Also carries the wide-format pivot (`convert_to_daily_wide`) and the training slices (`get_month_subset`, `get_day_window_subset`). |
 | [`provenance.py`](../../src/meteosynth/provenance.py) | `Provenance`: source, site, coordinates, period, fetch date. Always present (`source="user"` when nobody claimed one). `from_dict` tolerates unknown keys so a newer writer cannot strand a reader — the opposite of `schema_version`, which refuses a future file rather than guessing. |
-| [`adapters.py`](../../src/meteosynth/adapters.py) | Optional collection helpers, returning a `MetDataset` with provenance filled in. `fetch_pvgis` (hourly, plane-of-array) and `fetch_pvgis_tmy` (TMY, horizontal) call `pvlib.iotools` and cache to parquet, matching an existing cache against the request rather than trusting its path — a mismatch is `CacheMismatchError`, not a silent wrong answer. `normalise` maps provider columns to canonical names per source; `validate_support` remains as an opt-in hard check for callers who would rather be stopped than repaired. |
+| [`adapters.py`](../../src/meteosynth/adapters.py) | Optional collection helpers, returning a `MetDataset` with provenance filled in. `fetch_pvgis` (hourly, plane-of-array) and `fetch_pvgis_tmy` (TMY, horizontal) call `pvlib.iotools` and **cache by default**, matching an existing cache against the request rather than trusting its path — a mismatch is `CacheMismatchError`, not a silent wrong answer. A default fetch takes the provider's widest range (`probe_year_range`) and keeps every column returned, deriving `poa_global` by summation; `start`/`end` select a view. `normalise` maps provider columns to canonical names per source; `validate_support` remains as an opt-in hard check for callers who would rather be stopped than repaired. |
+| [`store.py`](../../src/meteosynth/store.py) | **The project's data store, and discovery as distinct from validation.** `adapters` answers *"is this named file the one I want?"*; this answers *"which file in this folder is?"* — `scan` and `resolve` read provenance and column names from parquet **footers** (1.3 ms/file against 113 ms to load), so no manifest or sidecar is needed and nothing can drift from the records it describes. Owns `default_data_dir` — `./data` under the working directory, **with no environment variable or global setting**, so two projects keep independent stores — the filename convention, and `period_contains`, the single definition of "wide enough" called by both this module and `adapters`. Refuses with `AmbiguousRecordError` when several records answer, rather than choosing. Deliberately not called a *cache*: the records are not expendable (a provider may revise its archive), not transparent, and not shared. |
 | [`constants.py`](../../src/meteosynth/constants.py) | Package constants including index column names (`year`, `month`, `day`, `hour`) and shipped attribute sets. |
 | [`sup_plot_lib.py`](../../src/meteosynth/sup_plot_lib.py) | Visual diagnostic functions for plotting fitted 2D KDE surfaces, conditional CDFs, and synthetic time-series comparisons. |
 | [`markov_implementations/`](../../src/meteosynth/markov_implementations) | Alternative Markov models: `ContinuousMarkovChainSimulator` (binned 1D KDE) and `MarkovChainSimulatorDiscrete` (binned matrix transitions). |
@@ -343,17 +349,33 @@ uv sync
 uv sync --extra excel
 ```
 
-> **There is no `examples` extra.** `tqdm` became a core runtime dependency, so `uv sync`
-> alone is enough to run every script under `examples/`. `README.md`,
-> `docs/source/quickstart.md` and `examples/diagnostics-overshoot/README.md` still
-> instruct `uv sync --extra examples`, which fails outright — tracked as `FIX-18`.
+> **There is no `examples` extra.** `tqdm` is a core runtime dependency, so `uv sync`
+> alone is enough to run every script under `examples/`. The documentation used to
+> instruct `uv sync --extra examples`, which failed outright; corrected across 13 files
+> by `FIX-18`.
 
 ### 2. Verification & Testing
 ```bash
-# Run full test suite in headless mode
-$env:MPLBACKEND = "Agg"; uv run pytest    # Windows (PowerShell)
-MPLBACKEND=Agg uv run pytest              # Linux / macOS
+# Run the full test suite. Headless by construction -- no environment to set.
+uv run pytest
 ```
+
+> **`MPLBACKEND=Agg` is not needed for the suite**, and has not been since 0.2.0:
+> `tests/conftest.py` calls `matplotlib.use("Agg")` at import, before any test module
+> pulls in `pyplot`. Verified — the suite passes with the variable unset, and reports the
+> `Agg` backend.
+>
+> **It *is* needed to run an example script non-interactively.** Six of them end in
+> `plt.show()`, and the default backend on a desktop is interactive (`tkagg` here), so an
+> unattended run blocks forever waiting for a window to be closed. Measured: `plt.show()`
+> under `tkagg` never returns; under `Agg` it warns and continues. So use it for CI and
+> scripted runs — and *not* when running an example yourself, where blocking on the
+> figure is the point.
+>
+> ```bash
+> MPLBACKEND=Agg uv run python examples/use_cases/year/synthetic_year.py   # unattended
+> uv run python examples/use_cases/year/synthetic_year.py                  # interactive
+> ```
 
 ### 3. Key Extension Points
 - **Adding a New Environmental Quantity**:

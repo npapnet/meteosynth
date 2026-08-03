@@ -31,12 +31,15 @@ from tools.site_data import (
 )
 
 
-def report(site, years, data) -> None:
-    """One line per cached record: what it holds and what can be modelled from it."""
-    modellable = [c for c in data.columns
-                  if c.startswith("poa") or c in ("temp_air", "wind_speed")]
-    print(f"  {site.name:18} {years[0]}-{years[1]}  {len(data):6d} hourly rows  "
-          f"columns: {modellable}")
+def report(site, years, dataset) -> None:
+    """One line per stored record: what it holds and what can be modelled from it.
+
+    ``dataset`` is a :class:`~meteosynth.MetDataset`, not a frame -- so ``variables``
+    answers "what can be modelled" directly, rather than re-deriving it from a column
+    name prefix as this used to.
+    """
+    print(f"  {site.name:18} {years[0]}-{years[1]}  "
+          f"{len(dataset.met_data):6d} hourly rows  columns: {list(dataset.variables)}")
 
 
 def main(refresh: bool = False) -> None:
@@ -47,7 +50,7 @@ def main(refresh: bool = False) -> None:
     paris = load_site(PARIS, *PARIS_YEARS, refresh=refresh)
     report(PARIS, PARIS_YEARS, paris)
 
-    print(f"\nCache lives in {HERAKLION.cache_path(*HERAKLION_YEARS).parent} "
+    print(f"\nRecords live in {HERAKLION.cache_path(*HERAKLION_YEARS).parent} "
           f"(git-ignored).")
 
 

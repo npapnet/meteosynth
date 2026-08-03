@@ -20,13 +20,10 @@ from __future__ import annotations
 
 import pathlib
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from typing import Optional
 
-import pandas as pd
-from pvlib.iotools import get_pvgis_hourly
-
-from meteosynth import MetDataset, Provenance
+from meteosynth import MetDataset
+from meteosynth.adapters import fetch_pvgis
 
 EXAMPLES_ROOT = pathlib.Path(__file__).resolve().parents[1]
 DATA_DIR = EXAMPLES_ROOT / "data"
@@ -69,43 +66,6 @@ HERAKLION_YEARS = (2010, 2020)
 PARIS_YEARS = (2011, 2012)
 
 
-def add_time_columns(data: pd.DataFrame) -> pd.DataFrame:
-    """Add the ``year``/``month``/``day``/``hour`` index columns from a datetime index.
-
-    These four are :data:`meteosynth.INDEX_COLS` -- what
-    :class:`~meteosynth.MetDataset` validates on ingestion.
-    """
-    data["year"] = data.index.year
-    data["month"] = data.index.month
-    data["day"] = data.index.day
-    data["hour"] = data.index.hour
-    return data
-
-
-def add_poa_global(data: pd.DataFrame) -> pd.DataFrame:
-    """Add ``poa_global`` as the sum of the three plane-of-array components.
-
-    ``get_pvgis_hourly(components=True)`` returns the components but not their sum,
-    and ``components=False`` returns the sum but not the components. The PV use case
-    wants total plane-of-array irradiance -- the quantity a module actually sees -- so
-    it is reconstructed here rather than fetched twice.
-
-    ``poa_global`` is registered in :mod:`meteosynth.variables` under the same
-    :data:`~meteosynth.IRRADIANCE` spec as its parts, so it is modellable with no
-    further declaration. The column name is what records that this is the *global*
-    component and not the direct one -- see the module docstring of
-    ``meteosynth.variables`` on why the names stay distinct.
-    """
-    parts = ["poa_direct", "poa_sky_diffuse", "poa_ground_diffuse"]
-    missing = [col for col in parts if col not in data.columns]
-    if missing:
-        raise KeyError(
-            f"cannot build poa_global: missing {missing}. Fetch with components=True."
-        )
-    data["poa_global"] = data[parts].sum(axis=1)
-    return data
-
-
 def load_site(
     site: Site = HERAKLION,
     start_year: Optional[int] = None,
@@ -133,63 +93,48 @@ def load_site(
 
     Notes
     -----
-    This does not call :func:`meteosynth.adapters.fetch_pvgis`, and the reason is worth
-    stating: PVGIS returns *either* the global total *or* the three components, and the
-    examples need both -- the use cases model ``poa_global``, the concept scripts model
-    ``poa_direct``. So the components are fetched and the total is **reconstructed here,
-    deliberately**, rather than paying for two downloads.
+    Thin over :func:`meteosynth.adapters.fetch_pvgis`, which now collects the components
+    and derives ``poa_global`` itself -- so this module no longer reimplements either.
+    The examples need both forms: the use cases model ``poa_global``, the concept scripts
+    model ``poa_direct``.
 
-    That reconstruction is exact for PVGIS: measured on Heraklion 2010 against a fetched
-    ``poa_global``, the maximum absolute difference over 8760 hours is 0.01 W/m2 --
-    PVGIS's own two-decimal rounding -- and the annual totals agree at 1914.6 kWh/m2.
+    **The file is named explicitly rather than discovered**, which is the one thing this
+    does not delegate. ``examples/data/`` holds two overlapping Heraklion records
+    (2005-2023 for the diagnostics, 2010-2020 for the use cases), and letting the default
+    discovery choose between them would raise
+    :exc:`~meteosynth.store.AmbiguousRecordError` -- correctly, since the two are
+    genuinely different training records. Naming the file says which is wanted.
 
-    It stays *explicit* on purpose. :attr:`~meteosynth.MetDataset.irradiance_column`
-    refuses to reconstruct a total from components, because a component is a part of a
-    total rather than the total, and guessing that would be the factor-of-two error the
-    distinct column names exist to prevent. Summing is a claim about the data, so it is
-    something a caller does, not something a lookup does for them.
+    It also means these scripts keep their own ``examples/data/`` store regardless of the
+    directory they are run from, which the default ``./data`` would not.
     """
     default_years = HERAKLION_YEARS if site is HERAKLION else PARIS_YEARS
     start_year = default_years[0] if start_year is None else start_year
     end_year = default_years[1] if end_year is None else end_year
 
     cache = site.cache_path(start_year, end_year)
-    if cache.exists() and not refresh:
-        print(f"Loading cached {site.name} {start_year}-{end_year} from {cache.name}...")
-        return MetDataset.load(cache)
+    if not cache.exists():
+        print(
+            f"Fetching {site.name} ({site.latitude}, {site.longitude}) "
+            f"{start_year}-{end_year} from PVGIS -- one request, then cached..."
+        )
 
-    print(
-        f"Fetching {site.name} ({site.latitude}, {site.longitude}) "
-        f"{start_year}-{end_year} from PVGIS -- one request, then cached..."
-    )
-    # pvlib returned (data, inputs, metadata) before 0.11 and (data, metadata) after,
-    # so index rather than unpack: the examples should not care which is installed.
-    result = get_pvgis_hourly(
+    dataset = fetch_pvgis(
         latitude=site.latitude,
         longitude=site.longitude,
         start=start_year,
         end=end_year,
+        site=site.key,
+        cache=cache,
+        force_refetch=refresh,
+        full_range=False,
         usehorizon=True,
         outputformat="json",
-        components=True,
     )
-    data = add_poa_global(add_time_columns(result[0]))
-
-    dataset = MetDataset(
-        data,
-        provenance=Provenance(
-            source="pvgis_hourly",
-            site=site.key,
-            latitude=site.latitude,
-            longitude=site.longitude,
-            start_year=start_year,
-            end_year=end_year,
-            fetched=datetime.now(timezone.utc).date().isoformat(),
-            notes="poa_global reconstructed by summing the three POA components",
-        ),
+    print(
+        f"Loaded {site.name} {start_year}-{end_year} "
+        f"({len(dataset.met_data)} hourly rows) from {cache.name}"
     )
-    dataset.save(cache)
-    print(f"  cached {len(dataset.met_data)} hourly rows to {cache}")
     return dataset
 
 

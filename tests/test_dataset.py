@@ -340,3 +340,108 @@ def test_month_and_window_subsets_agree_on_date_id(synthetic_ds):
     assert "date_id" in month.columns
     assert "date_id" in window.columns
     assert set(window["date_id"]) <= set(month["date_id"])
+
+
+# --- period subsetting ---------------------------------------------------------------
+#
+# The property that makes one download per site enough: a wide record answers a narrow
+# request by narrowing, rather than by being re-fetched at the width someone happened to
+# want first.
+
+def test_a_period_subset_holds_only_the_requested_years(synthetic_ds):
+    subset = synthetic_ds.get_period_subset(2012, 2012)
+
+    assert set(subset.met_data["year"]) == {2012}
+    assert len(subset.met_data) < len(synthetic_ds.met_data)
+
+
+def test_a_period_subset_is_the_same_data(synthetic_ds):
+    """Narrowing selects rows; it must not touch a value."""
+    subset = synthetic_ds.get_period_subset(2012, 2012)
+    expected = synthetic_ds.met_data[synthetic_ds.met_data["year"] == 2012]
+
+    pd.testing.assert_frame_equal(
+        subset.met_data, expected.reset_index(drop=True)
+    )
+
+
+def test_a_full_width_subset_is_the_whole_record(synthetic_ds):
+    subset = synthetic_ds.get_period_subset(2011, 2012)
+
+    pd.testing.assert_frame_equal(subset.met_data, synthetic_ds.met_data)
+
+
+def test_a_period_subset_records_the_period_it_now_holds():
+    """Not the one it was cut from -- otherwise the record describes a file, not itself."""
+    dataset = MetDataset(
+        _frame(n=48),
+        provenance=Provenance(source="pvgis_hourly", site="paris",
+                              start_year=2005, end_year=2023),
+    )
+
+    subset = dataset.get_period_subset(2011, 2011)
+
+    assert (subset.provenance.start_year, subset.provenance.end_year) == (2011, 2011)
+    assert subset.provenance.site == "paris"          # identity survives
+    assert subset.provenance.source == "pvgis_hourly"
+
+
+def test_a_period_subset_notes_where_it_came_from():
+    dataset = MetDataset(
+        _frame(n=48),
+        provenance=Provenance(source="pvgis_hourly", start_year=2005, end_year=2023),
+    )
+
+    subset = dataset.get_period_subset(2011, 2011, origin="heraklion_2005_2023.parquet")
+
+    assert "subset from heraklion_2005_2023.parquet" in subset.provenance.notes
+
+
+def test_a_period_subset_keeps_any_note_already_there():
+    """A derived-column note must not be erased by a narrowing note."""
+    dataset = MetDataset(
+        _frame(n=48),
+        provenance=Provenance(source="pvgis_hourly", start_year=2005, end_year=2023,
+                              notes="poa_global summed from components"),
+    )
+
+    subset = dataset.get_period_subset(2011, 2011)
+
+    assert "poa_global summed from components" in subset.provenance.notes
+    assert "subset from" in subset.provenance.notes
+
+
+def test_an_uncontained_period_raises_rather_than_returning_the_overlap(synthetic_ds):
+    """The overlap answers a different question, silently and plausibly."""
+    with pytest.raises(ValueError, match="does not contain"):
+        synthetic_ds.get_period_subset(2010, 2012)
+
+    with pytest.raises(ValueError, match="does not contain"):
+        synthetic_ds.get_period_subset(2012, 2015)
+
+
+def test_a_reversed_period_raises(synthetic_ds):
+    with pytest.raises(ValueError, match="is after"):
+        synthetic_ds.get_period_subset(2012, 2011)
+
+
+def test_a_period_subset_round_trips_to_disk(tmp_path, synthetic_ds):
+    """It is a dataset, not a frame -- so it must survive save/load like one."""
+    subset = synthetic_ds.get_period_subset(2012, 2012)
+    path = tmp_path / "narrowed.parquet"
+    subset.save(path)
+
+    assert MetDataset.load(path) == subset
+
+
+def test_narrowing_a_real_record_matches_fetching_it_narrow(real_ds):
+    """Skipped without the optional real record; exact where it is available."""
+    held_start = int(real_ds.met_data["year"].min())
+    subset = real_ds.get_period_subset(held_start, held_start)
+
+    assert set(subset.met_data["year"]) == {held_start}
+    for col in subset.variables:
+        expected = real_ds.met_data.loc[
+            real_ds.met_data["year"] == held_start, col
+        ].reset_index(drop=True)
+        pd.testing.assert_series_equal(subset.met_data[col], expected)

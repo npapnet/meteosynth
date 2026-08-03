@@ -19,6 +19,126 @@ Two project-specific conventions:
 
 ---
 
+## Current sprint — unreleased
+
+**Collect once per site, then work locally.** A download used to be cached only if you
+named a file for it, and a cached file only answered the exact period it was fetched for —
+so a second training range meant a second download, and finding either meant remembering
+its filename. Now `fetch_pvgis` takes the provider's widest range by default, keeps every
+column it returns, caches it, and finds it again by **provenance**. A record covering
+2005–2023 answers a request for 2010–2020 by narrowing. 418 tests passing (was 357).
+
+### Added
+
+- **`meteosynth.store` — finding a collected record without opening it** (`FEAT-4`).
+  `scan` and `resolve` read provenance and column names from **parquet footers**, so a
+  folder is discoverable without loading any data: measured at **1.3 ms/file against
+  113 ms** for a full `MetDataset.load`, 86× cheaper, which is what makes a scan viable
+  as the selection mechanism instead of a manifest. No index file, no sidecar — the
+  provenance `FEAT-13` put inside each record is the only source of truth. Also
+  `default_data_dir`, `record_filename`, `describe_store` and `AmbiguousRecordError`.
+- **`MetDataset.get_period_subset(start, end)`** — the years a request asked for, as a
+  dataset in its own right, carrying provenance for **the period it now holds** plus a
+  note naming where it was cut from. Verified exact on the 19-year Heraklion record
+  narrowed to its middle 11 against the same 11 fetched separately: identical row count,
+  index columns aligned, `temp_air` and `wind_speed` bit-identical, `poa_global` within
+  **0.01 W/m²** — PVGIS's own two-decimal rounding. An uncontained period raises rather
+  than returning the overlap, which would answer a different question silently.
+- **`adapters.probe_year_range`** — asks PVGIS for year 1900 because the resulting error
+  names both bounds, so one failed request gives the full range without bisecting. It was
+  written in `examples/diagnostics-overshoot/step1_fetch.py` and moved into the library
+  when "collect the widest range" became the default; the diagnostic now calls it.
+- **Site labels resolve coordinates.** `fetch_pvgis(35.3387, 25.1442, site="heraklion")`
+  once, then `fetch_pvgis(site="heraklion", start=2010, end=2020)` forever. The label is
+  matched against `Provenance.site` in the store — no geocoding, no registry, no config
+  file: a name means whatever the first fetch bound it to.
+
+### Changed
+
+- **`cache=None` now means "use the project's data store", not "do not cache".**
+  Downloads land in `./data/` under the working directory. `data_dir=` picks another
+  folder for one call, `cache=<path>` keeps the previous explicit-file behaviour, and
+  `cache=False` is the opt-out. Callers relying on the old default will now write files.
+
+  **The store is project-local by construction, with no environment variable and no
+  global setting.** Two projects side by side keep two independent stores; a script reads
+  the folder it sits next to regardless of which shell launched it. Ambient configuration
+  was built and then removed during this sprint, because it lets the same script read a
+  different store depending on how it was started — the class of surprise a
+  provenance-checked format exists to remove.
+
+  The working directory rather than the calling script's folder, because a library cannot
+  reliably locate its caller — it would have to walk the call stack, which breaks in a
+  REPL, a notebook and anything frozen. A script that wants its own folder passes
+  `data_dir=Path(__file__).parent / "data"`.
+- **A cached period is matched by containment, not equality.** A wider record answers a
+  narrower request and is narrowed on the way out; one that merely *overlaps* is still a
+  mismatch. Both the discovery path and the validation path call one function,
+  `store.period_contains`, after the two were written separately and disagreed on the
+  no-period case — which showed up as a covering cache being refused.
+- **`fetch_pvgis` keeps every column the provider returned**, and `start`/`end` select a
+  view rather than sizing the download. PVGIS serves either `poa_global` or the three
+  plane-of-array components, never both, so a per-component choice at fetch time meant a
+  separate download and file for each; collecting the components serves them all, and
+  `poa_global` is derived by summation and **recorded as derived** in provenance.
+  `components=False` still gets the provider's own total. Previously the components were
+  downloaded and two of the three discarded.
+- **`examples/tools/site_data.py` no longer bypasses `fetch_pvgis`.** It existed to fetch
+  components and sum them by hand, which the adapter now does; `add_poa_global` moved to
+  `migrate_cache.py`, its only remaining caller, and the unused `add_time_columns` is
+  gone. It still names its cache file explicitly, because `examples/data/` holds two
+  overlapping Heraklion records and discovery would correctly refuse to choose.
+- **The test suite can no longer write to the checkout.** An autouse conftest fixture
+  runs every test from its own empty working directory — without it a fetching test would
+  write into `./data/`, and a later test could then pass by finding that file. `chdir`
+  rather than a setting, because the working directory *is* the mechanism.
+
+### Fixed
+
+- **The documented install and run commands did not work** (`FIX-18`). `tqdm` became a
+  core dependency and the `examples` extra was removed with it, but 27 commands across 13
+  files still said `uv sync --extra examples` / `uv run --extra examples python …`, which
+  fails outright: `error: Extra 'examples' is not defined`. `uv sync` alone now runs
+  everything under `examples/`.
+- **`examples/diagnostics-overshoot/` could not run at all.** Step 1 passed a `.csv` path
+  to `fetch_pvgis`, which has required parquet since `FEAT-13`, and then subscripted the
+  `MetDataset` it returns as if it were a frame; step 2 read the cache with
+  `pd.read_csv`. Broken since 0.3.0 and unnoticed because the harness is not part of the
+  test suite. **The repo's measuring instrument works again**, and its output is
+  unchanged: `step2` + `step3` regenerate all four summary CSVs byte-identically to the
+  committed ones, and the anchor cell reproduces.
+
+### Decisions
+
+- **A folder that could answer a request two ways raises rather than choosing.** Which
+  record a result was trained on is part of the result, so a rule like "the widest wins"
+  would make it depend on what else is in the folder. `AmbiguousRecordError` lists the
+  candidates.
+- **Discovery lives in `store.py`; `adapters` stays explicit.** A named file must answer
+  the request or raise — that is `CacheMismatchError`, unchanged. Finding an unnamed one
+  is a separate operation with a separate failure mode.
+- **It is a *store*, not a *cache*, and the vocabulary now says so.** A cache is
+  expendable, transparent and shared; this is none of the three. Delete a record and you
+  lose the exact input a result was built on — providers revise their archives, so a
+  refetch may not return the same numbers, which makes the file part of the analysis
+  rather than an accelerator for it. Hence `store.py`, `default_data_dir`,
+  `describe_store`, `record_filename` and `AmbiguousRecordError`. The two names published
+  in earlier releases — `CacheMismatchError` and the `cache=` parameter — are deliberately
+  **not** renamed: `cache=` still means "this exact file", which was always accurate, and
+  renaming a shipped exception is a real break for a cosmetic gain.
+- **The filename is a convenience, not an identity.** `<source>_<site>_<start>_<end>.parquet`
+  exists so a human listing the folder can see what they have; provenance inside the file
+  is what is matched, so a renamed file still answers honestly. The convention is exactly
+  what `examples/tools/site_data.py` already wrote, so no cached file needed migrating.
+- **`fetch_pvgis_tmy` keeps opt-in caching**, and the asymmetry with `fetch_pvgis` is the
+  point. Default caching is only safe when a record's identity is fully written into its
+  provenance, and a TMY's is not: `coerce_year` and `roll_utc_offset` change what comes
+  back — pvlib's `_coerce_and_roll_tmy` rewrites the year *and can roll the series* — and
+  neither is a provenance field. A discovered TMY could answer a different question than
+  the one asked. Intended for the same default and reverted on finding this.
+
+---
+
 ## [0.3.1] — 2026-07-31
 
 **Ensembles are now a first-class operation, and the package's primary use case got ~77×

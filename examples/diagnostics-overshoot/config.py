@@ -40,7 +40,7 @@ REQUESTED_YEARS = (2005, 2023)
 
 #: Where the fetched record is cached. Lives in the shared ``examples/data/`` folder,
 #: which is already git-ignored, so it is not re-downloaded per analysis.
-RECORD_CACHE = EXAMPLES_ROOT / "data" / "pvgis_hourly_heraklion_2005_2023.csv"
+RECORD_CACHE = EXAMPLES_ROOT / "data" / "pvgis_hourly_heraklion_2005_2023.parquet"
 
 RECORD_META = RAW_DIR / "record_meta.json"
 

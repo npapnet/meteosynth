@@ -34,6 +34,26 @@ REAL_RECORD_CANDIDATES = (
 )
 
 
+@pytest.fixture(autouse=True)
+def _isolated_data_dir(tmp_path, monkeypatch):
+    """Run every test from its own empty working directory.
+
+    ``fetch_pvgis`` stores into :func:`meteosynth.store.default_data_dir` when the caller
+    names no path, which is ``./data`` under the working directory. Without this, a test
+    that fetches would write into the checkout -- and, worse, a *second* test could then
+    find that file and pass for the wrong reason. Autouse because the failure is silent
+    and the cost is nil.
+
+    ``chdir`` rather than an environment variable, because the working directory *is* the
+    mechanism: there is deliberately no ambient setting to point elsewhere, so isolating
+    the tests any other way would be testing a path users do not have.
+
+    Safe for the fixtures that read files: ``DATA_DIR`` here is derived from ``__file__``
+    and is absolute, as are pytest's own ``tmp_path`` values.
+    """
+    monkeypatch.chdir(tmp_path)
+
+
 @pytest.fixture
 def synthetic_ds():
     """Two years (2011-2012) of hourly data with a plausible diurnal + seasonal cycle.

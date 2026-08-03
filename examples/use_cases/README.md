@@ -8,7 +8,7 @@ PVGIS — and all of them write to the git-ignored `examples/output/`.
 | :--- | :--- | :--- |
 | [`day/`](day/) | Does a synthetic *day* look like a real one? | ~40–60 s each |
 | [`month/`](month/) | Does an ensemble of synthetic *months* vary like the real ones? | ~3 min |
-| [`year/`](year/) | Produce a complete 8760-hour *year* to feed something downstream. | ~4 min |
+| [`year/`](year/) | Produce a complete 8760-hour *year* to feed something downstream. | **~45–50 min** |
 
 Each folder's `README.md` says what its scripts answer, what they write, and how long
 they take. Read those before the scripts.
