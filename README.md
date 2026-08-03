@@ -192,11 +192,24 @@ fetch_pvgis(35.3387, 25.1442, 2011, 2012, cache="data/paris_2011_2012.parquet")
 # CacheMismatchError: site (48.8566, 2.3522) != requested (35.3387, 25.1442)
 ```
 
-**The store is project-local.** It is `./data/` under the folder you are working in, and
-nothing else — no user-level location, no environment variable, no global setting. Two
-projects side by side keep two independent stores, and a script reads the folder it sits
-next to regardless of which shell launched it. Say otherwise per call with
-`data_dir="inputs"` (another folder, files still named for you), `cache="exact/file.parquet"`
+**The store is project-local.** It is `data/` under a *workspace root*, and nothing else —
+no user-level location, no environment variable, no global setting. Two projects side by
+side keep two independent stores.
+
+The root is `./` — the folder you are working in — unless you say otherwise, which is
+what a command line means. **A script pins its own folder instead**, so it reads and
+writes beside itself however it was launched:
+
+```python
+from meteosynth import workspace
+
+WS = workspace(__file__)                        # this script's folder
+fetch_pvgis(48.8566, 2.3522, site="paris", data_dir=WS.data_dir)
+WS.output("ensemble.parquet")                   # generated files go in output/
+```
+
+Say otherwise per call with `data_dir="inputs"` (another folder — a **relative** path is
+read from the working directory, like any path you type), `cache="exact/file.parquet"`
 (one named file) or `cache=False` (nothing read, nothing written).
 
 To see what you have collected:
@@ -230,14 +243,12 @@ different quantity, which is why it gets different column names.
 
 `examples/` is split by purpose — `use_cases/` (applied workflows that produce
 data), `concepts/` (how the package behaves), `tools/` (shared helpers), and
-`diagnostics-overshoot/` (a measurement rather than a demonstration). Downloads are
-cached under `examples/data/` and everything generated is written to the git-ignored
-`examples/output/`. See [`examples/README.md`](examples/README.md) for the full index.
+`diagnostics-overshoot/` (a measurement rather than a demonstration). **Each script
+folder is self-contained**: it collects its record into a `data/` folder beside itself and
+writes what it generates into an `output/` folder beside itself, both git-ignored. See
+[`examples/README.md`](examples/README.md) for the full index.
 
 ```bash
-# Optional: download the two records the examples use, once, up front
-uv run python examples/tools/fetch_site_data.py
-
 # Use cases: Heraklion 2010-2020, grouped by time scale (day / month / year)
 uv run python examples/use_cases/day/day_envelope_pv.py
 uv run python examples/use_cases/day/day_envelope_temp.py

@@ -20,7 +20,6 @@ days, so this is about *centring* and *smoothness*, not sample size.
 See `docs/design/completed/rolling-day-window.md` for the full rationale.
 """
 
-import pathlib
 import sys
 
 import matplotlib.pyplot as plt
@@ -34,9 +33,15 @@ from meteosynth import (
     day_slot,
 )
 
+from meteosynth import workspace
+
+#: This script's own folder. `data/` and `output/` sit beside it, wherever the script
+#: is launched from -- so the example is self-contained and can be copied anywhere.
+#: `globals().get` rather than `__file__` because this also runs as `#%%` cells, where
+#: there is no file and the working directory is the honest answer.
+WS = workspace(globals().get("__file__"))
 # Make `examples/` importable however this file is run (script, -m, or an editor cell).
-_HERE = pathlib.Path(__file__).resolve().parent if "__file__" in globals() else pathlib.Path.cwd()
-_EXAMPLES = next(p for c in (_HERE, *_HERE.parents) for p in (c, c / "examples")
+_EXAMPLES = next(p for c in (WS.root, *WS.root.parents) for p in (c, c / "examples")
                  if (p / "tools" / "site_data.py").is_file())
 sys.path.insert(0, str(_EXAMPLES))
 
@@ -153,7 +158,7 @@ def plot_comparison(ds: MetDataset, n_profiles: int = 25):
 
 
 def main():
-    ds = load_paris_demo()
+    ds = load_paris_demo(WS)
     print(ds.describe_time_range())
 
     compare_subsets(ds)

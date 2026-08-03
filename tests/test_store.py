@@ -34,6 +34,7 @@ from meteosynth.store import (
     scan,
 )
 from meteosynth.dataset import MetDataset
+from meteosynth.paths import workspace
 from meteosynth.provenance import Provenance
 
 
@@ -130,6 +131,12 @@ def test_no_environment_variable_can_relocate_the_store(tmp_path, monkeypatch):
         monkeypatch.setenv(name, str(tmp_path / "elsewhere"))
 
     assert default_data_dir() == tmp_path / "data"
+
+
+def test_default_data_dir_is_the_working_directory_workspace(tmp_path, monkeypatch):
+    """One definition behind two names, so the store and `FEAT-21`'s rule cannot drift."""
+    monkeypatch.chdir(tmp_path)
+    assert default_data_dir() == workspace().data_dir
 
 
 def test_record_path_for_combines_directory_and_convention(tmp_path):
@@ -282,7 +289,14 @@ def test_a_record_without_the_requested_column_does_not_match(tmp_path):
 
 
 def test_the_three_components_answer_a_poa_global_request(tmp_path):
-    """Reconstruction is exact for PVGIS -- 0.01 W/m2 over 8760 hours, its own rounding."""
+    """Reconstruction is exact for PVGIS -- 0.01 W/m2 over 8760 hours, its own rounding.
+
+    Right for the package, and **the reason `examples/diagnostics-overshoot/` still names
+    its cache file** rather than letting discovery find it. That record is fetched with
+    ``components=False`` for PVGIS's own total; a components record dropped into its folder
+    would answer here, silently, and shift the numbers its dated findings cite. Discovery
+    matches on site, period and quantity -- never on how a record was collected.
+    """
     path = _write(tmp_path, site="heraklion", start=2011, end=2012,
                   columns=("poa_direct", "poa_sky_diffuse", "poa_ground_diffuse"))
 
@@ -296,6 +310,19 @@ def test_a_total_does_not_answer_a_request_for_a_part(tmp_path):
 
     assert resolve(tmp_path, source="pvgis_hourly", site="heraklion",
                    start=2011, end=2012, column="poa_direct") is None
+
+
+def test_one_record_per_folder_resolves_without_a_filename(tmp_path):
+    """The state `FEAT-21` puts every example folder in, and why they stopped naming files.
+
+    `examples/data/` held two overlapping Heraklion records, so discovery refused and the
+    scripts named files to get round it. One store per script folder means one record, so
+    the ordinary path answers and the workaround is gone.
+    """
+    path = _write(tmp_path, site="heraklion", start=2005, end=2023)
+
+    assert resolve(tmp_path, source="pvgis_hourly", site="heraklion",
+                   start=2010, end=2020, column="poa_global") == path
 
 
 def test_the_column_rule_can_break_a_period_tie(tmp_path):

@@ -30,6 +30,17 @@ column it returns, caches it, and finds it again by **provenance**. A record cov
 
 ### Added
 
+- **`meteosynth.paths` — where a run reads and writes** (`FEAT-21`). One workspace root
+  per run, with `data/` for what was collected and `output/` for what was generated
+  hanging off it. `workspace(__file__)` roots at **the script's own folder**, so a script
+  reads and writes beside itself whichever directory it was launched from;
+  `workspace()` roots at the working directory, which is what a command line means and
+  what the future CLI (`FEAT-14`) will call. Exports `Workspace` and `workspace` at the
+  top level; `store.default_data_dir()` is now defined as `workspace().data_dir`, so the
+  two cannot drift. **A relative `data_dir=` is read from the working directory**, not
+  from the calling script — a path you type means what your shell would make of it. Still
+  no environment variable and no global setting. See
+  [`FEAT-21-workspace-and-file-locations.md`](docs/design/completed/FEAT-21-workspace-and-file-locations.md).
 - **`meteosynth.store` — finding a collected record without opening it** (`FEAT-4`).
   `scan` and `resolve` read provenance and column names from **parquet footers**, so a
   folder is discoverable without loading any data: measured at **1.3 ms/file against
@@ -54,6 +65,27 @@ column it returns, caches it, and finds it again by **provenance**. A record cov
   file: a name means whatever the first fetch bound it to.
 
 ### Changed
+
+- **Every example folder is self-contained** (`FEAT-21`). A script collects its record
+  into a `data/` folder beside itself and writes into an `output/` folder beside itself,
+  both git-ignored, replacing the shared `examples/data/` and `examples/output/`. The
+  repository used to demonstrate three different conventions — the working directory in
+  `use_cases/year-leros/`, a hard-coded `examples/data` in four more folders, a named file
+  in `diagnostics-overshoot/` — so no reader could learn the rule from the examples. The
+  Heraklion record is now downloaded once per folder that needs it rather than shared;
+  ~530 KB a time, and the price of a folder being copyable on its own.
+- **The examples find their records by provenance instead of naming files** (`FEAT-21`).
+  `examples/data/` held two overlapping Heraklion records, so discovery would rightly
+  refuse to choose and every script named its cache file to get round it. One record per
+  folder removes the collision, so the scripts now show the package's ordinary path.
+  `Site.cache_path` and `load_site`'s `cache=` argument are gone; `load_site`,
+  `save_frame` and `save_figure` take the caller's `Workspace` instead.
+  **`examples/diagnostics-overshoot/` still names its file**, and now says why: it fetches
+  with `components=False` for PVGIS's own `poa_global`, and `StoredRecord.holds`
+  deliberately treats a components record as answering that request. Right for the
+  package, wrong for a measuring instrument whose dated findings are cited — so name a
+  file when *how* a record was collected is load-bearing, and give a folder when only its
+  site and period are.
 
 - **`cache=None` now means "use the project's data store", not "do not cache".**
   Downloads land in `./data/` under the working directory. `data_dir=` picks another
@@ -84,10 +116,10 @@ column it returns, caches it, and finds it again by **provenance**. A record cov
   `components=False` still gets the provider's own total. Previously the components were
   downloaded and two of the three discarded.
 - **`examples/tools/site_data.py` no longer bypasses `fetch_pvgis`.** It existed to fetch
-  components and sum them by hand, which the adapter now does; `add_poa_global` moved to
-  `migrate_cache.py`, its only remaining caller, and the unused `add_time_columns` is
-  gone. It still names its cache file explicitly, because `examples/data/` holds two
-  overlapping Heraklion records and discovery would correctly refuse to choose.
+  components and sum them by hand, which the adapter now does, and the unused
+  `add_time_columns` is gone. It named its cache file explicitly for a while, because the
+  shared `examples/data/` held two overlapping Heraklion records; `FEAT-21` gave each
+  folder its own store, so it hands over a folder and lets provenance decide.
 - **The test suite can no longer write to the checkout.** An autouse conftest fixture
   runs every test from its own empty working directory — without it a fetching test would
   write into `./data/`, and a later test could then pass by finding that file. `chdir`
@@ -108,8 +140,31 @@ column it returns, caches it, and finds it again by **provenance**. A record cov
   unchanged: `step2` + `step3` regenerate all four summary CSVs byte-identically to the
   committed ones, and the anchor cell reproduces.
 
+### Removed
+
+- **`examples/tools/fetch_site_data.py`** (`FEAT-21`) — primed the one shared
+  `examples/data/` store. With a store per script folder there is nothing shared to prime;
+  each script fetches into its own on the first run and says so before it starts.
+- **`examples/tools/migrate_cache.py`** (`FEAT-21`) — converted the legacy CSV caches to
+  parquet. Those CSVs are deleted, and it imported `DATA_DIR` from `site_data`, which no
+  longer exists. Dead on both counts.
+- **`examples/data/` and `examples/output/`** (`FEAT-21`) — replaced by a `data/` and an
+  `output/` inside each example folder.
+
 ### Decisions
 
+- **A script's files belong beside the script; a command's belong where it was run.**
+  Two entry points, one rule, written down once in `meteosynth.paths` rather than copied
+  into each script — the repository had already accumulated three conventions that
+  disagreed. An explicitly typed relative path stays relative to the working directory,
+  because a path you type should mean what your shell would make of it. See
+  [`FEAT-21-workspace-and-file-locations.md`](docs/design/completed/FEAT-21-workspace-and-file-locations.md).
+- **Name a file when *how* a record was collected is load-bearing; give a folder when only
+  its site and period are.** Discovery matches on site, period and quantity, and treats a
+  three-component record as answering a `poa_global` request — exact to PVGIS's own
+  rounding. That is right for the package and wrong for `diagnostics-overshoot/`, which
+  fetches with `components=False` and whose dated findings are cited, so it is the one
+  place in `examples/` that still names its cache file.
 - **A folder that could answer a request two ways raises rather than choosing.** Which
   record a result was trained on is part of the result, so a rule like "the widest wins"
   would make it depend on what else is in the folder. `AmbiguousRecordError` lists the

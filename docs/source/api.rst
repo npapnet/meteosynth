@@ -58,6 +58,18 @@ layer the data has to pass through.
    :undoc-members:
    :show-inheritance:
 
+Where a Run Reads and Writes
+---------------------------
+
+The workspace: ``data/`` for what was collected and ``output/`` for what was generated,
+under a root chosen by how the code was entered -- the script's own folder for a script,
+the working directory for a command.
+
+.. automodule:: meteosynth.paths
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 The Download Cache
 ------------------
 

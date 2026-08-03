@@ -118,7 +118,7 @@ that are. The anchor catches a rewrite that quietly changed what is computed.
 
 `results/summary_*.csv` and `figures/` are derived and regenerate from the raw files in
 seconds. `results/raw/` and `figures/` are git-ignored, matching the repo's rule for
-`examples/output/`; the dated `FINDINGS-*.md` and the summary tables are committed, because
+the examples' `output/` folders; the dated `FINDINGS-*.md` and the summary tables are committed, because
 they are the evidence `FIX-1` cites.
 
 ## What it reuses

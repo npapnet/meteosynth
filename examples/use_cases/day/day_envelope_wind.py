@@ -24,7 +24,9 @@ Wind is the third distinct case, and the one where the daily mean is least suffi
   21 May window is a mild, moderately variable regime -- the ensemble should look
   unremarkable, and a fat upper tail here would be a red flag.
 
-The ensemble is written to ``examples/output/`` (git-ignored).
+The ensemble is written to ``output/`` beside this file (git-ignored), and the
+training record is collected into ``data/`` there. Both follow the script, not the
+directory you launch it from.
 
 Run with::
 
@@ -33,15 +35,20 @@ Run with::
 Runtime: ~60 s on a warm cache.
 """
 
-import pathlib
 import sys
 
 import matplotlib.pyplot as plt
 import numpy as np
 
+from meteosynth import workspace
+
+#: This script's own folder. `data/` and `output/` sit beside it, wherever the script
+#: is launched from -- so the example is self-contained and can be copied anywhere.
+#: `globals().get` rather than `__file__` because this also runs as `#%%` cells, where
+#: there is no file and the working directory is the honest answer.
+WS = workspace(globals().get("__file__"))
 # Make `examples/` importable however this file is run (script, -m, or an editor cell).
-_HERE = pathlib.Path(__file__).resolve().parent if "__file__" in globals() else pathlib.Path.cwd()
-_EXAMPLES = next(p for c in (_HERE, *_HERE.parents) for p in (c, c / "examples")
+_EXAMPLES = next(p for c in (WS.root, *WS.root.parents) for p in (c, c / "examples")
                  if (p / "tools" / "site_data.py").is_file())
 sys.path.insert(0, str(_EXAMPLES))
 
@@ -68,7 +75,7 @@ SEED = 42
 
 
 def main():
-    ds = load_site(HERAKLION, *HERAKLION_YEARS)
+    ds = load_site(WS, HERAKLION, *HERAKLION_YEARS)
     print(ds.describe_time_range())
 
     observed_exact = day_matrix(ds, ATTR, *TARGET, n_days=0)
@@ -104,15 +111,15 @@ def main():
     print(f"               bias in v^3        : {power_bias:+6.1%}   <- the one that costs money")
 
     print("\nSaving...")
-    save_frame(ensemble_frame(synthetic), f"day_{DATE_LABEL.replace(' ', '')}_{ATTR}_ensemble.csv")
-    save_frame(stats, f"day_{DATE_LABEL.replace(' ', '')}_{ATTR}_stats.csv", index=False)
+    save_frame(WS, ensemble_frame(synthetic), f"day_{DATE_LABEL.replace(' ', '')}_{ATTR}_ensemble.csv")
+    save_frame(WS, stats, f"day_{DATE_LABEL.replace(' ', '')}_{ATTR}_stats.csv", index=False)
 
     fig = plot_day_envelope(
         observed_pool, observed_exact, synthetic,
         attr=ATTR, unit=UNIT, date_label=DATE_LABEL,
         site_label=HERAKLION.name, window_days=POOL_DAYS, aggregate="mean",
     )
-    save_figure(fig, f"day_{DATE_LABEL.replace(' ', '')}_{ATTR}.png")
+    save_figure(WS, fig, f"day_{DATE_LABEL.replace(' ', '')}_{ATTR}.png")
 
     print("\n  A small bias in mean speed becomes a large one in v^3, because cubing")
     print("  weights the windy tail. If you take one number from this script for an")

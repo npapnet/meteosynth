@@ -27,7 +27,7 @@ earning its keep: a wind study built on this ensemble would price a tail that th
 record does not support, and no amount of looking at individual days would have shown
 it.
 
-Nothing is plotted. Every realisation is written to ``examples/output/`` (git-ignored)
+Nothing is plotted. Every realisation is written to ``output/`` beside this file (git-ignored)
 in long format, along with the statistics table below, so the numbers can be re-derived
 or taken into another tool without re-running the generator.
 
@@ -40,16 +40,21 @@ Runtime: ~3 min for 12 realisations of all three attributes. Fitting is paid onc
 """
 
 import calendar
-import pathlib
 import sys
 import time
 
 import numpy as np
 import pandas as pd
 
+from meteosynth import workspace
+
+#: This script's own folder. `data/` and `output/` sit beside it, wherever the script
+#: is launched from -- so the example is self-contained and can be copied anywhere.
+#: `globals().get` rather than `__file__` because this also runs as `#%%` cells, where
+#: there is no file and the working directory is the honest answer.
+WS = workspace(globals().get("__file__"))
 # Make `examples/` importable however this file is run (script, -m, or an editor cell).
-_HERE = pathlib.Path(__file__).resolve().parent if "__file__" in globals() else pathlib.Path.cwd()
-_EXAMPLES = next(p for c in (_HERE, *_HERE.parents) for p in (c, c / "examples")
+_EXAMPLES = next(p for c in (WS.root, *WS.root.parents) for p in (c, c / "examples")
                  if (p / "tools" / "site_data.py").is_file())
 sys.path.insert(0, str(_EXAMPLES))
 
@@ -217,7 +222,7 @@ def long_frame(ensemble: dict[str, np.ndarray], index: pd.DatetimeIndex) -> pd.D
 
 
 def main():
-    ds = load_site(HERAKLION, *HERAKLION_YEARS)
+    ds = load_site(WS, HERAKLION, *HERAKLION_YEARS)
     print(ds.describe_time_range())
 
     index = month_index(REFERENCE_YEAR, MONTH)
@@ -229,9 +234,9 @@ def main():
     stats = report(ds, ensemble)
 
     print("\nSaving...")
-    save_frame(long_frame(ensemble, index),
+    save_frame(WS, long_frame(ensemble, index),
                f"month_{HERAKLION.key}_{MONTH:02d}_ensemble.csv")
-    save_frame(stats, f"month_{HERAKLION.key}_{MONTH:02d}_statistics.csv", index=False)
+    save_frame(WS, stats, f"month_{HERAKLION.key}_{MONTH:02d}_statistics.csv", index=False)
     return stats
 
 

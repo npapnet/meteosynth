@@ -6,10 +6,33 @@ Runnable scripts, split by what they are for.
 | :--- | :--- |
 | [`use_cases/`](use_cases/) | Applied workflows that produce data, split by time scale into [`day/`](use_cases/day/), [`month/`](use_cases/month/) and [`year/`](use_cases/year/) — each with its own README. |
 | [`concepts/`](concepts/) | Demonstrations of how the package behaves — training windows, leap days, the Markov engine, exploratory plots. |
-| [`tools/`](tools/) | Shared helpers the scripts import (data loading, the observed-vs-synthetic comparison), plus one runnable cache-priming script. Not part of `meteosynth`. |
+| [`tools/`](tools/) | Shared helpers the scripts import: site definitions, data loading, the observed-vs-synthetic comparison. Not part of `meteosynth`. |
 | [`diagnostics-overshoot/`](diagnostics-overshoot/) | A measurement rather than a demonstration: does the generator reproduce the distribution it was fitted to? Four steps behind one `run_all.py`, ~5 min, with the design, the pre-registered decision rule and the dated findings alongside. This is what `FIX-1` cites. |
-| `data/` | Cached PVGIS downloads. Git-ignored. |
-| `output/` | Everything the scripts generate. Git-ignored (see `output/.gitignore`). |
+| [`benchmark/`](benchmark/) | The other measuring instrument: **what drives generation time?** One script, ~9–10 min, answering it in ratios rather than seconds — cost scales with attributes × days and not with realisation count. Results are per-machine and stay out of the repo. |
+
+## Where each script's files go
+
+**Every script folder is self-contained.** A script collects its training record into a
+`data/` folder beside itself and writes what it generates into an `output/` folder beside
+itself — whichever directory you launch it from:
+
+```
+examples/use_cases/day/
+    day_envelope_pv.py
+    data/     the PVGIS record it trains on, downloaded once
+    output/   the ensembles, tables and figures it produces
+```
+
+Both are git-ignored, because both are re-creatable by re-running the script. `data/` is
+an input a result was built on; `output/` is a product — delete `output/` freely.
+
+This is the same rule the future `meteosynth` command will follow, with the folder you are
+standing in taking the place of the script's own. It is `FEAT-21`, and the mechanism is
+`meteosynth.workspace(__file__)`.
+
+One consequence worth expecting: the Heraklion record is downloaded separately for
+`day/`, `month/` and `year/` rather than shared. That is the price of each folder being
+copyable on its own, and it is about 530 KB a time.
 
 Every script is a `#%%` cell script, so it can be stepped through in an editor as well
 as run start to finish.
@@ -21,17 +44,16 @@ these scripts print or plot.
 ## Before the first run
 
 ```bash
-uv sync                                           # everything these scripts need
-uv run python examples/tools/fetch_site_data.py   # ~10 s, downloads once
+uv sync     # everything these scripts need
 ```
 
-`fetch_site_data.py` is optional — every script fetches what it needs on a cold cache —
-but running it up front separates "waiting for PVGIS" from "waiting for the generator".
+That is all. Each script downloads what it needs into its own `data/` on the first run —
+once, then never again — and says so before it starts.
 
 ## Use cases
 
 All of them train on **Heraklion, Crete, 2010–2020** (eleven full years from PVGIS) and
-write their output to `examples/output/`. They are grouped by the **time scale of the
+write their output to their own folder's `output/`. They are grouped by the **time scale of the
 question**, because the scale changes what can be asked — see
 [`use_cases/README.md`](use_cases/README.md).
 
@@ -72,7 +94,7 @@ uv run python examples/concepts/example_leap_year_windows.py      # leap days; n
 
 ## Output
 
-Everything generated lands in `examples/output/`, which is git-ignored:
+Each script writes into its own folder's `output/`, which is git-ignored:
 
 ```
 day_21May_<attr>_ensemble.csv     200 synthetic days, one row each, hours as columns
@@ -85,8 +107,8 @@ year_heraklion_monthly_summary.csv
 year_heraklion_2023_heatmap.png   only when PLOT_HEATMAP is True
 ```
 
-The `day_` / `month_` / `year_` prefixes are why the three use-case folders can share
-one flat output directory.
+The `day_` / `month_` / `year_` prefixes are older than the per-folder layout and are
+kept because they name the file usefully wherever it ends up.
 
-Delete the folder's contents freely — every file is reproducible by re-running the
+Delete these folders' contents freely — every file is reproducible by re-running the
 script that wrote it, and the seeds are fixed in each script's constants.

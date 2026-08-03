@@ -5,12 +5,14 @@ Based on `leros_year_ensemble.py`, cut down to a controlled timing experiment. T
 questions are asked separately, because they are separate questions and crossing them
 would cost four times the runtime for nothing:
 
-**Sweep A -- does cost scale with the number of realisations?** All three attributes
-together, ``N`` stepped 10 -> 100 -> 1000. These runs are the *total* timings: one row per
-N, each the full three-attribute cost of a calendar day.
+**Sweep A -- does cost scale with the number of realisations?** ``poa_global`` alone,
+``N`` stepped 10 -> 100 -> 1000. One attribute rather than three, because the answer is
+*no* and the reason is that cost is set by a per-day-per-attribute grid build: sweeping N
+on three attributes would establish the same fact at three times the price. The cheapest
+attribute is used so the sweep is nearly free.
 
-**Sweep B -- how is that total split between the attributes?** Each attribute alone, at a
-single N. The three are not alike: ``poa_global`` is degenerate at night, so many of its
+**Sweep B -- how is a day's cost split between the attributes?** Each attribute alone, at
+a single N. The three are not alike: ``poa_global`` is degenerate at night, so many of its
 23 hourly transitions collapse to a constant and never need a full 2D KDE, while
 ``temp_air`` and ``wind_speed`` need all 23 and cost several times more. Sweep B is what
 turns "a day costs X" into "a day costs X *because of* these attributes".
@@ -26,15 +28,18 @@ take the direct path and a 100-realisation run the cached one, so the two would 
 ``PRECOMPUTE = True`` forces the cached path for **every** run, so the only thing that
 changes within a sweep is the one variable that sweep exists to vary.
 
-**The cross-check.** Sweep B's three attributes sum to roughly Sweep A's combined row at
-the same N, and a large gap would mean something other than fitting and drawing is on the
-clock. Measured on ``desktop-tt4bb0i``: 73.7 s/day summed against 74.4 s/day combined, a
-ratio of 0.991. The obvious guess -- that three separate runs cost *more*, each paying a
-calendar walk and a parquet write the combined run pays once -- is not visible here: that
-fixed overhead is smaller than the run-to-run spread, which Sweep A itself puts at ~4 %
-(71.4 to 74.4 s/day for rows that differ only in N). So the split is clean to within
-noise, and the sign of the residual is not resolvable at this precision. The JSON records
-both figures and the ratio, so the comparison can be redone on any machine.
+**Sweep D -- the additivity control.** Sweep B's three attributes should sum to one run
+that generates all three, and a large gap would mean something other than fitting and
+drawing is on the clock. Measured on ``desktop-tt4bb0i``: 68.5 s/day summed against
+68.4 s/day combined, a ratio of 1.001 (and 0.991 on an earlier run). The obvious guess --
+that three separate runs cost *more*, each paying a calendar walk and a parquet write the
+combined run pays once -- is not visible: that fixed overhead is below the run-to-run
+spread, so the sign of the residual is not resolvable at this precision.
+
+This control used to fall out of Sweep A for free, when Sweep A ran all three attributes.
+It is now its own row, and the most expensive one here -- so ``CROSS_CHECK = False`` is
+the first thing to switch off for a quick check, at the cost of the only row that
+validates the decomposition.
 
 **A second in one of these files is not a second in another.** Every absolute duration
 here -- and every one quoted in a README, a docstring or a changelog anywhere in this
@@ -74,10 +79,39 @@ nature, and committing it would push one machine's numbers into every clone.
 
 Run::
 
-    uv run python examples/use_cases/year-leros/leros_timing_benchmark.py
+    uv run python examples/benchmark/leros_timing_benchmark.py
 
-Expect roughly 25-30 minutes. Nothing here is a usable ensemble -- 5 days, and the parquet
-is deleted once its size has been recorded unless ``KEEP_PARQUET`` says otherwise.
+**Expect roughly 11 minutes** -- measured at 10.8 on ``desktop-tt4bb0i``, against 24.7 for
+the 5-day, three-attribute-sweep design this replaced. Nothing here is a usable ensemble:
+3 days, and the parquet is deleted once its size has been recorded unless ``KEEP_PARQUET``
+says otherwise.
+
+**What the speed-up cost, stated plainly.** The ratios all survived -- N scaling 1.03x ->
+0.98x, the attribute split 3.24x -> 3.36x/3.37x, additivity 1.001 -> 1.014 -- but
+**Sweep C's noise floor widened from 2.0 % to 7.7 %**. Fewer days means a noisier per-day
+mean, and the first-day warm-up is a third of a 3-day run instead of a fifth. So this
+build detects a regression of ~8 %, where the old one claimed ~2 %. Two caveats on that
+comparison: the 0.17 % CV behind the old floor was measured on an idle machine, and one
+run cannot separate "fewer days" from "busier machine". Raise ``N_DAYS`` to 4-5 if a
+tighter floor matters more than the runtime.
+
+Where the time goes, and what buying it back would cost
+-------------------------------------------------------
+Cost is **attributes x days** and is independent of N, so the budget is a count of
+attribute-days. At the shipped settings:
+
+===================================  =================  ====================================
+sweep                                attribute-days     what dropping it would lose
+===================================  =================  ====================================
+A -- N scaling (3 x cheapest)        3 cheap            the N-independence claim itself
+B -- attribute split (3 attrs)       1 cheap + 2 dear   the whole "why a day costs X"
+C -- noise floor (3 x cheapest)      3 cheap            the threshold every comparison uses
+D -- additivity control (3 attrs)    1 cheap + 2 dear   the only check on the decomposition
+===================================  =================  ====================================
+
+``N_DAYS`` scales all four linearly and is the honest knob. ``CROSS_CHECK = False`` drops
+Sweep D for a ~40 % saving. Lowering ``ATTR_SPLIT_N`` saves almost nothing, and that is
+not a flaw -- it is Sweep A's finding, arriving as a bill.
 """
 
 #%%
@@ -85,7 +119,6 @@ from __future__ import annotations
 
 import json
 import os
-import pathlib
 import platform
 import statistics
 import time
@@ -94,7 +127,7 @@ from datetime import datetime, timezone
 import pandas as pd
 
 import meteosynth
-from meteosynth import store
+from meteosynth import workspace
 from meteosynth.adapters import fetch_pvgis
 from meteosynth.ensemble import write_ensemble
 
@@ -107,7 +140,7 @@ from meteosynth.ensemble import write_ensemble
 #: the history comparison then refuses that file outright rather than reporting a phantom
 #: regression. Bump the **minor** part when a sweep is merely added or refined: older files
 #: still compare on the rows they share.
-BENCHMARK_VERSION = "2.1"
+BENCHMARK_VERSION = "3.0"
 
 LATITUDE = 37.167
 LONGITUDE = 26.800
@@ -116,12 +149,25 @@ SITE = "leros"
 ATTRS = ["poa_global", "temp_air", "wind_speed"]
 REFERENCE_YEAR = 2023
 
-#: Sweep A: one timed run per entry, all of ``ATTRS`` together.
+#: **The cheapest attribute, and what Sweep A sweeps.** Cost is
+#: ``attributes x days`` and independent of N -- which is precisely what Sweep A exists to
+#: show -- so sweeping N on three attributes measures the same fact three times over at
+#: three times the price. Sweeping the cheapest one says it just as well.
+SWEEP_ATTR = "poa_global"
+
+#: Sweep A: one timed run per entry, on :data:`SWEEP_ATTR` alone.
 REALISATION_COUNTS = [10, 100, 1000]
 
 #: Sweep B: one timed run per attribute, all at this N. Picked at the top of Sweep A's
 #: range so the split is measured where the cached path is doing real work.
 ATTR_SPLIT_N = 1000
+
+#: Sweep D: the additivity control -- all three attributes in **one** run, against the sum
+#: of Sweep B's three. A gap would mean something other than fitting and drawing is on the
+#: clock (the calendar walk, the parquet write). It used to fall out of Sweep A for free;
+#: now that Sweep A runs one attribute, it is paid for explicitly. It is the single most
+#: expensive row here, so it is also the first thing to switch off for a quick check.
+CROSS_CHECK = True
 
 #: Sweep C: repeats of one fixed configuration, to measure run-to-run scatter. The
 #: cheapest attribute, so that a useful number of repeats stays affordable -- the floor is
@@ -138,7 +184,14 @@ NOISE_SIGMA = 3.0
 MIN_THRESHOLD_PCT = 2.0
 
 #: Short on purpose -- the per-day cost is what is being measured, not a usable year.
-N_DAYS = 5
+#: Every timing here is linear in this, so it is the one knob that scales the whole run.
+#:
+#: **The first calendar day of every run costs ~16 % more than the rest** -- measured
+#: 10.3 s against a steady ~8.9 s on ``poa_global`` at N = 1000, and reproduced in every
+#: repeat. So a lower count inflates the reported seconds-per-day: about +5 % at 3 days
+#: against +3 % at 5. **Every row pays it identically, so no ratio moves** -- which is why
+#: 3 is affordable here, and why this file insists on ratios over seconds.
+N_DAYS = 3
 
 WINDOW_DAYS = 15
 SEED = 2026
@@ -153,14 +206,15 @@ PROGRESS = True
 #: that is recorded before they go. True keeps them for inspection.
 KEEP_PARQUET = False
 
-#: Where results land. Beside this file, not under the working directory -- a benchmark
-#: belongs with the benchmark that produced it.
-_HERE = (
-    pathlib.Path(__file__).resolve().parent
-    if "__file__" in globals()
-    else pathlib.Path.cwd()
-)
-BENCHMARK_DIR = _HERE / "benchmarks"
+#: This script's own folder. Everything it touches -- the training record in `data/`, the
+#: timings in `benchmarks/` -- sits beside it rather than under the working directory: a
+#: benchmark belongs with the benchmark that produced it.
+WS = workspace(globals().get("__file__"))
+
+#: Timing results, and the throwaway parquets whose only interesting property is size.
+#: Its own folder rather than `output/`, because these are machine-specific measurements
+#: compared against each other over time, not a product of a run.
+BENCHMARK_DIR = WS.root / "benchmarks"
 
 #: Hostname, lowercased and stripped to something safe in a filename.
 MACHINE_SLUG = "".join(
@@ -210,9 +264,11 @@ print(f"benchmark version {BENCHMARK_VERSION}, results -> {BENCHMARK_DIR}")
 # collection and every row trains on identical data.
 
 print(f"\nTraining record for {SITE} ({LATITUDE}, {LONGITUDE})")
-print(f"  store: {store.default_data_dir()}")
+print(f"  {WS.describe()}")
 
-dataset = fetch_pvgis(LATITUDE, LONGITUDE, site=SITE, force_refetch=FORCE_REFETCH)
+dataset = fetch_pvgis(
+    LATITUDE, LONGITUDE, site=SITE, data_dir=WS.data_dir, force_refetch=FORCE_REFETCH
+)
 
 print(f"  {dataset.describe_time_range()}, {len(dataset.met_data):,} hourly rows")
 
@@ -310,14 +366,15 @@ def timed_run(
 
 #%%
 # --- 3. Sweep A: does cost scale with N? ---------------------------------------------
-# All three attributes; only N changes. These are the total timings.
+# One attribute, the cheapest; only N changes. Three attributes would answer the same
+# question three times over -- see SWEEP_ATTR.
 
 benchmark_started = time.perf_counter()
 benchmark_start_dt = datetime.now(timezone.utc)
 
 runs = []
 for n_realisations in REALISATION_COUNTS:
-    runs.append(timed_run("n_scaling", ATTRS, n_realisations))
+    runs.append(timed_run("n_scaling", [SWEEP_ATTR], n_realisations))
 
 #%%
 # --- 4. Sweep B: where does the total go? --------------------------------------------
@@ -336,6 +393,14 @@ for attr in ATTRS:
 for repeat in range(1, NOISE_REPEATS + 1):
     runs.append(timed_run("noise_floor", [NOISE_ATTR], NOISE_N, repeat=repeat))
 
+#%%
+# --- 4c. Sweep D: the additivity control ----------------------------------------------
+# All three attributes in one run, to be set against the sum of Sweep B's three. The one
+# row here that exists to be *compared* rather than to measure something new.
+
+if CROSS_CHECK:
+    runs.append(timed_run("combined", ATTRS, ATTR_SPLIT_N))
+
 benchmark_seconds = time.perf_counter() - benchmark_started
 
 #%%
@@ -346,6 +411,7 @@ benchmark_seconds = time.perf_counter() - benchmark_started
 n_rows = [r for r in runs if r["sweep"] == "n_scaling"]
 attr_rows = [r for r in runs if r["sweep"] == "per_attribute"]
 noise_rows = [r for r in runs if r["sweep"] == "noise_floor"]
+combined_rows = [r for r in runs if r["sweep"] == "combined"]
 
 noise_samples = [r["seconds_per_day"] for r in noise_rows]
 noise_mean = statistics.fmean(noise_samples)
@@ -395,8 +461,10 @@ n_scaling = {
 }
 
 attr_total_per_day = sum(r["seconds_per_day"] for r in attr_rows)
+# Sweep D, when it ran. Until 3.0 this came free from Sweep A's three-attribute rows;
+# Sweep A now runs one attribute, so the control is its own row and can be switched off.
 combined_at_split_n = next(
-    (r for r in n_rows if r["n_realisations"] == ATTR_SPLIT_N), None
+    (r for r in combined_rows if r["n_realisations"] == ATTR_SPLIT_N), None
 )
 cheapest = min(attr_rows, key=lambda r: r["seconds_per_day"])
 
@@ -623,7 +691,7 @@ print(results[[
 ]].to_string(index=False))
 print("=" * 78)
 
-print(f"\nSweep A -- N scaling, all {len(ATTRS)} attributes, relative to "
+print(f"\nSweep A -- N scaling, {SWEEP_ATTR} alone, relative to "
       f"N={n_scaling['baseline_n']}:")
 for p in n_scaling["points"]:
     print(
@@ -640,11 +708,15 @@ for a in per_attribute["attributes"]:
         f"= {a['share_of_sum'] * 100:>4.1f}% of the sum, "
         f"{a['cost_vs_cheapest']:>4.2f}x the cheapest"
     )
-print(
-    f"  sum {per_attribute['sum_seconds_per_day']:.1f} s/day vs combined run "
-    f"{per_attribute['combined_run_seconds_per_day']} s/day "
-    f"(ratio {per_attribute['separate_vs_combined_overhead_ratio']})"
-)
+if combined_at_split_n:
+    print(
+        f"\nSweep D -- additivity control, all {len(ATTRS)} attributes in one run:\n"
+        f"  sum of the three {per_attribute['sum_seconds_per_day']:.1f} s/day vs "
+        f"combined {per_attribute['combined_run_seconds_per_day']} s/day "
+        f"(ratio {per_attribute['separate_vs_combined_overhead_ratio']})"
+    )
+else:
+    print("\nSweep D -- additivity control: skipped (CROSS_CHECK = False)")
 
 print(f"\nSweep C -- run-to-run scatter, {noise_floor['repeats']} repeats of "
       f"{NOISE_ATTR} at N={NOISE_N}:")

@@ -2,7 +2,8 @@
 
 Applied workflows, grouped by the **time scale of the question they answer**. All of
 them train on the same record — Heraklion, Crete, 2010–2020, eleven full years from
-PVGIS — and all of them write to the git-ignored `examples/output/`.
+PVGIS — and each writes to its own folder's git-ignored `output/`, having collected
+that record into its own `data/`.
 
 | Folder | The question | Runtime |
 | :--- | :--- | :--- |
@@ -20,9 +21,6 @@ climatology. A year is not checked at all here; it is *produced*, and the checki
 whatever consumes it.
 
 ```bash
-# Optional: prime the download cache once, so no script waits on PVGIS
-uv run python examples/tools/fetch_site_data.py
-
 uv run python examples/use_cases/day/day_envelope_pv.py
 uv run python examples/use_cases/month/monthly_statistics.py
 uv run python examples/use_cases/year/synthetic_year.py
