@@ -1,5 +1,5 @@
 """
-A 1000-realisation synthetic year for Leros (37.167 N, 26.800 E). Data only.
+A synthetic wind-speed ensemble for Leros (37.167 N, 26.800 E). Data only.
 
 Standalone by design: imports **nothing from `examples/`** -- no `tools.site_data`, no
 shared helpers, no `sys.path` bootstrap -- so it can be copied anywhere and run. Written
@@ -13,42 +13,58 @@ you want the file a yield model, a storage-sizing run or a demand simulation con
 Everything lands in the **default data store**, `./data/` under the directory you run
 from:
 
-    data/pvgis_hourly_leros_2005_2023.parquet    the training record, fetched once
-    data/ensemble_leros_2023_n1000.parquet       the generated ensemble
+    data/pvgis_hourly_leros_2005_2023.parquet     the training record, fetched once
+    data/ensemble_leros_2023_n<N>.parquet         the generated ensemble
+
+The training record holds every quantity PVGIS returned, so switching ``ATTRS`` to
+another variable needs no refetch -- it is already on disk.
 
 Both are parquet and both sit in one folder, but they cannot be confused: a training
 record and an ensemble carry different parquet metadata keys, so `meteosynth.store` lists
 only the former and `read_ensemble` accepts only the latter.
 
-On runtime -- read this before starting a full run
---------------------------------------------------
-**Measured on this configuration: ~75 s per calendar day** -- 74.9 and 75.0 s/day on two
-independent trial runs at the full 1000 realisations. A complete 365-day year therefore
-takes **roughly 7-8 hours**.
+On runtime -- and what does *not* drive it
+-----------------------------------------
+Absolute times belong to whatever machine you are on, so what follows is deliberately in
+ratios. Run ``leros_timing_benchmark.py`` for the numbers on yours; it writes them to
+``benchmarks/``.
 
-That is far more than the ~21 min the changelog quotes for 1000 realisations of a
-365-day year, and the difference is entirely in the settings, not the machine:
+**The number of realisations is very nearly free.** Stepping N over two orders of
+magnitude -- ten realisations to a thousand -- costs a **few per cent** more time, and the
+run-to-run scatter is the same size as the effect. Per realisation-day the cost falls by
+about a hundredfold, exactly as if N were not in the equation. Output grows in proportion
+and still does not register, so even parquet writing, the one component that genuinely
+scales with N, is lost in the noise.
 
-* the changelog figure is **one attribute**; this asks for three, each fitted and drawn
-  separately -- 3x;
-* it uses a **+/-7-day window on an 11-year record** (165 pooled days per model); this
-  uses **+/-15 on a 19-year record** (589 pooled days), which is ~3.6x the training data
-  behind every KDE.
+**What does drive it: days x transitions needing a full 2D KDE x training pairs.** Nearly
+all the time goes into building each simulator's cached quantile grid, and that is paid
+per calendar day per attribute *regardless of N*.
 
-At 1000 realisations the cost is dominated by *drawing*, so unlike a small ensemble it
-does scale with the realisation count. The three levers, in order of effect:
+That is also what sets the gap between attributes. Each has 23 hourly transitions to
+model, but only those that are not degenerate need a full 2D KDE: ``poa_global`` is
+constant through the night and so needs a full fit for fewer than half of them, while
+``temp_air`` and ``wind_speed`` need all 23. Irradiance therefore comes out **roughly
+three times cheaper** than either of the other two, which cost about the same as each
+other -- and it is the cheapest of the three despite being the headline quantity.
+
+So the levers are, in order of effect:
 
 ===============================  ==========================================
 lever                            effect
 ===============================  ==========================================
-fewer ``ATTRS``                  ~proportional -- ``poa_global`` alone is ~1/3
-``WINDOW_DAYS`` 15 -> 7          roughly halves the data behind each fit
-lower ``N_REALISATIONS``         ~proportional at this scale
+fewer ``ATTRS``                  ~proportional to their 2D-KDE counts above
+``WINDOW_DAYS`` 15 -> 7          ~halves it, by halving the pooled pairs
+raising ``N_REALISATIONS``       **costs almost nothing -- do not economise here**
 ===============================  ==========================================
 
 Narrowing the window is a **modelling** decision, not just a speed one -- see ``CHORE-1``
 in ``TODOs.md``, which measures what a window costs in seasonal contamination. Do not
 change it purely to go faster.
+
+**Runtime is linear in ``N_DAYS`` and independent of ``N_REALISATIONS``**, which is all
+you need to size a run: time a short one, multiply. A full 365-day year at a single
+non-degenerate attribute lands in the **low hours** on a current desktop, at any
+realisation count.
 
 **Size a trial run first** by lowering ``N_DAYS``.
 """
@@ -72,20 +88,25 @@ LATITUDE = 37.167
 LONGITUDE = 26.800
 SITE = "leros"
 
-#: Quantities to generate. Each needs a registered VariableSpec; these three ship with
-#: the package. Cost scales with how many you ask for -- each is fitted separately.
-ATTRS = ["poa_global", "temp_air", "wind_speed"]
+#: Quantities to generate. Each needs a registered VariableSpec, is fitted and drawn
+#: separately, and costs roughly in proportion to how many of its 23 hourly transitions
+#: need a full 2D KDE. ``wind_speed`` and ``temp_air`` need all of them and cost about the
+#: same; ``poa_global`` is constant overnight, needs a full fit for well under half, and
+#: so runs roughly three times cheaper than either -- the cheapest of the three despite
+#: being the headline quantity.
+# ATTRS = ["poa_global", "temp_air", "wind_speed"]
+ATTRS = ["wind_speed"]
 
 #: A non-leap calendar to hang the hours on. The generator is climatological and carries
 #: no year of its own; this only names the output and fixes the day count at 365.
 REFERENCE_YEAR = 2023
 
 #: How many independent synthetic years. The calendar is walked once for all of them.
-N_REALISATIONS = 100
+N_REALISATIONS = 1000
 
 #: Days per realisation. Lower this to size a trial run -- see "On runtime" above.
 # use 365 for full run, or 30 for a test run
-N_DAYS = 5
+N_DAYS = 365
 
 #: Half-width of each day's rolling training window, in days. A modelling choice.
 WINDOW_DAYS = 15
@@ -94,6 +115,13 @@ WINDOW_DAYS = 15
 #: so realisation 0 does not change when you ask for more, and temp_air does not change
 #: when you add wind_speed alongside it.
 SEED = 2026
+
+#: Build each simulator's cached quantile grid up front rather than letting the package
+#: decide. Left as ``None`` it switches on above 64 realisations, which means two runs
+#: either side of that boundary differ by *which sampling path ran* and not only by size.
+#: Forcing it True keeps every run on one path, and is the right setting for any ensemble
+#: large enough to want one -- below ~64 realisations it is pure overhead.
+PRECOMPUTE = True
 
 #: Re-download the training record even when one is already stored.
 FORCE_REFETCH = False
@@ -147,6 +175,7 @@ meta = write_ensemble(
     n_days_window=WINDOW_DAYS,
     include_feb29=False,
     progress=PROGRESS,
+    precompute=PRECOMPUTE,
 )
 elapsed = time.perf_counter() - started
 

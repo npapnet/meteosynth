@@ -1,0 +1,7 @@
+# Timing results land here and stay out of the repository. They are only meaningful
+# compared against other runs on the *same machine*, so a committed result would push one
+# developer's hardware into every clone while telling nobody else anything.
+# The folder itself is tracked (via this file) so the benchmark always has somewhere to
+# write, and so a fresh clone shows where results will appear.
+*
+!.gitignore
