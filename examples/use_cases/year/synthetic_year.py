@@ -43,7 +43,7 @@ Mechanics worth knowing while it runs:
   depends on ``(SEED, i, a)`` and nothing else, so realisation 3 is the same series whether
   you generate 10 or 10 000, and ``temp_air`` does not change when you add ``wind_speed``
   alongside it. (One caveat, documented on ``generate_ensemble``: the sampler switches above
-  64 realisations, so pass ``precompute=`` explicitly if you need two *differently sized*
+  64 realisations, so pass ``sampling=`` explicitly if you need two *differently sized*
   ensembles to agree to the last digit.)
 
 Output lands in ``output/`` beside this file (git-ignored): one parquet ensemble, a monthly summary

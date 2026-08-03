@@ -52,7 +52,7 @@ def test_a_realisation_does_not_depend_on_how_many_were_requested(synthetic_ds, 
     and nothing in the output says so.
 
     All sizes here sit below the grid-activation threshold, so the sampler is constant
-    across them; ``test_crossing_the_precompute_boundary`` covers what happens above it.
+    across them; ``test_crossing_the_sampling_crossover`` covers what happens above it.
     """
     dwg = DayWindowGenerator(synthetic_ds, attr_str="temp_air", n_days=WINDOW)
     reference = dwg.generate_ensemble((6, 15), DAYS, 2, seed=11)
@@ -133,12 +133,13 @@ def test_realisation_streams_are_keyed_by_index_not_by_count():
     )
 
 
-def test_crossing_the_precompute_boundary_is_documented_and_controllable(synthetic_ds):
-    """Above 64 realisations the grids are built up front, which changes the last digits.
+def test_crossing_the_sampling_crossover_is_documented_and_controllable(synthetic_ds):
+    """Above 64 realisations `sampling="auto"` picks the grid, which changes the last digits.
 
     Pinned rather than fixed: the alternative is a sampler that changes part-way through an
-    ensemble, leaving the first 64 members drawn differently from the rest. Passing
-    ``precompute`` explicitly is the documented way to compare across the boundary.
+    ensemble, leaving the first 64 members drawn differently from the rest. **Naming the
+    path** -- `sampling="grid"` or `"exact"` -- is the documented way to compare across the
+    crossover, and since `FEAT-17` it is the only thing that decides it.
     """
     dwg = DayWindowGenerator(synthetic_ds, attr_str="temp_air", n_days=WINDOW)
     small = dwg.generate_ensemble((6, 15), DAYS, 3, seed=8)
@@ -149,11 +150,19 @@ def test_crossing_the_precompute_boundary_is_documented_and_controllable(synthet
     )
 
     # Forced to the same setting, the two agree exactly.
-    forced_small = dwg.generate_ensemble((6, 15), DAYS, 3, seed=8, precompute=True)
+    forced_small = dwg.generate_ensemble((6, 15), DAYS, 3, seed=8, sampling="grid")
     forced_large = dwg.generate_ensemble(
-        (6, 15), DAYS, _GRID_ACTIVATION_CALLS + 3, seed=8, precompute=True
+        (6, 15), DAYS, _GRID_ACTIVATION_CALLS + 3, seed=8, sampling="grid"
     )
     np.testing.assert_array_equal(forced_small[0], forced_large[0])
+
+    # And the other way: forced exact, the two also agree -- which `precompute=False`
+    # never managed, because the counter built the grid anyway on the 65th draw.
+    exact_small = dwg.generate_ensemble((6, 15), DAYS, 3, seed=8, sampling="exact")
+    exact_large = dwg.generate_ensemble(
+        (6, 15), DAYS, _GRID_ACTIVATION_CALLS + 3, seed=8, sampling="exact"
+    )
+    np.testing.assert_array_equal(exact_small[0], exact_large[0])
 
 
 # --- agreement with the single-series path -----------------------------------------
@@ -301,7 +310,7 @@ def test_the_file_carries_dtypes_and_its_own_provenance(synthetic_ds, tmp_path):
     assert ens.frame["temp_air"].dtype == np.float64
 
     for key in ("seed", "n_realisations", "n_days", "start", "window_n_days",
-                "bandwidth", "attrs", "include_feb29", "precompute",
+                "bandwidth", "attrs", "include_feb29", "sampling",
                 "meteosynth_version", "source_provenance", "notes"):
         assert key in meta, f"{key} missing from the embedded metadata"
     assert ens.meta["seed"] == 6

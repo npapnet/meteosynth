@@ -36,6 +36,7 @@ import pandas as pd
 
 from .dataset import MetDataset, _pyarrow
 from .generators import DayWindowGenerator, HOURS_PER_DAY, _walk_ensemble, realisation_stream
+from .markov_chain_simulator_kde2d import resolve_sampling
 from .provenance import Provenance
 
 __all__ = [
@@ -183,7 +184,7 @@ def write_ensemble(
     bandwidth: Optional[float] = 0.1,
     include_feb29: bool = False,
     progress: bool = False,
-    precompute: Optional[bool] = None,
+    sampling: str = "auto",
     compression: str = "snappy",
 ) -> dict:
     """
@@ -229,11 +230,12 @@ def write_ensemble(
         Whether the walk visits Feb 29. Defaults to ``False``, giving a 365-day year.
     progress : bool, optional
         Show a ``tqdm`` bar over the day walk.
-    precompute : bool, optional
-        Whether to build each day's quantile grids up front. ``None`` decides by realisation
-        count. Recorded in the file's metadata, since it is part of what would be needed to
-        regenerate the ensemble bit-for-bit -- see
-        :meth:`~meteosynth.generators.DayWindowGenerator.generate_ensemble`.
+    sampling : {"auto", "exact", "grid"}, optional
+        Which path answers each draw. ``"auto"`` (default) decides from ``n_realisations``
+        before drawing starts. The **resolved** value -- never ``"auto"`` -- is recorded in
+        the file's metadata, since it is part of what would be needed to regenerate the
+        ensemble bit-for-bit. See
+        :data:`~meteosynth.markov_chain_simulator_kde2d.SAMPLING_PATHS`.
     compression : str, optional
         Parquet codec. Defaults to ``"snappy"`` for the widest reader compatibility, since
         these files are written to be read by other software.
@@ -297,7 +299,9 @@ def write_ensemble(
         "seed": None if seed is None else int(seed),
         "window_n_days": int(n_days_window),
         "bandwidth": None if bandwidth is None else float(bandwidth),
-        "precompute": precompute,
+        # The path that actually ran, not the one requested: "auto" tells a later reader
+        # nothing, and a file records what happened.
+        "sampling": resolve_sampling(sampling, n_expected_draws=n_realisations),
         "source_provenance": dataset.provenance.to_dict(),
         "notes": _INDEPENDENCE_NOTE,
     }
@@ -314,7 +318,7 @@ def write_ensemble(
             streams=streams,
             include_feb29=include_feb29,
             progress=progress,
-            precompute=precompute,
+            sampling=sampling,
         ):
             writer.write_table(_day_table(pa, schema, step, attrs, n_realisations))
 

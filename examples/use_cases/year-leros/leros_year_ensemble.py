@@ -125,12 +125,13 @@ WINDOW_DAYS = 15
 #: when you add wind_speed alongside it.
 SEED = 2026
 
-#: Build each simulator's cached quantile grid up front rather than letting the package
-#: decide. Left as ``None`` it switches on above 64 realisations, which means two runs
-#: either side of that boundary differ by *which sampling path ran* and not only by size.
-#: Forcing it True keeps every run on one path, and is the right setting for any ensemble
-#: large enough to want one -- below ~64 realisations it is pure overhead.
-PRECOMPUTE = True
+#: Which path answers each draw: ``"grid"`` builds each simulator's cached quantile grid
+#: up front. Left on ``"auto"`` the package decides from the realisation count, so two runs
+#: either side of 64 would differ by *which sampling path ran* and not only by size. Naming
+#: it keeps every run on one path, and ``"grid"`` is right for any ensemble large enough to
+#: want one -- below ~64 realisations it is pure overhead, and ``"exact"`` is the choice
+#: when a run has to be reproducible to the last digit.
+SAMPLING = "grid"
 
 #: Re-download the training record even when one is already stored.
 FORCE_REFETCH = False
@@ -186,7 +187,7 @@ meta = write_ensemble(
     n_days_window=WINDOW_DAYS,
     include_feb29=False,
     progress=PROGRESS,
-    precompute=PRECOMPUTE,
+    sampling=SAMPLING,
 )
 elapsed = time.perf_counter() - started
 

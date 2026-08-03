@@ -19,6 +19,89 @@ Two project-specific conventions:
 
 ---
 
+## Current sprint — unreleased
+
+**The suite can now tell when the sampler changes, and the caller can now say which
+sampler runs.** Two items, in that order, because the first is what made the second safe
+to take. `CHORE-12` closed a demonstrated blind spot: the tests checked rules but never
+the numbers, so `PERF-1`'s entirely new sampling path passed 271 of them unmodified and
+would have passed had it been wrong. `FEAT-17` then replaced the hidden counter that
+decided which path a draw came from with three named modes. **471 tests passing
+(was 447).**
+
+### Added
+
+- **A calibration test: the suite checks what the sampler *produces*, not only that it
+  follows the rules** (`CHORE-12`). `tests/test_sampler_calibration.py` trains on the
+  two-year synthetic fixture, draws 300 realisations at two calendar dates for all three
+  attributes, and asserts the synthetic days match the pool they were fitted to on level
+  (within 5 %), match a recorded reference on spread (within 25 %), and are finite and
+  inside physical support. 18 tests, ~20 s, no network.
+
+  **It was itself validated by fault injection**, since a test that cannot fail is what
+  this item exists to complain about: a ±6–10 % level shift and a halved or 1.6× spread
+  were each caught in **6 of 6 cells**, with **0 of 6** false positives on an untouched
+  control.
+
+  Two measurements shaped it, both recorded in the file. **Spread cannot be compared to
+  the training pool**: a healthy `temp_air` reads 0.61 because the pool carries
+  within-window seasonal drift the model deliberately does not reproduce, while a healthy
+  `poa_direct` reads 0.95 — and narrowing the window fixes one while breaking the other.
+  So spread is checked against its own measured value. And the fixture's **winter is
+  darker than any real site** (0.7 W/m² daily mean in late December against 86 for
+  Heraklion), so the second date is 21 October, where a level ratio is not two near-zero
+  numbers divided by each other.
+
+- **`sampling=` — say which path answers a draw, instead of a hidden counter deciding**
+  (`FEAT-17`). Three named modes on `generate_series`, `generate_ensemble`,
+  `write_ensemble`, `DayWindowGenerator`, `EnvSeriesGenerator`, `for_day`/`for_slot` and
+  the simulator itself:
+
+  | mode | behaviour |
+  | :--- | :--- |
+  | `"auto"` *(default)* | resolve **once, before drawing**, from what is known — an ensemble knows `n_realisations`; a bare `gen_day` loop knows nothing, so the counter advises |
+  | `"exact"` | never build a quantile grid |
+  | `"grid"` | build it up front, always |
+
+  Exported as `SAMPLING_PATHS` and `resolve_sampling`. A mistyped mode raises rather than
+  silently sampling from something else. `DayWindowGenerator`'s LRU cache is keyed on
+  `(slot, sampling)`, so a generator fitted for one path is never handed back for another.
+
+### Fixed
+
+- **`precompute=False` did not disable the cached sampler** (`FEAT-17`). It skipped only
+  the *eager* build; a hidden counter on each simulator still built the grid on the 65th
+  draw, so **936 of 1000 realisations came from a grid the caller had declined** — an
+  opt-out landing within 1.8× of the opt-in and 7× from what its name implied. Measured at
+  N = 1000 on a 365-day year: `precompute=True` 20.2 min, `precompute=False` 36.8 min, a
+  genuine exact path 4.5 h. Verified end to end at N = 200: `sampling="exact"` builds
+  **0 of 23** grids where `precompute=False` built 23 of 23.
+
+  Which sampler answers a draw no longer depends on call history at all. The counter
+  survives as **advice only**: it keeps counting and logs once that a grid would have paid
+  for itself, so the optimisation stays discoverable without ever changing a number.
+
+### Removed
+
+- **`precompute=` on `generate_ensemble` and `write_ensemble`** (`FEAT-17`), replaced by
+  `sampling=`. It was the misnamed parameter above, and a boolean could not express the
+  third state that mattered. **Ensemble files record the resolved path under a `sampling`
+  key** in place of `precompute` — never `"auto"`, since a file should record what
+  happened rather than what was asked for.
+
+### Decisions
+
+- **Choosing a sampling path is about determinism, not accuracy.** The grid's extra error
+  is 0.03 % on the mean and 0.04–0.31 % on the standard deviation — ~100× below what the
+  diagnostics harness can resolve — so the axis is *exact vs fast*, not *precise vs
+  performant*. Pinned by a test asserting the two paths agree distributionally.
+- **A calibration test asserts statistics, never individual draws.** A golden test on a
+  sampler breaks whenever `numpy` or `scipy` changes generator internals without anything
+  being wrong. Every tolerance was set from measured Monte-Carlo noise (±0.1–0.6 % on the
+  level, ±3–9 % on the spread) before the threshold was chosen.
+
+---
+
 ## [0.3.2] — 2026-08-03
 
 **Collect once per site, then work locally — and put the files where the work is.** Two

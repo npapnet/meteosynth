@@ -116,6 +116,80 @@ _GRID_ACTIVATION_CALLS = 64
 #: Quantile levels at which the cached inverse CDF is stored.
 _GRID_QUANTILE_LEVELS = 1001
 
+#: The three ways a draw can be answered, named so a caller can **say which** rather than
+#: discover it from call history (``FEAT-17``).
+#:
+#: ``"exact"``
+#:     Evaluate the conditional density live, every time. No grid is ever built -- not
+#:     lazily, not eagerly. Deterministic and auditable: a number came from the density and
+#:     will again next run. ~13x slower than ``"grid"`` for a large ensemble.
+#: ``"grid"``
+#:     Build the cached quantile grid up front and draw from it throughout. Right when many
+#:     draws are coming; a pessimisation when few are (a chained year takes one draw per
+#:     simulator, so building grids would cost ~9x more than it saves).
+#: ``"auto"``
+#:     Decide from whatever is known, **once, before any drawing starts**. Callers that know
+#:     their draw count -- an ensemble knows ``n_realisations`` -- resolve to ``"exact"`` or
+#:     ``"grid"`` up front and never switch. Only a caller that knows nothing, such as a
+#:     bare ``gen_day`` loop, falls back to :data:`_GRID_ACTIVATION_CALLS` and switches
+#:     part-way, which is then a stated choice rather than a hidden one.
+#:
+#: **"Exact" means no grid, not no approximation.** The live path still discretises the
+#: value axis and integrates by cumulative sum; the grid adds interpolation across
+#: :data:`_CDF_GRID_NODES` nodes and a quantile axis of :data:`_GRID_QUANTILE_LEVELS` on
+#: top of that. Measured, the grid's extra error is 0.03 % on the mean and 0.04-0.31 % on
+#: the standard deviation -- ~100x below what this repo can resolve. **The choice is
+#: about determinism, not accuracy.**
+SAMPLING_PATHS = ("auto", "exact", "grid")
+
+#: What ``"auto"`` resolves to when the caller knows nothing at all.
+_DEFAULT_SAMPLING = "auto"
+
+
+def resolve_sampling(sampling: str, n_expected_draws: Optional[int] = None) -> str:
+    """
+    Turn a requested path and a known draw count into the path that will actually run.
+
+    Parameters
+    ----------
+    sampling : {"auto", "exact", "grid"}
+        What the caller asked for.
+    n_expected_draws : int, optional
+        How many draws each simulator will see, when the caller knows. ``None`` means
+        genuinely unknown -- not zero.
+
+    Returns
+    -------
+    str
+        ``"auto"``, ``"exact"`` or ``"grid"``. ``"auto"`` is returned only when the count
+        is unknown, and means *"let the counter advise"*.
+
+    Raises
+    ------
+    ValueError
+        For an unknown path. Failing here rather than silently defaulting is the point:
+        a typo in a sampling mode must not quietly change what a result was drawn from.
+
+    Examples
+    --------
+    >>> resolve_sampling("auto", n_expected_draws=1000)
+    'grid'
+    >>> resolve_sampling("auto", n_expected_draws=1)
+    'exact'
+    >>> resolve_sampling("auto")
+    'auto'
+    >>> resolve_sampling("exact", n_expected_draws=1000)
+    'exact'
+    """
+    if sampling not in SAMPLING_PATHS:
+        raise ValueError(
+            f"sampling must be one of {SAMPLING_PATHS}, got {sampling!r}"
+        )
+    if sampling != "auto" or n_expected_draws is None:
+        return sampling
+    # The same crossover the counter uses, applied up front where the count is a fact.
+    return "grid" if n_expected_draws > _GRID_ACTIVATION_CALLS else "exact"
+
 
 def _as_rng(rng: Union[None, int, np.random.Generator]) -> np.random.Generator:
     """
@@ -158,6 +232,7 @@ class MarkovChainSimulator2dKDE:
         data: pd.DataFrame,
         bandwidth: Optional[float] = None,
         spec: Optional[VariableSpec] = None,
+        sampling: str = _DEFAULT_SAMPLING,
     ):
         if 'previous' not in data.columns or 'current' not in data.columns:
             raise ValueError("DataFrame must contain 'previous' and 'current' columns")
@@ -165,6 +240,10 @@ class MarkovChainSimulator2dKDE:
         self.data = data
         self.bandwidth = bandwidth
         self.spec = spec
+
+        #: Which path answers a draw. See :data:`SAMPLING_PATHS`. Validated here so a typo
+        #: fails at construction rather than silently sampling from something else.
+        self.sampling = resolve_sampling(sampling)
 
         # Default so that degenerate kinds still expose a ``joint_kde`` attribute
         # (only KDE_2D builds a real 2D KDE).
@@ -672,15 +751,42 @@ class MarkovChainSimulator2dKDE:
         the random stream.
         """
         if not self.has_quantile_grid:
+            # Counted on every path, because the count is worth knowing even when it
+            # decides nothing -- see the advisory note below.
             self._kde2d_calls += 1
-            if self._kde2d_calls > _GRID_ACTIVATION_CALLS:
+
+            if self.sampling == "auto" and self._kde2d_calls > _GRID_ACTIVATION_CALLS:
+                # Only "auto" with no draw count reaches here: the caller knew nothing, so
+                # the counter advises. Every other path was settled before drawing began.
                 self._build_quantile_grid()
-            else:
+            elif self.sampling != "grid":
+                if self.sampling == "exact":
+                    self._advise_grid_once()
                 res_dict = self.get_conditional_density(current_state)
                 curr_values, cdf = res_dict['domain'], res_dict['cdf']
                 return float(np.interp(rng.random(), cdf, curr_values))
+            else:
+                # sampling == "grid" but nobody built it: build now rather than silently
+                # taking the other path.
+                self._build_quantile_grid()
 
         return self._sample_from_grid(current_state, rng)
+
+    def _advise_grid_once(self) -> None:
+        """Say once that a grid would have paid for itself, then never again.
+
+        The counter knows something worth knowing -- *this simulator has answered many
+        draws the slow way and nobody asked for the grid* -- and `FEAT-17` keeps it for
+        exactly that. It no longer changes any number; it only makes the optimisation
+        discoverable instead of silently forgone.
+        """
+        if self._kde2d_calls == _GRID_ACTIVATION_CALLS + 1:
+            logging.info(
+                "simulator drew %d times on the exact path; pass sampling='grid' "
+                "(or a draw count to sampling='auto') for the cached grid -- ~13x "
+                "faster for a large ensemble, same distribution",
+                self._kde2d_calls,
+            )
 
     def _sample_from_grid(self, current_state: float, rng: np.random.Generator) -> float:
         """Two interpolations: along ``previous``, then along the quantile axis."""

@@ -6,7 +6,7 @@ Status: accepted · Author: Antigravity Agent · Date: 2026-07-27 · Last revise
 
 This document provides a concise, high-level architectural overview of the `meteosynth` package. It serves as the primary entry point and technical orientation for human developers and AI agents working on, extending, or integrating `meteosynth`.
 
-- **In Scope**: Package essence, domain focus, current architectural state (v0.3.2), component boundaries, data flow pipelines, folder tree structure, module responsibilities, and developer onboarding workflows.
+- **In Scope**: Package essence, domain focus, current architectural state (v0.3.2 + unreleased), component boundaries, data flow pipelines, folder tree structure, module responsibilities, and developer onboarding workflows.
 - **Out of Scope**: Detailed API parameter references (see Sphinx docs in [`docs/source/`](../source/)), end-user quickstart tutorials (see [`README.md`](../../README.md)), and historical design decision records (see [`docs/design/completed/`](completed/)).
 
 ---
@@ -26,13 +26,15 @@ The primary application of `meteosynth` is **Monte-Carlo simulation for renewabl
 
 ---
 
-## Current Package State (v0.3.2)
+## Current Package State (v0.3.2, plus unreleased work)
 
-- **Version**: `0.3.2`, released 2026-08-03 (managed via `uv` and `hatchling`). The
-  release history is [`CHANGELOG.md`](../../CHANGELOG.md); open work is
-  [`TODOs.md`](../../TODOs.md).
+- **Version**: `0.3.2`, released 2026-08-03 (managed via `uv` and `hatchling`). **This
+  document describes the working tree, which is ahead of that release** — `CHORE-12` and
+  `FEAT-17` have landed and will ship in the next version. The release history is
+  [`CHANGELOG.md`](../../CHANGELOG.md), whose *Current sprint* section holds the
+  unreleased part; open work is [`TODOs.md`](../../TODOs.md).
 - **Python Compatibility**: `>=3.10`.
-- **Test suite**: 447 tests across 20 modules, headless by construction -- `conftest.py` selects the `Agg` backend at import, so no environment variable is needed.
+- **Test suite**: 471 tests across 21 modules, headless by construction -- `conftest.py` selects the `Agg` backend at import, so no environment variable is needed.
 - **Runtime dependencies**: `numpy`, `pandas`, `scipy`, `pvlib`, `matplotlib`, `seaborn`,
   `tqdm`, `pyarrow` — all required. One optional extra, `excel` (`openpyxl`), for
   `ensemble_to_xlsx` alone.
@@ -51,7 +53,7 @@ The primary application of `meteosynth` is **Monte-Carlo simulation for renewabl
   - **Decoupled Variable Specs**: Physical constraints (`support`, `units`, `long_name`) are registered centrally in `meteosynth.variables` independently of dataset-specific column names. A column is modellable if and only if it has a spec.
   - **Date-Indexed Pair Alignment**: Daily wide-format restructuring keys transition pairs on calendar dates, eliminating silent mispairing bugs caused by dataset re-sorting.
   - **Lazy LRU-Cached Generators**: `DayWindowGenerator` dynamically instantiates daily models behind an LRU cache, permitting full-year simulations without excessive memory consumption. The cache serves *repeated* requests for the same day (`gen_day`); an ordered calendar walk visits each slot once and gets no hits from it.
-  - **Lazily Cached Conditional Sampling**: a simulator sampled past a threshold caches its conditional inverse CDF over a grid of `previous` values, turning each draw into two interpolations. Lazy by design — a chained year takes one sample per simulator and must not pay to build a cache it will use once.
+  - **Cached Conditional Sampling, chosen not stumbled into**: a simulator can answer from a cached inverse CDF over a grid of `previous` values, turning each draw into two interpolations. `sampling="auto"|"exact"|"grid"` decides, resolved before drawing starts rather than by a counter tripping mid-run — a chained year takes one sample per simulator and must not pay for a cache it will use once.
   - **Ensembles are a first-class operation**, with their own on-disk format
     (`ensemble.py`, long-format parquet, one row group per calendar day).
   - **PVGIS API Integration**: `meteosynth.adapters` interfaces with `pvlib.iotools` to fetch hourly (`fetch_pvgis`, plane-of-array) and TMY (`fetch_pvgis_tmy`, horizontal) data, normalising each to the canonical schema and validating against registered support before it reaches the core. Adapters are an optional convenience, not a required layer.
@@ -65,7 +67,7 @@ The release history behind them is in [`CHANGELOG.md`](../../CHANGELOG.md).
 
 | property | why it has to be known up front |
 | :--- | :--- |
-| **The sampler has two paths, not one** (`PERF-1`) | `MarkovChainSimulator2dKDE` answers a draw either by evaluating the conditional density live, or by reading a cached quantile grid built once the simulator proves hot. Anything reasoning about sampling cost, memory, or exact reproducibility across ensemble sizes has to know this. ~8× on ensembles; nothing on a chained year, by design. Which path is taken is currently decided by a hidden call counter — a known defect, tracked as `FEAT-17`. See [`PERF-1-precomputed-conditional-quantiles.md`](completed/PERF-1-precomputed-conditional-quantiles.md). |
+| **The sampler has two paths, and you choose** (`PERF-1`, `FEAT-17`) | `MarkovChainSimulator2dKDE` answers a draw either by evaluating the conditional density live (`sampling="exact"`) or from a cached quantile grid (`sampling="grid"`) — ~13× apart at scale, and reversed for a chained year, so neither is right for both. `"auto"` resolves **once, before drawing**, from `n_realisations` where that is known. Anything reasoning about sampling cost, memory or bit-reproducibility has to know this. It used to be decided by a hidden counter on draw 65; `FEAT-17` demoted that to advice. See [`PERF-1-precomputed-conditional-quantiles.md`](completed/PERF-1-precomputed-conditional-quantiles.md). |
 | **Two generation entry points with different cost models** (`FEAT-15`) | `generate_series` walks the calendar and fits each day as it arrives; `generate_ensemble` / `write_ensemble` walk it **once** and pass every realisation through each day's single fit — ~77× at N = 1000. Both share `_walk_ensemble`, so calendar behaviour cannot diverge. Two consequences: an ensemble **does** exercise `PERF-1`'s cached sampler (a chained year still does not), and randomness is keyed on `(seed, realisation index, attribute name)` rather than drawn from one stream. See [`completed/FEAT-15-ensemble-generation.md`](completed/FEAT-15-ensemble-generation.md). |
 | **Degeneracy is detected by scale, not by exact zero** (`FIX-2`) | `Kind` classification does not assume a source stores physical zero as exact `0.0`. This is what **allows ingesting providers other than PVGIS**, where resampling and unit conversion leave `1e-16` nights. Relatedly, a singular covariance re-categorises to `KDE_1D` with a warning rather than raising, so one unfittable hour cannot take a whole synthetic year with it. |
 | **Two irradiance specs, deliberately distinct** | `IRRADIANCE_HORIZONTAL` (`ghi`/`dni`/`dhi`) is a *separate spec object* from `IRRADIANCE` (plane-of-array) despite identical support and units, because `long_name` is quoted back to the user by `validate_support` — naming a horizontal quantity "plane-of-array" misinforms exactly when someone is debugging provenance. |
@@ -93,10 +95,14 @@ What it has established, and what the package therefore does and does not promis
   19.3 % at ±7 on 21 September, because the same seasonal slope sits on a smaller
   day-to-day variance. A single global half-width cannot be right for every date
   (`CHORE-1`).
-- **Nothing in the test suite pins what the sampler produces distributionally.** The suite
-  tests properties, so `PERF-1`'s entirely new sampling path passed 271 tests unmodified —
-  and would have passed had it been wrong. Tracked as `CHORE-12`, and it gates the two
-  items that would add a third value-producing path.
+- **The suite now pins what the sampler produces, as well as the rules it follows**
+  (`CHORE-12`, landed 2026-08-03). It used to test properties only, so `PERF-1`'s entirely
+  new sampling path passed 271 tests unmodified — and would have passed had it been wrong.
+  `tests/test_sampler_calibration.py` closes that: it compares generated days against the
+  pool they were fitted to, and was itself validated by fault injection (a ±6–10 % level
+  shift or a halved spread fails 6 of 6 cells; an untouched sampler fails none). It runs on
+  a synthetic fixture, so it asserts *fidelity to the input*, not real-world accuracy —
+  that remains `examples/diagnostics-overshoot/`.
 
 ---
 

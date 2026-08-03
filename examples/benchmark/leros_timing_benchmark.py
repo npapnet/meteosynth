@@ -31,7 +31,7 @@ per run lands in ``benchmarks/``, named for the machine and git-ignored; the scr
 compares against the newest earlier run at a compatible ``BENCHMARK_VERSION`` and flags
 rows that clear the measured noise floor.
 
-**Why it is built this way** -- the two controls (``PRECOMPUTE``, ``WARMUP``), the runtime
+**Why it is built this way** -- the two controls (``SAMPLING``, ``WARMUP``), the runtime
 budget and which knob to turn, the noise floor's known limitation (``CHORE-22``), and how
 this got from 24.7 min to 14 -- is in `README.md` beside this file. The configuration
 constants below carry the rest.
@@ -63,7 +63,7 @@ from meteosynth.ensemble import write_ensemble
 #: the history comparison then refuses that file outright rather than reporting a phantom
 #: regression. Bump the **minor** part when a sweep is merely added or refined: older files
 #: still compare on the rows they share.
-BENCHMARK_VERSION = "4.1"
+BENCHMARK_VERSION = "4.2"
 
 LATITUDE = 37.167
 LONGITUDE = 26.800
@@ -130,8 +130,11 @@ N_DAYS = 4
 WINDOW_DAYS = 15
 SEED = 2026
 
-#: Forced for every run, so the 64-realisation switch cannot confound the comparison.
-PRECOMPUTE = True
+#: Forced for every run, so the 64-realisation crossover cannot confound the comparison:
+#: left on ``"auto"``, a 10-realisation run would take the exact path and a 1000-realisation
+#: run the cached grid, and the two would differ by *which algorithm ran* as much as by
+#: size. Named explicitly since `FEAT-17` replaced ``precompute=True``; same behaviour.
+SAMPLING = "grid"
 
 FORCE_REFETCH = False
 PROGRESS = True
@@ -264,7 +267,7 @@ def timed_run(
         n_days_window=WINDOW_DAYS,
         include_feb29=False,
         progress=PROGRESS,
-        precompute=PRECOMPUTE,
+        sampling=SAMPLING,
     )
 
     total_seconds = time.perf_counter() - start_perf
@@ -283,7 +286,7 @@ def timed_run(
         "n_realisations": n_realisations,
         "n_days": N_DAYS,
         "window_days": WINDOW_DAYS,
-        "precompute": PRECOMPUTE,
+        "sampling": SAMPLING,
         "seed": SEED,
         "start_time": start_dt.isoformat(timespec="seconds"),
         "end_time": end_dt.isoformat(timespec="seconds"),
@@ -330,7 +333,7 @@ if WARMUP:
         n_days_window=WINDOW_DAYS,
         include_feb29=False,
         progress=False,
-        precompute=PRECOMPUTE,
+        sampling=SAMPLING,
     )
     _warm_path.unlink(missing_ok=True)
     print(f"  discarded after {time.perf_counter() - _warm_started:.1f} s")
@@ -495,7 +498,7 @@ payload = {
         "n_days": N_DAYS,
         "window_days": WINDOW_DAYS,
         "seed": SEED,
-        "precompute": PRECOMPUTE,
+        "sampling": SAMPLING,
     },
     "runs": runs,
     "summary": {
