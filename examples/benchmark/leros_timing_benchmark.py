@@ -1,117 +1,40 @@
 """
-What actually drives generation time? Leros, 5 days, timings written to JSON.
+What actually drives generation time? Leros, 4 days, timings written to JSON.
 
-Based on `leros_year_ensemble.py`, cut down to a controlled timing experiment. Two
-questions are asked separately, because they are separate questions and crossing them
-would cost four times the runtime for nothing:
+Four sweeps, each answering one question, because crossing them would cost several times
+the runtime for nothing:
 
-**Sweep A -- does cost scale with the number of realisations?** ``poa_global`` alone,
-``N`` stepped 10 -> 100 -> 1000. One attribute rather than three, because the answer is
-*no* and the reason is that cost is set by a per-day-per-attribute grid build: sweeping N
-on three attributes would establish the same fact at three times the price. The cheapest
-attribute is used so the sweep is nearly free.
+===========  ==========================================================================
+Sweep A      Does cost scale with the number of realisations?  (``poa_global``, N 10-1000)
+Sweep B      How is a day's cost split between the attributes? (each alone, one N)
+Sweep C      How much does an identical run vary?              (one config, repeated)
+Sweep D      Do B's three sum to one run that does all three?  (the additivity control)
+===========  ==========================================================================
 
-**Sweep B -- how is a day's cost split between the attributes?** Each attribute alone, at
-a single N. The three are not alike: ``poa_global`` is degenerate at night, so many of its
-23 hourly transitions collapse to a constant and never need a full 2D KDE, while
-``temp_air`` and ``wind_speed`` need all 23 and cost several times more. Sweep B is what
-turns "a day costs X" into "a day costs X *because of* these attributes".
+The answer Sweep A exists to give is **no**: cost is ``attributes x days`` and is set by a
+per-day-per-attribute grid build, not by how many realisations come out. Sweep B is what
+turns "a day costs X" into "a day costs X *because of* these attributes"; C sets the
+threshold below which a difference between runs is machine noise; D is the only check that
+the decomposition adds up.
 
-Only one N is used for Sweep B on purpose: if Sweep A shows N barely matters, measuring
-the split at every N would re-measure the same three numbers three times.
-
-**The control that makes this a fair test.** `meteosynth` decides for itself whether to
-build each simulator's cached quantile grid, switching it on above 64 realisations
-(`generators.py`, ``_GRID_ACTIVATION_CALLS``). Left to itself, a 10-realisation run would
-take the direct path and a 100-realisation run the cached one, so the two would differ by
-*which algorithm ran* as much as by how many realisations were asked for. Here
-``PRECOMPUTE = True`` forces the cached path for **every** run, so the only thing that
-changes within a sweep is the one variable that sweep exists to vary.
-
-**Sweep D -- the additivity control.** Sweep B's three attributes should sum to one run
-that generates all three, and a large gap would mean something other than fitting and
-drawing is on the clock. Measured on ``desktop-tt4bb0i``: 68.5 s/day summed against
-68.4 s/day combined, a ratio of 1.001 (and 0.991 on an earlier run). The obvious guess --
-that three separate runs cost *more*, each paying a calendar walk and a parquet write the
-combined run pays once -- is not visible: that fixed overhead is below the run-to-run
-spread, so the sign of the residual is not resolvable at this precision.
-
-This control used to fall out of Sweep A for free, when Sweep A ran all three attributes.
-It is now its own row, and the most expensive one here -- so ``CROSS_CHECK = False`` is
-the first thing to switch off for a quick check, at the cost of the only row that
-validates the decomposition.
-
-**A second in one of these files is not a second in another.** Every absolute duration
-here -- and every one quoted in a README, a docstring or a changelog anywhere in this
-repository -- is a property of the machine that produced it as much as of the code. It
-carries no meaning until it is set against another measurement from *the same machine*.
-Ratios travel; seconds do not. That is why documentation elsewhere should speak in
-relative terms and defer to this script, and why these results are deliberately not
-committed.
-
-Sweep C -- how much scatter is there anyway?
---------------------------------------------
-A comparison between runs is worthless without knowing what a *repeat of the same run*
-costs. Sweeps A and B cannot tell you: their rows differ in N or in attribute, so any
-spread confounds real effects with machine noise. Sweep C therefore repeats one fixed
-configuration ``NOISE_REPEATS`` times and reports the coefficient of variation. It uses
-the cheapest attribute so that repeats are affordable, which does mean the floor is
-measured on one configuration and assumed to transfer.
-
-That number is what makes the history comparison honest: a difference smaller than a few
-multiples of the CV is thermal state and background load, not a regression.
-
-Output and comparison
----------------------
-One JSON file per run, into ``benchmarks/`` beside this file::
-
-    benchmarks/<machine>_leros_timing_<timestamp>.json
-
-Prefixed with the machine name because that is the whole point of keeping them. The file
-records ``benchmark_version`` and the full library environment alongside the results, so a
-comparison can tell "this machine got slower" from "the benchmark changed underneath us"
-from "numpy was upgraded".
-
-After writing, the script compares the run against the most recent earlier run **from the
-same machine at a compatible benchmark version**, and flags per-row differences that
-exceed the measured noise floor. The folder is git-ignored: this history is local by
-nature, and committing it would push one machine's numbers into every clone.
+**Read ratios, never seconds.** Every absolute duration here is a property of the machine
+that produced it as much as of the code, and means nothing until set against another
+measurement from *the same machine*.
 
 Run::
 
     uv run python examples/benchmark/leros_timing_benchmark.py
 
-**Expect roughly 11 minutes** -- measured at 10.8 on ``desktop-tt4bb0i``, against 24.7 for
-the 5-day, three-attribute-sweep design this replaced. Nothing here is a usable ensemble:
-3 days, and the parquet is deleted once its size has been recorded unless ``KEEP_PARQUET``
-says otherwise.
+**Roughly 14 minutes.** Nothing here is a usable ensemble -- four days, and the parquet is
+deleted once its size has been recorded unless ``KEEP_PARQUET`` says otherwise. One JSON
+per run lands in ``benchmarks/``, named for the machine and git-ignored; the script then
+compares against the newest earlier run at a compatible ``BENCHMARK_VERSION`` and flags
+rows that clear the measured noise floor.
 
-**What the speed-up cost, stated plainly.** The ratios all survived -- N scaling 1.03x ->
-0.98x, the attribute split 3.24x -> 3.36x/3.37x, additivity 1.001 -> 1.014 -- but
-**Sweep C's noise floor widened from 2.0 % to 7.7 %**. Fewer days means a noisier per-day
-mean, and the first-day warm-up is a third of a 3-day run instead of a fifth. So this
-build detects a regression of ~8 %, where the old one claimed ~2 %. Two caveats on that
-comparison: the 0.17 % CV behind the old floor was measured on an idle machine, and one
-run cannot separate "fewer days" from "busier machine". Raise ``N_DAYS`` to 4-5 if a
-tighter floor matters more than the runtime.
-
-Where the time goes, and what buying it back would cost
--------------------------------------------------------
-Cost is **attributes x days** and is independent of N, so the budget is a count of
-attribute-days. At the shipped settings:
-
-===================================  =================  ====================================
-sweep                                attribute-days     what dropping it would lose
-===================================  =================  ====================================
-A -- N scaling (3 x cheapest)        3 cheap            the N-independence claim itself
-B -- attribute split (3 attrs)       1 cheap + 2 dear   the whole "why a day costs X"
-C -- noise floor (3 x cheapest)      3 cheap            the threshold every comparison uses
-D -- additivity control (3 attrs)    1 cheap + 2 dear   the only check on the decomposition
-===================================  =================  ====================================
-
-``N_DAYS`` scales all four linearly and is the honest knob. ``CROSS_CHECK = False`` drops
-Sweep D for a ~40 % saving. Lowering ``ATTR_SPLIT_N`` saves almost nothing, and that is
-not a flaw -- it is Sweep A's finding, arriving as a bill.
+**Why it is built this way** -- the two controls (``PRECOMPUTE``, ``WARMUP``), the runtime
+budget and which knob to turn, the noise floor's known limitation (``CHORE-22``), and how
+this got from 24.7 min to 14 -- is in `README.md` beside this file. The configuration
+constants below carry the rest.
 """
 
 #%%
@@ -140,7 +63,7 @@ from meteosynth.ensemble import write_ensemble
 #: the history comparison then refuses that file outright rather than reporting a phantom
 #: regression. Bump the **minor** part when a sweep is merely added or refined: older files
 #: still compare on the rows they share.
-BENCHMARK_VERSION = "3.0"
+BENCHMARK_VERSION = "4.1"
 
 LATITUDE = 37.167
 LONGITUDE = 26.800
@@ -169,6 +92,12 @@ ATTR_SPLIT_N = 1000
 #: expensive row here, so it is also the first thing to switch off for a quick check.
 CROSS_CHECK = True
 
+#: One discarded generation before any timing starts, so the first *measured* run is not
+#: also the first run in the process. Without it Sweep A's baseline carries ~12 % of
+#: warm-up that no other row pays -- see the warm-up section below. Off only to reproduce
+#: a pre-4.1 file.
+WARMUP = True
+
 #: Sweep C: repeats of one fixed configuration, to measure run-to-run scatter. The
 #: cheapest attribute, so that a useful number of repeats stays affordable -- the floor is
 #: therefore measured on one configuration and assumed to carry to the others. Three is
@@ -188,10 +117,15 @@ MIN_THRESHOLD_PCT = 2.0
 #:
 #: **The first calendar day of every run costs ~16 % more than the rest** -- measured
 #: 10.3 s against a steady ~8.9 s on ``poa_global`` at N = 1000, and reproduced in every
-#: repeat. So a lower count inflates the reported seconds-per-day: about +5 % at 3 days
-#: against +3 % at 5. **Every row pays it identically, so no ratio moves** -- which is why
-#: 3 is affordable here, and why this file insists on ratios over seconds.
-N_DAYS = 3
+#: repeat. So a lower count inflates the reported seconds-per-day: about +4 % at 4 days
+#: against +3 % at 5 and +5 % at 3. **Every row pays it identically, so no ratio moves** --
+#: which is why a short count is affordable, and why this file insists on ratios over
+#: seconds.
+#:
+#: **4 rather than 3** buys back sensitivity: the per-day mean averages one more sample and
+#: the warm-up is a quarter of the run instead of a third, which narrows Sweep C's noise
+#: floor -- the threshold every comparison against an earlier run is judged by.
+N_DAYS = 4
 
 WINDOW_DAYS = 15
 SEED = 2026
@@ -363,6 +297,43 @@ def timed_run(
     print(f"  -> {total_seconds:.1f} s total, {row['seconds_per_day']:.1f} s/day")
     return row
 
+
+#%%
+# --- 2b. Warm-up: one run, timed by nobody -------------------------------------------
+# **The first generation in a process is systematically slow**, over and above the
+# first-*day* effect every run pays. Measured at 4 days: Sweep A's opening row came in at
+# 11.1 s/day against 9.8 and 10.1 for the two after it -- a 12 % inflation landing squarely
+# on the baseline every other Sweep A row is divided by, which read as "100x the
+# realisations runs 0.91x the time". The same fingerprint sits in Sweep C, whose first
+# repeat is the slowest of the three in every run recorded.
+#
+# It was invisible before `BENCHMARK_VERSION` 3.0 only because Sweep A's rows were then
+# 330 s of three-attribute work, which amortised it away. At 40 s rows it exceeds the
+# noise floor the benchmark reports, so it has to be paid off rather than measured.
+#
+# One day at the cheapest attribute, discarded: enough to touch every code path a timed
+# run touches, for ~3 % of the total.
+
+if WARMUP:
+    print("\nWarm-up run (discarded) -- paying off first-in-process overhead...")
+    _warm_started = time.perf_counter()
+    BENCHMARK_DIR.mkdir(parents=True, exist_ok=True)
+    _warm_path = BENCHMARK_DIR / f"warmup_{SITE}.parquet"
+    # Deliberately the same call `timed_run` makes, so the warm-up touches every path a
+    # measured run touches. One day only: this is a payment, not a measurement.
+    write_ensemble(
+        dataset, [SWEEP_ATTR], _warm_path,
+        start=(1, 1),
+        n_days=1,
+        n_realisations=NOISE_N,
+        seed=SEED,
+        n_days_window=WINDOW_DAYS,
+        include_feb29=False,
+        progress=False,
+        precompute=PRECOMPUTE,
+    )
+    _warm_path.unlink(missing_ok=True)
+    print(f"  discarded after {time.perf_counter() - _warm_started:.1f} s")
 
 #%%
 # --- 3. Sweep A: does cost scale with N? ---------------------------------------------
