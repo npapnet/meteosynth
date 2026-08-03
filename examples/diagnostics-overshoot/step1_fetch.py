@@ -17,48 +17,36 @@ without touching the network.
 from __future__ import annotations
 
 import json
-import re
-import warnings
 
 import config as cfg
 
-from meteosynth.adapters import fetch_pvgis
+from meteosynth.adapters import fetch_pvgis, probe_year_range as _probe
 
 from tools.site_data import HERAKLION  # noqa: E402  (needs cfg's sys.path insert)
-
-#: PVGIS answers an out-of-range request by naming the range it does serve, which is a
-#: far more reliable probe than bisecting: one failed request gives both bounds.
-_RANGE_RE = re.compile(r"between\s+(\d{4})\s+and\s+(\d{4})")
 
 
 def probe_year_range(latitude: float, longitude: float) -> tuple[int, int]:
     """
-    Ask PVGIS what year range it serves for a site.
+    Ask PVGIS what year range it serves, falling back to the configured range.
 
-    Deliberately makes a request that *should* fail -- year 1900 -- because the error
-    message names both bounds. Falls back to :data:`config.REQUESTED_YEARS` if the
-    message ever stops carrying them.
+    The probe itself now lives in :func:`meteosynth.adapters.probe_year_range` -- it was
+    written here first, and moved into the library when ``FEAT-4`` made "collect the
+    widest range" the default rather than something this diagnostic did by hand.
+
+    What stays here is the **fallback**: this harness would rather run on
+    :data:`config.REQUESTED_YEARS` than not run at all, whereas the library refuses,
+    because silently truncating someone's training record is worse than stopping.
     """
-    from pvlib.iotools import get_pvgis_hourly
-
     print("Probing PVGIS for the available year range...")
     try:
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            get_pvgis_hourly(
-                latitude=latitude, longitude=longitude, start=1900, end=1900,
-                components=False,
-            )
-    except Exception as exc:  # noqa: BLE001 -- any failure carries the message we want
-        match = _RANGE_RE.search(str(exc))
-        if match:
-            start, end = int(match.group(1)), int(match.group(2))
-            print(f"  PVGIS serves {start}-{end} ({end - start + 1} years)")
-            return start, end
-        print(f"  probe gave an unparseable error: {str(exc)[:160]}")
+        start, end = _probe(latitude, longitude)
+    except RuntimeError as exc:
+        print(f"  {exc}")
+        print(f"  falling back to the configured range {cfg.REQUESTED_YEARS}")
+        return cfg.REQUESTED_YEARS
 
-    print(f"  falling back to the configured range {cfg.REQUESTED_YEARS}")
-    return cfg.REQUESTED_YEARS
+    print(f"  PVGIS serves {start}-{end} ({end - start + 1} years)")
+    return start, end
 
 
 def main() -> None:
@@ -67,7 +55,7 @@ def main() -> None:
 
     start, end = probe_year_range(site.latitude, site.longitude)
     cache = cfg.RECORD_CACHE.with_name(
-        f"pvgis_hourly_{site.key}_{start}_{end}.csv"
+        f"pvgis_hourly_{site.key}_{start}_{end}.parquet"
     )
 
     if cache.exists():
@@ -79,16 +67,26 @@ def main() -> None:
         )
 
     # fetch_pvgis reads the cache when it exists and fetches when it does not, so this
-    # one call covers both paths. irradiance="global" asks for poa_global directly
-    # rather than fetching the three components and summing them.
-    frame = fetch_pvgis(
+    # one call covers both paths.
+    #
+    # `components=False` asks PVGIS for its own poa_global rather than the three
+    # components, which is deliberate and load-bearing here: the shipped cache was
+    # collected that way, and the summed alternative differs by up to 0.01 W/m2. That is
+    # far below anything this harness can resolve, but it is not *nothing*, and a
+    # measuring instrument should not quietly change what it measures. `full_range=False`
+    # for the same reason -- the probe above already fixed the range.
+    dataset = fetch_pvgis(
         latitude=site.latitude,
         longitude=site.longitude,
         start=start,
         end=end,
         irradiance="global",
+        components=False,
+        full_range=False,
+        site=site.key,
         cache=cache,
     )
+    frame = dataset.met_data
 
     years = sorted(frame["year"].unique().tolist())
     rows_per_year = frame.groupby("year").size()

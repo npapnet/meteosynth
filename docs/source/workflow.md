@@ -141,6 +141,49 @@ A file written by a **newer** schema version is refused rather than guessed at, 
 today's code cannot know what changed. Unknown *provenance* fields are the opposite: they
 are descriptive, so they are ignored with a warning and the dataset still loads.
 
+### Collecting once, then working locally
+
+Collection is slow and networked; modelling is neither, and the two usually happen at
+different times. So `fetch_pvgis` **caches by default** and finds what it cached by
+provenance rather than by you remembering a filename:
+
+```python
+from meteosynth.adapters import fetch_pvgis
+
+fetch_pvgis(35.3387, 25.1442, site="heraklion")     # downloads, caches under ./data/
+fetch_pvgis(site="heraklion", start=2010, end=2020)  # no network: label + view
+```
+
+Three rules make one download per site enough:
+
+1. **The download is the provider's widest range**, discovered by `probe_year_range`,
+   which asks PVGIS for an impossible year because the error names both bounds. `start`
+   and `end` select a *view* of the record, not the size of the download.
+2. **A wider record answers a narrower request** by narrowing —
+   `MetDataset.get_period_subset(start, end)` cuts it and records the period it now holds
+   plus where it came from. A record that merely *overlaps* is a mismatch, because
+   returning the intersection would answer a different question without saying so.
+3. **Every column the provider returned is kept.** PVGIS serves either `poa_global` or
+   the three plane-of-array components, never both, so collecting the components serves
+   every later choice — the total is recoverable by summation, exact to 0.01 W/m² against
+   a fetched one, and marked as derived in provenance.
+
+Where files go is **`data/` under a workspace root**, and nothing else — the store is
+project-local by construction, with no environment variable or global setting that could
+point it elsewhere. The root is the working directory unless a caller says otherwise;
+a script says otherwise with `workspace(__file__)` and gets its own folder however it was
+launched. `data_dir=` chooses another folder for one call (a relative path being read from
+the working directory), `cache=<path>` names one exact file, and `cache=False` turns the
+store off in both directions.
+
+```{note}
+If two collected records could both answer a request, the package raises
+`AmbiguousRecordError` and lists them instead of choosing. Which record a result was
+trained on is part of the result, and a rule like "the widest wins" would make that
+depend on what else happens to be in the folder. `meteosynth.store.describe_store()`
+shows what you have.
+```
+
 ---
 
 ## 2. Seasonal slicing

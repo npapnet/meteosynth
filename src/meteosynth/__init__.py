@@ -5,7 +5,9 @@ try:
 except PackageNotFoundError:      # running from a source tree with no install
     __version__ = "unknown"
 
-from meteosynth import adapters
+from meteosynth import adapters, store
+from meteosynth.store import AmbiguousRecordError, default_data_dir
+from meteosynth.paths import Workspace, workspace
 from meteosynth.constants import INDEX_COLS, SHIPPED_ATTRS, modelled_attrs
 from meteosynth.variables import (
     IRRADIANCE,
@@ -60,6 +62,13 @@ from meteosynth.ensemble import (
 
 __all__ = [
     "adapters",
+    # The project data store: `store.scan`, `store.resolve`, `store.describe_store`.
+    "store",
+    "AmbiguousRecordError",
+    "default_data_dir",
+    # Where a run reads and writes: `data/` and `output/` under a chosen root.
+    "Workspace",
+    "workspace",
     "INDEX_COLS",
     "SHIPPED_ATTRS",
     "modelled_attrs",

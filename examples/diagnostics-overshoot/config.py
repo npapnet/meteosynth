@@ -12,11 +12,14 @@ hyphenated folder (which is therefore not an importable package itself).
 
 from __future__ import annotations
 
-import pathlib
 import sys
 from typing import Optional
 
-HERE = pathlib.Path(__file__).resolve().parent
+from meteosynth import workspace
+
+#: This analysis's own folder, whichever directory the steps are launched from.
+WS = workspace(__file__)
+HERE = WS.root
 EXAMPLES_ROOT = HERE.parent
 
 # examples/tools/ holds site definitions and the observed-vs-synthetic helpers this
@@ -24,6 +27,11 @@ EXAMPLES_ROOT = HERE.parent
 if str(EXAMPLES_ROOT) not in sys.path:
     sys.path.insert(0, str(EXAMPLES_ROOT))
 
+#: Deliberately ``results/`` and ``figures/`` rather than the ``output/`` every other
+#: example writes to. ``results/summary_*.csv`` are **tracked** -- they are the evidence
+#: ``FIX-1`` cites -- and the repository ignores ``output/`` wholesale, so moving them
+#: there would either drop committed evidence or need a re-include rule existing only to
+#: undo the one above it. These names are also what the findings and README cite.
 RESULTS_DIR = HERE / "results"
 RAW_DIR = RESULTS_DIR / "raw"
 FIGURES_DIR = HERE / "figures"
@@ -38,9 +46,22 @@ FIGURES_DIR = HERE / "figures"
 #: got to ``results/raw/record_meta.json``.
 REQUESTED_YEARS = (2005, 2023)
 
-#: Where the fetched record is cached. Lives in the shared ``examples/data/`` folder,
-#: which is already git-ignored, so it is not re-downloaded per analysis.
-RECORD_CACHE = EXAMPLES_ROOT / "data" / "pvgis_hourly_heraklion_2005_2023.csv"
+#: Where the fetched record is cached: this folder's own ``data/``, git-ignored.
+#:
+#: **Named explicitly, and this is the one place in ``examples/`` that still is.** Every
+#: other script hands :func:`~meteosynth.adapters.fetch_pvgis` a folder and lets it match
+#: on provenance. That cannot be done here, because this record is fetched with
+#: ``components=False`` -- PVGIS's own ``poa_global`` rather than the sum of the three
+#: plane-of-array components (see :mod:`step1_fetch`) -- and discovery deliberately treats
+#: those as interchangeable: :meth:`meteosynth.store.StoredRecord.holds` answers a
+#: ``poa_global`` request from the components, exact to the provider's own rounding.
+#:
+#: That equivalence is right for the package and wrong for a measuring instrument. A
+#: components record dropped into this folder would be selected silently and would move
+#: the numbers the dated findings cite, by up to 0.01 W/m2. Discovery matches on site,
+#: period and quantity; it cannot see *how* a record was collected, and here that is the
+#: property that matters. So the file is named.
+RECORD_CACHE = WS.data_dir / "pvgis_hourly_heraklion_2005_2023.parquet"
 
 RECORD_META = RAW_DIR / "record_meta.json"
 

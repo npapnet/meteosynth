@@ -66,7 +66,7 @@ uv run python examples/diagnostics-overshoot/step3_analyse.py    # tables, secon
 uv run python examples/diagnostics-overshoot/step4_figures.py    # figures, seconds
 ```
 
-Progress bars need `tqdm`, which is in the `examples` extra — `uv sync --extra examples`.
+Progress bars need `tqdm`, which is a core dependency — `uv sync` is enough.
 They disable themselves automatically when output is not a terminal, so a redirected log
 holds the printed results rather than several thousand redraws of a bar.
 
@@ -118,7 +118,7 @@ that are. The anchor catches a rewrite that quietly changed what is computed.
 
 `results/summary_*.csv` and `figures/` are derived and regenerate from the raw files in
 seconds. `results/raw/` and `figures/` are git-ignored, matching the repo's rule for
-`examples/output/`; the dated `FINDINGS-*.md` and the summary tables are committed, because
+the examples' `output/` folders; the dated `FINDINGS-*.md` and the summary tables are committed, because
 they are the evidence `FIX-1` cites.
 
 ## What it reuses

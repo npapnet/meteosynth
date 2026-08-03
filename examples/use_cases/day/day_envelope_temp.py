@@ -24,24 +24,31 @@ Temperature behaves nothing like irradiance, and that is why it is worth its own
 * **The daily mean is the aggregate that matters** -- for heating/cooling demand and
   for PV module derating, where a hot day costs efficiency.
 
-The ensemble is written to ``examples/output/`` (git-ignored).
+The ensemble is written to ``output/`` beside this file (git-ignored), and the
+training record is collected into ``data/`` there. Both follow the script, not the
+directory you launch it from.
 
 Run with::
 
-    uv run --extra examples python examples/use_cases/day/day_envelope_temp.py
+    uv run python examples/use_cases/day/day_envelope_temp.py
 
 Runtime: ~60 s on a warm cache.
 """
 
-import pathlib
 import sys
 
 import matplotlib.pyplot as plt
 import numpy as np
 
+from meteosynth import workspace
+
+#: This script's own folder. `data/` and `output/` sit beside it, wherever the script
+#: is launched from -- so the example is self-contained and can be copied anywhere.
+#: `globals().get` rather than `__file__` because this also runs as `#%%` cells, where
+#: there is no file and the working directory is the honest answer.
+WS = workspace(globals().get("__file__"))
 # Make `examples/` importable however this file is run (script, -m, or an editor cell).
-_HERE = pathlib.Path(__file__).resolve().parent if "__file__" in globals() else pathlib.Path.cwd()
-_EXAMPLES = next(p for c in (_HERE, *_HERE.parents) for p in (c, c / "examples")
+_EXAMPLES = next(p for c in (WS.root, *WS.root.parents) for p in (c, c / "examples")
                  if (p / "tools" / "site_data.py").is_file())
 sys.path.insert(0, str(_EXAMPLES))
 
@@ -68,7 +75,7 @@ SEED = 42
 
 
 def main():
-    ds = load_site(HERAKLION, *HERAKLION_YEARS)
+    ds = load_site(WS, HERAKLION, *HERAKLION_YEARS)
     print(ds.describe_time_range())
 
     observed_exact = day_matrix(ds, ATTR, *TARGET, n_days=0)
@@ -103,15 +110,15 @@ def main():
           f"synthetic {int(np.nanargmin(np.median(synthetic, axis=0)))}:00")
 
     print("\nSaving...")
-    save_frame(ensemble_frame(synthetic), f"day_{DATE_LABEL.replace(' ', '')}_{ATTR}_ensemble.csv")
-    save_frame(stats, f"day_{DATE_LABEL.replace(' ', '')}_{ATTR}_stats.csv", index=False)
+    save_frame(WS, ensemble_frame(synthetic), f"day_{DATE_LABEL.replace(' ', '')}_{ATTR}_ensemble.csv")
+    save_frame(WS, stats, f"day_{DATE_LABEL.replace(' ', '')}_{ATTR}_stats.csv", index=False)
 
     fig = plot_day_envelope(
         observed_pool, observed_exact, synthetic,
         attr=ATTR, unit=UNIT, date_label=DATE_LABEL,
         site_label=HERAKLION.name, window_days=POOL_DAYS, aggregate="mean",
     )
-    save_figure(fig, f"day_{DATE_LABEL.replace(' ', '')}_{ATTR}.png")
+    save_figure(WS, fig, f"day_{DATE_LABEL.replace(' ', '')}_{ATTR}.png")
 
     print("\n  Note how much of the ensemble's spread is set at hour 0 and simply carried")
     print("  through the day. That is persistence doing its job, and it is why pi(x0) has")

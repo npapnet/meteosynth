@@ -46,34 +46,39 @@ Mechanics worth knowing while it runs:
   64 realisations, so pass ``precompute=`` explicitly if you need two *differently sized*
   ensembles to agree to the last digit.)
 
-Output lands in ``examples/output/`` (git-ignored): one parquet ensemble, a monthly summary
+Output lands in ``output/`` beside this file (git-ignored): one parquet ensemble, a monthly summary
 table checking the generated climatology against the observed one, and -- if asked for --
 an ``.xlsx`` copy and the heatmap.
 
 Run with::
 
-    uv run --extra examples python examples/use_cases/year/synthetic_year.py
+    uv run python examples/use_cases/year/synthetic_year.py
 
 Runtime: roughly 21 min per attribute for a 1000-realisation year, against ~27 h to
 generate the same thing one series at a time -- a 77x reduction, measured.
 """
 
-import pathlib
 import sys
 import time
 
 import numpy as np
 import pandas as pd
 
+from meteosynth import workspace
+
+#: This script's own folder. `data/` and `output/` sit beside it, wherever the script
+#: is launched from -- so the example is self-contained and can be copied anywhere.
+#: `globals().get` rather than `__file__` because this also runs as `#%%` cells, where
+#: there is no file and the working directory is the honest answer.
+WS = workspace(globals().get("__file__"))
 # Make `examples/` importable however this file is run (script, -m, or an editor cell).
-_HERE = pathlib.Path(__file__).resolve().parent if "__file__" in globals() else pathlib.Path.cwd()
-_EXAMPLES = next(p for c in (_HERE, *_HERE.parents) for p in (c, c / "examples")
+_EXAMPLES = next(p for c in (WS.root, *WS.root.parents) for p in (c, c / "examples")
                  if (p / "tools" / "site_data.py").is_file())
 sys.path.insert(0, str(_EXAMPLES))
 
 from meteosynth import MetDataset, read_ensemble, write_ensemble
-from tools.site_data import (HERAKLION, HERAKLION_YEARS, load_site, output_path,
-                             save_figure, save_frame)
+from tools.site_data import (HERAKLION, HERAKLION_YEARS, load_site, save_figure,
+                             save_frame)
 
 ATTRS = ["poa_global", "temp_air", "wind_speed"]
 REFERENCE_YEAR = 2023     # a non-leap calendar to hang timestamps on
@@ -197,7 +202,7 @@ def plot_year(frame: pd.DataFrame):
 
 
 def main():
-    ds = load_site(HERAKLION, *HERAKLION_YEARS)
+    ds = load_site(WS, HERAKLION, *HERAKLION_YEARS)
     print(ds.describe_time_range())
     print(f"Generating an ensemble of {N_REALISATIONS} synthetic year(s) of {ATTRS} "
           f"on a {REFERENCE_YEAR} (non-leap) calendar.")
@@ -205,7 +210,7 @@ def main():
           "and shared by every realisation.\n")
 
     index = hourly_index(REFERENCE_YEAR, N_DAYS)
-    path = output_path(
+    path = WS.output(
         f"ensemble_{HERAKLION.key}_{REFERENCE_YEAR}_n{N_REALISATIONS}.parquet"
     )
 
@@ -231,21 +236,21 @@ def main():
     if N_DAYS == 365:
         summary = monthly_summary(first, ds.met_data)
         print_summary(summary, first, ds.met_data)
-        save_frame(summary, f"year_{HERAKLION.key}_monthly_summary.csv", index=False)
+        save_frame(WS, summary, f"year_{HERAKLION.key}_monthly_summary.csv", index=False)
 
         if N_REALISATIONS > 1:
             spread = ensemble_spread(ensemble)
             print(f"\n  spread across {N_REALISATIONS} realisations "
                   f"-- the quantity a single series cannot give you:")
             print(spread.to_string(index=False, float_format=lambda v: f"{v:.2f}"))
-            save_frame(spread, f"year_{HERAKLION.key}_ensemble_spread.csv", index=False)
+            save_frame(WS, spread, f"year_{HERAKLION.key}_ensemble_spread.csv", index=False)
     else:
         print(f"\n  N_DAYS={N_DAYS} rather than 365, so the monthly and annual checks are "
               f"skipped -- they compare against annual observed statistics.")
 
     # A single realisation as CSV, for anything that would rather read one series than an
     # ensemble. The parquet file remains the record: it carries the provenance.
-    save_frame(first, f"year_{HERAKLION.key}_{REFERENCE_YEAR}_r01.csv")
+    save_frame(WS, first, f"year_{HERAKLION.key}_{REFERENCE_YEAR}_r01.csv")
 
     if WRITE_XLSX:
         from meteosynth import ensemble_to_xlsx
@@ -254,7 +259,7 @@ def main():
         print(f"  wrote {xlsx.name} (one sheet per attribute, hours x realisations)")
 
     if PLOT_HEATMAP:
-        save_figure(plot_year(first),
+        save_figure(WS, plot_year(first),
                     f"year_{HERAKLION.key}_{REFERENCE_YEAR}_heatmap.png")
 
     print(f"\n  Feb 29 present in the output: "

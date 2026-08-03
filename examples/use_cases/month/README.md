@@ -5,7 +5,7 @@
 | [`monthly_statistics.py`](monthly_statistics.py) | 12 independent synthetic Mays, all three attributes, reported against the eleven observed Mays | ~3 min |
 
 ```bash
-uv run --extra examples python examples/use_cases/month/monthly_statistics.py
+uv run python examples/use_cases/month/monthly_statistics.py
 ```
 
 Nothing is plotted — the output is a statistics table.
@@ -32,7 +32,7 @@ synthetic-to-observed standard-deviation ratio, while monthly mean **wind spread
 price a tail the record does not support. It is the kind of thing only an ensemble
 reveals; no amount of looking at individual days shows it.
 
-## Written to `examples/output/`
+## Written to `output/`, beside this script
 
 ```
 month_heraklion_05_ensemble.csv     every realisation, long format

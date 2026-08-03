@@ -20,7 +20,14 @@ from meteosynth.adapters import (
     normalise,
     validate_support,
 )
+from meteosynth.store import AmbiguousRecordError
 from meteosynth.dataset import MetDataset
+from meteosynth.paths import workspace
+from meteosynth.provenance import Provenance
+
+#: What the stubbed PVGIS claims to serve. Requests outside it fail the way the real API
+#: fails -- naming the range -- which is the whole basis of `probe_year_range`.
+STUB_YEARS = (2005, 2023)
 
 
 def _canonical_frame(n=48, **overrides):
@@ -148,17 +155,34 @@ def _install_stub_pvlib(monkeypatch, arity=2):
 
     def get_pvgis_hourly(latitude, longitude, start, end, components=True, **kwargs):
         calls["components"] = components
-        index = pd.date_range(f"{start}-01-01", periods=72, freq="h")
-        data = pd.DataFrame(index=index)
-        data["temp_air"] = np.linspace(5, 20, len(index))
-        data["wind_speed"] = np.linspace(1, 6, len(index))
-        if components:
-            data["poa_direct"] = np.clip(np.linspace(0, 700, len(index)), 0, None)
-            data["poa_sky_diffuse"] = np.clip(np.linspace(0, 100, len(index)), 0, None)
-            data["poa_ground_diffuse"] = np.zeros(len(index))
-        else:
-            data["poa_global"] = np.clip(np.linspace(0, 800, len(index)), 0, None)
-        return _pad(data)
+        calls["range"] = (start, end)
+
+        # PVGIS refuses an out-of-range request by *naming the range it does serve*,
+        # which is what `probe_year_range` reads instead of bisecting. Reproduced here
+        # so the probe is exercised rather than stubbed past.
+        if start < STUB_YEARS[0] or end > STUB_YEARS[1]:
+            raise ValueError(
+                "Requested location is not available. Data is available "
+                f"between {STUB_YEARS[0]} and {STUB_YEARS[1]}"
+            )
+
+        # Three days per year across the requested span, so a period subset of the
+        # result has something to select. The real reader returns every hour; what
+        # matters here is that the years asked for are the years present.
+        frames = []
+        for year in range(start, end + 1):
+            index = pd.date_range(f"{year}-06-01", periods=72, freq="h")
+            block = pd.DataFrame(index=index)
+            block["temp_air"] = np.linspace(5, 20, len(index))
+            block["wind_speed"] = np.linspace(1, 6, len(index))
+            if components:
+                block["poa_direct"] = np.clip(np.linspace(0, 700, len(index)), 0, None)
+                block["poa_sky_diffuse"] = np.clip(np.linspace(0, 100, len(index)), 0, None)
+                block["poa_ground_diffuse"] = np.zeros(len(index))
+            else:
+                block["poa_global"] = np.clip(np.linspace(0, 800, len(index)), 0, None)
+            frames.append(block)
+        return _pad(pd.concat(frames))
 
     def get_pvgis_tmy(latitude, longitude, coerce_year=None, **kwargs):
         calls["coerce_year"] = coerce_year
@@ -191,32 +215,62 @@ def stub_pvlib(monkeypatch):
     return _install_stub_pvlib(monkeypatch)
 
 
-def test_default_collects_global_irradiance(stub_pvlib):
-    """PVGIS returns global or the three components depending on one flag."""
+def test_a_default_fetch_keeps_every_column_the_provider_returned(stub_pvlib):
+    """One record per site answers every later question about it.
+
+    PVGIS returns global *or* the three components, never both, so choosing per
+    component at fetch time means a download and a file for each. Collecting the
+    components serves them all, because the total is recoverable by summation.
+    """
     dataset = fetch_pvgis(48.86, 2.35, 2011, 2011)
 
+    assert stub_pvlib["components"] is True
+    for column in ("poa_direct", "poa_sky_diffuse", "poa_ground_diffuse", "poa_global",
+                   "temp_air", "wind_speed"):
+        assert column in dataset.met_data.columns, column
+
+
+def test_a_summed_total_says_so_in_provenance(stub_pvlib):
+    """Derived is not the same as measured, and the record carries the difference."""
+    dataset = fetch_pvgis(48.86, 2.35, 2011, 2011)
+
+    assert "summed" in dataset.provenance.notes
+
+
+def test_the_summed_total_is_the_sum(stub_pvlib):
+    dataset = fetch_pvgis(48.86, 2.35, 2011, 2011)
+
+    components = dataset.met_data[
+        ["poa_direct", "poa_sky_diffuse", "poa_ground_diffuse"]
+    ].sum(axis=1)
+    np.testing.assert_allclose(dataset.met_data["poa_global"], components, atol=1e-6)
+
+
+def test_the_providers_own_total_is_still_reachable(stub_pvlib):
+    """`components=False` reproduces what PVGIS itself calls poa_global."""
+    dataset = fetch_pvgis(48.86, 2.35, 2011, 2011, components=False)
+
+    assert stub_pvlib["components"] is False
     assert "poa_global" in dataset.met_data.columns
     assert "poa_direct" not in dataset.met_data.columns
-    assert stub_pvlib["components"] is False
+    assert "summed" not in (dataset.provenance.notes or ""), "this total is measured"
 
 
-def test_direct_is_opted_into(stub_pvlib):
-    dataset = fetch_pvgis(48.86, 2.35, 2011, 2011, irradiance="direct")
-
-    assert "poa_direct" in dataset.met_data.columns
-    assert "poa_global" not in dataset.met_data.columns
-    assert stub_pvlib["components"] is True
+def test_a_component_cannot_be_asked_for_without_components(stub_pvlib):
+    with pytest.raises(ValueError, match="needs components=True"):
+        fetch_pvgis(48.86, 2.35, 2011, 2011, irradiance="direct", components=False)
 
 
 # The emitted column keeps its specific name, so the NAME records the quantity.
 # Provenance records what a name cannot: which site, which years, which source.
 def test_the_column_name_is_the_quantity(stub_pvlib):
-    globals_ds = fetch_pvgis(48.86, 2.35, 2011, 2011, irradiance="global")
+    globals_ds = fetch_pvgis(48.86, 2.35, 2011, 2011, components=False)
     direct_ds = fetch_pvgis(48.86, 2.35, 2011, 2011, irradiance="direct")
 
     assert set(globals_ds.variables) != set(direct_ds.variables)
     assert "poa_global" in globals_ds.variables
     assert "poa_direct" in direct_ds.variables
+    assert "poa_direct" not in globals_ds.variables
 
 
 def test_a_fetch_stamps_provenance(stub_pvlib):
@@ -272,18 +326,19 @@ def test_a_different_site_is_a_mismatch_not_a_silent_answer(stub_pvlib, tmp_path
     assert "35.3387" in message and "48.86" in message
 
 
-def test_a_different_period_is_a_mismatch(stub_pvlib, tmp_path):
+def test_an_uncovered_period_is_a_mismatch(stub_pvlib, tmp_path):
+    """`full_range=False` is what makes a narrow cache; it then cannot answer wider."""
     cache = tmp_path / "site.parquet"
-    fetch_pvgis(48.86, 2.35, 2011, 2011, cache=cache)
+    fetch_pvgis(48.86, 2.35, 2011, 2011, cache=cache, full_range=False)
 
     with pytest.raises(CacheMismatchError, match="period"):
-        fetch_pvgis(48.86, 2.35, 2015, 2016, cache=cache)
+        fetch_pvgis(48.86, 2.35, 2015, 2016, cache=cache, full_range=False)
 
 
-def test_a_different_irradiance_form_is_a_mismatch(stub_pvlib, tmp_path):
+def test_a_cache_holding_only_the_total_cannot_answer_for_a_component(stub_pvlib, tmp_path):
     """One PVGIS fetch cannot carry both forms -- the case that motivated the item."""
     cache = tmp_path / "site.parquet"
-    fetch_pvgis(48.86, 2.35, 2011, 2011, irradiance="global", cache=cache)
+    fetch_pvgis(48.86, 2.35, 2011, 2011, components=False, cache=cache)
 
     with pytest.raises(CacheMismatchError, match="columns"):
         fetch_pvgis(48.86, 2.35, 2011, 2011, irradiance="direct", cache=cache)
@@ -404,3 +459,366 @@ def test_tmy_cache_round_trips(stub_pvlib, tmp_path):
 
     assert "coerce_year" not in stub_pvlib      # the network path was not taken
     assert first == second
+
+
+# --- containment: a wider cache answers a narrower request ---------------------------
+#
+# The property that makes one download per site enough. These build their cache directly
+# rather than through the stub, because the stub returns a fixed 72 hours regardless of
+# the range asked for -- fine for every other test here, useless for one about coverage.
+
+def _multi_year_cache(path, *, start, end, columns=("poa_global",),
+                      latitude=48.86, longitude=2.35, site=None):
+    """A real cached record physically spanning ``start``-``end``."""
+    frames = []
+    for year in range(start, end + 1):
+        index = pd.date_range(f"{year}-06-01", periods=48, freq="h")
+        frame = pd.DataFrame({
+            "year": index.year, "month": index.month,
+            "day": index.day, "hour": index.hour,
+            "temp_air": np.linspace(5, 20, len(index)),
+            "wind_speed": np.linspace(1, 6, len(index)),
+        })
+        for col in columns:
+            frame[col] = np.clip(np.linspace(0, 700, len(index)), 0, None)
+        frames.append(frame)
+
+    MetDataset(
+        pd.concat(frames, ignore_index=True),
+        provenance=Provenance(source="pvgis_hourly", site=site, latitude=latitude,
+                              longitude=longitude, start_year=start, end_year=end),
+    ).save(path)
+    return path
+
+
+def test_a_wider_cache_answers_a_narrower_request(stub_pvlib, tmp_path):
+    cache = _multi_year_cache(tmp_path / "wide.parquet", start=2005, end=2015)
+
+    dataset = fetch_pvgis(48.86, 2.35, 2010, 2012, cache=cache)
+
+    assert set(dataset.met_data["year"]) == {2010, 2011, 2012}
+    assert stub_pvlib == {}, "a covering cache must not touch the network"
+
+
+def test_a_narrowed_result_records_the_period_it_holds(stub_pvlib, tmp_path):
+    cache = _multi_year_cache(tmp_path / "wide.parquet", start=2005, end=2015)
+
+    dataset = fetch_pvgis(48.86, 2.35, 2010, 2012, cache=cache)
+
+    assert (dataset.provenance.start_year, dataset.provenance.end_year) == (2010, 2012)
+    assert "subset from wide.parquet" in dataset.provenance.notes
+
+
+def test_an_exactly_matching_cache_is_returned_whole(stub_pvlib, tmp_path):
+    """No narrowing, and therefore no 'subset from' note to explain."""
+    cache = _multi_year_cache(tmp_path / "exact.parquet", start=2010, end=2012)
+
+    dataset = fetch_pvgis(48.86, 2.35, 2010, 2012, cache=cache)
+
+    assert (dataset.provenance.start_year, dataset.provenance.end_year) == (2010, 2012)
+    assert not (dataset.provenance.notes or "")
+
+
+def test_a_narrower_cache_does_not_answer_a_wider_request(stub_pvlib, tmp_path):
+    """Overlap is not coverage: the missing years have to come from somewhere."""
+    cache = _multi_year_cache(tmp_path / "narrow.parquet", start=2010, end=2012)
+
+    with pytest.raises(CacheMismatchError, match="does not contain"):
+        fetch_pvgis(48.86, 2.35, 2005, 2015, cache=cache)
+
+
+def test_a_partially_overlapping_cache_is_still_a_mismatch(stub_pvlib, tmp_path):
+    cache = _multi_year_cache(tmp_path / "partial.parquet", start=2010, end=2012)
+
+    with pytest.raises(CacheMismatchError, match="does not contain"):
+        fetch_pvgis(48.86, 2.35, 2011, 2015, cache=cache)
+
+
+def test_containment_does_not_weaken_the_site_check(stub_pvlib, tmp_path):
+    """The defect FEAT-13 was filed for must survive the period rule loosening."""
+    cache = _multi_year_cache(tmp_path / "heraklion.parquet", start=2005, end=2015,
+                              latitude=35.3387, longitude=25.1442)
+
+    with pytest.raises(CacheMismatchError, match="site"):
+        fetch_pvgis(48.86, 2.35, 2010, 2012, cache=cache)
+
+
+def test_the_three_components_answer_a_request_for_the_total(stub_pvlib, tmp_path):
+    """A total is reconstructible from its parts; the reverse is never true."""
+    cache = _multi_year_cache(
+        tmp_path / "components.parquet", start=2010, end=2012,
+        columns=("poa_direct", "poa_sky_diffuse", "poa_ground_diffuse"),
+    )
+
+    dataset = fetch_pvgis(48.86, 2.35, 2010, 2012, irradiance="global", cache=cache)
+
+    assert stub_pvlib == {}, "the components cover the request; no fetch needed"
+    assert "poa_direct" in dataset.met_data.columns
+
+
+def test_a_total_does_not_answer_a_request_for_a_part(stub_pvlib, tmp_path):
+    cache = _multi_year_cache(tmp_path / "total.parquet", start=2010, end=2012,
+                              columns=("poa_global",))
+
+    with pytest.raises(CacheMismatchError, match="columns"):
+        fetch_pvgis(48.86, 2.35, 2010, 2012, irradiance="direct", cache=cache)
+
+
+# --- fetch once per site: the default cache, probing, and site labels -----------------
+
+def test_a_fetch_stores_in_the_default_data_dir(stub_pvlib, tmp_path):
+    """Nothing named, and it still lands somewhere findable next time."""
+
+    fetch_pvgis(48.86, 2.35, site="paris")
+
+    written = list((tmp_path / "data").glob("*.parquet"))
+    assert [p.name for p in written] == ["pvgis_hourly_paris_2005_2023.parquet"]
+
+
+def test_the_default_cache_is_found_again_without_being_named(stub_pvlib, tmp_path):
+    first = fetch_pvgis(48.86, 2.35, site="paris")
+
+    stub_pvlib.clear()
+    second = fetch_pvgis(48.86, 2.35, site="paris")
+
+    assert stub_pvlib == {}, "a covering record was already on disk"
+    assert first == second
+
+
+def test_cache_false_neither_reads_nor_writes(stub_pvlib, tmp_path):
+
+    fetch_pvgis(48.86, 2.35, site="paris", cache=False)
+    assert not (tmp_path / "data").exists()
+
+    stub_pvlib.clear()
+    fetch_pvgis(48.86, 2.35, site="paris", cache=False)
+    assert stub_pvlib["components"] is True, "caching off means the network every time"
+
+
+def test_the_download_is_the_widest_range_the_provider_serves(stub_pvlib):
+    """`start`/`end` select a view; they do not size the download."""
+    dataset = fetch_pvgis(48.86, 2.35, 2011, 2012)
+
+    assert stub_pvlib["range"] == STUB_YEARS
+    assert set(dataset.met_data["year"]) == {2011, 2012}
+    assert (dataset.provenance.start_year, dataset.provenance.end_year) == (2011, 2012)
+
+
+def test_the_whole_record_is_returned_when_no_period_is_asked_for(stub_pvlib):
+    dataset = fetch_pvgis(48.86, 2.35)
+
+    assert (dataset.provenance.start_year,
+            dataset.provenance.end_year) == STUB_YEARS
+
+
+def test_full_range_false_downloads_only_what_was_asked_for(stub_pvlib):
+    dataset = fetch_pvgis(48.86, 2.35, 2011, 2012, full_range=False)
+
+    assert stub_pvlib["range"] == (2011, 2012)
+    assert (dataset.provenance.start_year, dataset.provenance.end_year) == (2011, 2012)
+
+
+def test_full_range_false_needs_a_period(stub_pvlib):
+    with pytest.raises(ValueError, match="needs an explicit start and end"):
+        fetch_pvgis(48.86, 2.35, full_range=False)
+
+
+def test_a_period_the_provider_cannot_serve_is_refused(stub_pvlib):
+    """Better than silently returning the overlap, which is what a clamp would do."""
+    with pytest.raises(ValueError, match="does not contain the requested"):
+        fetch_pvgis(48.86, 2.35, 1990, 2000)
+
+
+def test_half_a_period_is_refused(stub_pvlib):
+    with pytest.raises(ValueError, match="both start and end or neither"):
+        fetch_pvgis(48.86, 2.35, start=2011)
+
+
+def test_probe_reads_the_range_out_of_the_providers_own_error(stub_pvlib):
+    """One deliberately-failing request names both bounds -- no bisection."""
+    assert adapters.probe_year_range(48.86, 2.35) == STUB_YEARS
+
+
+def test_an_unparseable_probe_refuses_rather_than_guessing(monkeypatch):
+    """Guessing a range here would silently truncate a record."""
+    module = types.ModuleType("pvlib.iotools")
+
+    def get_pvgis_hourly(**kwargs):
+        raise ValueError("the service is having a bad day")
+
+    module.get_pvgis_hourly = get_pvgis_hourly
+    parent = types.ModuleType("pvlib")
+    parent.iotools = module
+    monkeypatch.setitem(sys.modules, "pvlib", parent)
+    monkeypatch.setitem(sys.modules, "pvlib.iotools", module)
+
+    with pytest.raises(RuntimeError, match="could not read a year range"):
+        adapters.probe_year_range(48.86, 2.35)
+
+
+def test_a_site_label_resolves_coordinates_after_the_first_fetch(stub_pvlib, tmp_path):
+    """The point of a label: type it once with coordinates, then never again."""
+    fetch_pvgis(35.3387, 25.1442, site="heraklion")
+
+    stub_pvlib.clear()
+    dataset = fetch_pvgis(site="heraklion", start=2010, end=2020)
+
+    assert stub_pvlib == {}
+    assert (dataset.provenance.latitude, dataset.provenance.longitude) == (35.3387, 25.1442)
+    assert set(dataset.met_data["year"]) == set(range(2010, 2021))
+
+
+def test_an_unknown_site_label_says_what_it_needs(stub_pvlib, tmp_path):
+
+    with pytest.raises(ValueError, match="coordinates are unknown"):
+        fetch_pvgis(site="atlantis", start=2011, end=2012)
+
+
+def test_coordinates_are_required_when_nothing_identifies_the_site(stub_pvlib):
+    with pytest.raises(ValueError, match="give latitude and longitude"):
+        fetch_pvgis(start=2011, end=2012)
+
+
+def test_an_ambiguous_default_cache_refuses(stub_pvlib, tmp_path):
+    """Two records answer; choosing would make the result depend on the folder."""
+    cache_dir = tmp_path / "data"
+    fetch_pvgis(48.86, 2.35, site="paris")
+    _multi_year_cache(cache_dir / "hand_placed.parquet", start=2005, end=2020,
+                      columns=("poa_direct", "poa_sky_diffuse", "poa_ground_diffuse",
+                               "poa_global"),
+                      latitude=48.86, longitude=2.35, site="paris")
+
+    with pytest.raises(AmbiguousRecordError, match="2 stored records"):
+        fetch_pvgis(48.86, 2.35, site="paris", start=2011, end=2012)
+
+
+def test_force_refetch_ignores_a_covering_cache(stub_pvlib, tmp_path):
+    fetch_pvgis(48.86, 2.35, site="paris")
+
+    stub_pvlib.clear()
+    fetch_pvgis(48.86, 2.35, site="paris", force_refetch=True)
+
+    assert stub_pvlib["components"] is True
+
+
+def test_tmy_caching_stays_opt_in(stub_pvlib, tmp_path):
+    """The asymmetry with fetch_pvgis is deliberate, so assert it rather than assume it.
+
+    A TMY's identity is not fully expressible in provenance -- `coerce_year` and
+    `roll_utc_offset` change what comes back and neither is a provenance field -- so a
+    record found by *searching* could answer a different question than the one asked.
+    """
+
+    fetch_pvgis_tmy(48.86, 2.35, site="paris")
+
+    assert not (tmp_path / "data").exists()
+
+
+def test_a_named_tmy_cache_still_round_trips(stub_pvlib, tmp_path):
+    cache = tmp_path / "tmy.parquet"
+
+    first = fetch_pvgis_tmy(48.86, 2.35, site="paris", cache=cache)
+    assert cache.exists()
+
+    stub_pvlib.clear()
+    second = fetch_pvgis_tmy(48.86, 2.35, site="paris", cache=cache)
+
+    assert "coerce_year" not in stub_pvlib      # the network path was not taken
+    assert first == second
+
+
+def test_a_tmy_and_an_hourly_record_do_not_answer_for_each_other(stub_pvlib, tmp_path):
+    """Different sources, so an hourly default cache never resolves to a TMY."""
+    fetch_pvgis(48.86, 2.35, site="paris")
+    fetch_pvgis_tmy(48.86, 2.35, site="paris", cache=tmp_path / "cache" / "tmy.parquet")
+
+    stub_pvlib.clear()
+    hourly = fetch_pvgis(48.86, 2.35, site="paris", start=2011, end=2012)
+
+    assert stub_pvlib == {}, "the hourly record was cached; the TMY must not confuse it"
+    assert hourly.provenance.source == "pvgis_hourly"
+    assert "ghi" not in hourly.met_data.columns
+
+
+def test_data_dir_relocates_the_store_per_call(stub_pvlib, tmp_path):
+    """The explicit replacement for the environment variable that was removed."""
+    fetch_pvgis(48.86, 2.35, site="paris", data_dir=tmp_path / "inputs")
+
+    assert [p.name for p in (tmp_path / "inputs").glob("*.parquet")] == [
+        "pvgis_hourly_paris_2005_2023.parquet"
+    ]
+    assert not (tmp_path / "data").exists(), "the default was not used"
+
+
+def test_a_relative_data_dir_is_read_from_the_working_directory(stub_pvlib, tmp_path, monkeypatch):
+    """A path you typed means what your shell would make of it -- `FEAT-21`, rule 2.
+
+    Not the calling script's folder: `workspace(__file__)` is how a script asks for that,
+    and it is a different question from "where does `inputs` point?".
+    """
+    monkeypatch.chdir(tmp_path)
+    fetch_pvgis(48.86, 2.35, site="paris", data_dir="inputs")
+
+    assert (tmp_path / "inputs" / "pvgis_hourly_paris_2005_2023.parquet").exists()
+
+
+def test_a_relative_data_dir_follows_the_working_directory(stub_pvlib, tmp_path, monkeypatch):
+    """The same relative path in two directories is two stores, not one."""
+    for project in ("project_a", "project_b"):
+        (tmp_path / project).mkdir()
+        monkeypatch.chdir(tmp_path / project)
+        stub_pvlib.clear()
+        fetch_pvgis(48.86, 2.35, site="paris", data_dir="inputs")
+
+    assert (tmp_path / "project_a" / "inputs" / "pvgis_hourly_paris_2005_2023.parquet").exists()
+    assert (tmp_path / "project_b" / "inputs" / "pvgis_hourly_paris_2005_2023.parquet").exists()
+
+
+def test_a_workspace_data_dir_does_not_follow_the_working_directory(stub_pvlib, tmp_path, monkeypatch):
+    """How a script pins its own folder: hand `fetch_pvgis` a workspace's `data_dir`.
+
+    The end-to-end form of `FEAT-21`'s point -- the record lands beside the script whether
+    or not the terminal is standing there.
+    """
+    script_dir = tmp_path / "use_case"
+    script_dir.mkdir()
+    (tmp_path / "launched_from").mkdir()
+    monkeypatch.chdir(tmp_path / "launched_from")
+
+    fetch_pvgis(48.86, 2.35, site="paris", data_dir=workspace(script_dir).data_dir)
+
+    assert (script_dir / "data" / "pvgis_hourly_paris_2005_2023.parquet").exists()
+    assert not (tmp_path / "launched_from" / "data").exists()
+
+
+def test_a_record_is_found_again_in_the_same_data_dir(stub_pvlib, tmp_path):
+    first = fetch_pvgis(48.86, 2.35, site="paris", data_dir=tmp_path / "inputs")
+
+    stub_pvlib.clear()
+    second = fetch_pvgis(site="paris", start=2011, end=2012, data_dir=tmp_path / "inputs")
+
+    assert stub_pvlib == {}, "the store answered; no download"
+    assert second.provenance.start_year == 2011
+    assert first.provenance.site == second.provenance.site
+
+
+def test_two_data_dirs_are_independent_stores(stub_pvlib, tmp_path):
+    """What "project-local" means: one project cannot read another's records."""
+    fetch_pvgis(48.86, 2.35, site="paris", data_dir=tmp_path / "project_a")
+
+    stub_pvlib.clear()
+    fetch_pvgis(48.86, 2.35, site="paris", data_dir=tmp_path / "project_b")
+
+    assert stub_pvlib["components"] is True, "project_b had to fetch for itself"
+    assert (tmp_path / "project_a" / "pvgis_hourly_paris_2005_2023.parquet").exists()
+    assert (tmp_path / "project_b" / "pvgis_hourly_paris_2005_2023.parquet").exists()
+
+
+def test_data_dir_is_ignored_when_a_file_is_named(stub_pvlib, tmp_path):
+    """`cache=` has always meant "this exact file", and still does."""
+    named = tmp_path / "named.parquet"
+
+    fetch_pvgis(48.86, 2.35, site="paris", cache=named, data_dir=tmp_path / "inputs")
+
+    assert named.exists()
+    assert not (tmp_path / "inputs").exists()

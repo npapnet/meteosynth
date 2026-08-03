@@ -7,27 +7,27 @@
 | `examples/use_cases/` | Applied workflows that produce data — generate, check against the record, write to disk. Heraklion 2010–2020. Split by time scale into `day/`, `month/` and `year/`, each with its own README. |
 | `examples/concepts/` | How the package behaves — training windows, leap days, the Markov engine, exploratory plots. Paris 2011–2012. |
 | `examples/diagnostics-overshoot/` | A measurement rather than a demonstration: does the generator reproduce the distribution it was fitted to? Four steps behind one `run_all.py`, with the design, the decision rule and the dated findings committed alongside. |
-| `examples/tools/` | Shared helpers the scripts import, plus a runnable cache-priming script. Not part of the package. |
+| `examples/tools/` | Shared helpers the scripts import: site definitions, data loading, the observed-vs-synthetic comparison. Not part of the package. |
 
-Downloads are cached under `examples/data/`; everything generated is written to
-the git-ignored `examples/output/`.
+Each script folder is self-contained: it collects what it needs into a `data/` folder
+beside itself and writes what it generates into an `output/` folder beside itself, both
+git-ignored.
+
+Each downloads what it needs on its first run, then never again.
 
 ```bash
-# Optional: prime the cache once, so no script waits on PVGIS
-uv run python examples/tools/fetch_site_data.py
-
 # Concepts
 uv run python examples/concepts/example_exploratory_analysis.py
 uv run python examples/concepts/example_rolling_window.py
 uv run python examples/concepts/example_leap_year_windows.py                 # no PVGIS needed
 
 # Use cases
-uv run --extra examples python examples/use_cases/day/day_envelope_pv.py     # also _temp, _wind
-uv run --extra examples python examples/use_cases/month/monthly_statistics.py  # ~3 min
-uv run --extra examples python examples/use_cases/year/synthetic_year.py     # ~4 min
+uv run python examples/use_cases/day/day_envelope_pv.py     # also _temp, _wind
+uv run python examples/use_cases/month/monthly_statistics.py  # ~3 min
+uv run python examples/use_cases/year/synthetic_year.py     # ~4 min
 
 # Diagnostics
-uv run --extra examples python examples/diagnostics-overshoot/run_all.py     # ~5 min
+uv run python examples/diagnostics-overshoot/run_all.py     # ~5 min
 ```
 
 Sections 1–4 below walk through the concept scripts; section 5 covers the use
@@ -160,7 +160,7 @@ asks about — and it sits at the 10th percentile.
 
 `examples/use_cases/` runs the sketch above for real, on eleven full years of
 Heraklion, Crete data (2010–2020, PVGIS). Each script writes what it generates to
-the git-ignored `examples/output/`.
+the script's own git-ignored `output/`.
 
 They are grouped by the **time scale of the question** — `day/`, `month/`, `year/` —
 because the scale changes what can be asked, and each folder carries a README saying

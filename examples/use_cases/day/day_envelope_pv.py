@@ -30,29 +30,32 @@ What to expect from irradiance specifically, and what makes it the awkward one:
   all: treat the shape as sound and the absolute magnitude as something you have
   measured rather than assumed.
 
-The ensemble is written to ``examples/output/`` (git-ignored).
+The ensemble is written to ``output/`` beside this file (git-ignored), and the
+training record is collected into ``data/`` there. Both follow the script, not the
+directory you launch it from.
 
 Run with::
 
-    uv run --extra examples python examples/use_cases/day/day_envelope_pv.py
+    uv run python examples/use_cases/day/day_envelope_pv.py
 
 Runtime: ~40 s (one fetch on a cold cache, then ~15 s of sampling).
 """
 
-import pathlib
 import sys
 
 import matplotlib.pyplot as plt
 
+from meteosynth import workspace
+
+#: This script's own folder. `data/` and `output/` sit beside it, wherever the script
+#: is launched from -- so the example is self-contained and can be copied anywhere.
+#: `globals().get` rather than `__file__` because this also runs as `#%%` cells, where
+#: there is no file and the working directory is the honest answer.
+WS = workspace(globals().get("__file__"))
 # Make `examples/` importable however this file is run (script, -m, or an editor cell).
-_HERE = (
-    pathlib.Path(__file__).resolve().parent
-    if "__file__" in globals()
-    else pathlib.Path.cwd()
-)
 _EXAMPLES = next(
     p
-    for c in (_HERE, *_HERE.parents)
+    for c in (WS.root, *WS.root.parents)
     for p in (c, c / "examples")
     if (p / "tools" / "site_data.py").is_file()
 )
@@ -87,7 +90,7 @@ SEED = 42
 
 
 def main():
-    ds = load_site(HERAKLION, *HERAKLION_YEARS)
+    ds = load_site(WS, HERAKLION, *HERAKLION_YEARS)
     print(ds.describe_time_range())
 
     # The observed cloud: the exact date, and the fortnight around it.
@@ -126,11 +129,12 @@ def main():
 
     print("\nSaving...")
     save_frame(
+        WS,
         ensemble_frame(synthetic),
         f"day_{DATE_LABEL.replace(' ', '')}_{ATTR}_ensemble.csv",
     )
     save_frame(
-        stats, f"day_{DATE_LABEL.replace(' ', '')}_{ATTR}_stats.csv", index=False
+        WS, stats, f"day_{DATE_LABEL.replace(' ', '')}_{ATTR}_stats.csv", index=False
     )
 
     fig = plot_day_envelope(
@@ -146,7 +150,7 @@ def main():
         aggregate_scale=1e-3,
         aggregate_unit="kWh/m2",
     )
-    save_figure(fig, f"day_{DATE_LABEL.replace(' ', '')}_{ATTR}.png")
+    save_figure(WS, fig, f"day_{DATE_LABEL.replace(' ', '')}_{ATTR}.png")
 
     print(
         "\n  Read the left panel as: the synthetic band should sit inside the observed"

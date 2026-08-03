@@ -8,15 +8,17 @@ few minutes.
 `meteosynth` is managed with [uv](https://docs.astral.sh/uv/).
 
 ```bash
-# Install core dependencies (numpy, pandas, scipy, pvlib, matplotlib, seaborn)
+# Runtime dependencies + the dev group. Enough to run everything, examples included.
 uv sync
 
-# Add the extras used by the example scripts (tqdm progress bars)
-uv sync --extra examples
+# Optional: Excel export of an ensemble (`ensemble_to_xlsx`) -- the only extra there is
+uv sync --extra excel
 ```
 
 This installs `meteosynth` in editable mode, so edits under `src/meteosynth/`
-take effect immediately.
+take effect immediately. `uv sync` on its own is enough to run every script under
+`examples/` — `tqdm` is a core dependency, because progress bars are a library
+feature rather than an example one.
 
 ```{note}
 The dev dependency group (`uv sync` installs it by default) also brings in
@@ -239,27 +241,76 @@ free.
 
 ## Fetching real data from PVGIS
 
+**Collect once per site, then work locally.** Only the first call touches the network:
+
 ```python
 from meteosynth.adapters import fetch_pvgis
 
-# Paris, 2011-2012. The cache file is written on the first call and read on every
-# later one, so collection happens once.
-ds = fetch_pvgis(48.8566, 2.3522, 2011, 2012, cache="data/paris_2011_2012.parquet")
+# First call: downloads every year PVGIS serves for Paris, caches it under ./data/.
+ds = fetch_pvgis(48.8566, 2.3522, site="paris")
+
+# Later calls: no network. The label resolves the coordinates, and the years select a
+# view of the record already on disk rather than a new download.
+ds = fetch_pvgis(site="paris", start=2011, end=2012)
 ```
 
-You get a `MetDataset` directly — the four calendar columns plus `poa_global`,
-`temp_air` and `wind_speed` — canonicalised and validated on construction, and carrying
-a `Provenance` recording the site, the period and the source.
+You get a `MetDataset` directly — the four calendar columns plus every irradiance
+quantity PVGIS supplied, `temp_air` and `wind_speed` — canonicalised and validated on
+construction, and carrying a `Provenance` recording the site, the period and the source.
 
 The cache is matched against that provenance rather than trusted on its path, so
 requesting a different site or period from the same file raises `CacheMismatchError`
 instead of quietly returning the wrong record. Pass `force_refetch=True` to repurpose a
-path deliberately.
+path deliberately. A wider record **answers** a narrower request and is narrowed on the
+way out; if two records could both answer, you get `AmbiguousRecordError` listing them
+rather than a silent choice.
 
 PVGIS returns *either* global plane-of-array irradiance *or* its three components, never
-both. `irradiance="global"` is the default; pass `"direct"`, `"sky_diffuse"` or
-`"ground_diffuse"` for a component. The emitted column keeps its specific name, so the
-name itself records what was collected.
+both — so a default fetch collects the **components**, which serve every later choice,
+and derives `poa_global` from them by summation (exact to 0.01 W/m², PVGIS's own
+rounding, and recorded as derived in provenance). Pass `components=False` for the
+provider's own total. Each column keeps its specific name, so the name itself records
+what was collected.
+
+### Where the records live
+
+```python
+import meteosynth
+meteosynth.default_data_dir()             # PosixPath('data') under the working directory
+print(meteosynth.store.describe_store())  # what you have collected so far
+```
+
+The store is `data/` under a **workspace root**, and nothing else. Two projects side by
+side keep two independent stores; there is no user-level location, no environment variable
+and no global setting.
+
+The root is the folder you are working in — which is what you mean when you type a
+command. A **script** usually means its own folder instead, and says so:
+
+```python
+from meteosynth import workspace
+
+WS = workspace(__file__)   # this script's folder, however the script was launched
+WS.data_dir                # <script folder>/data   -- collected records
+WS.output("year.csv")      # <script folder>/output -- generated files, created on demand
+```
+
+Passing `__file__` is what makes a script read the same store whichever directory you run
+it from; without it the answer follows your terminal.
+
+Three ways to say otherwise, in increasing order of specificity:
+
+| you want | how |
+| :--- | :--- |
+| a different folder | `data_dir="inputs"` — files are still named for you. A **relative** path is read from the working directory, like any path you type |
+| one specific file | `cache="archive/paris.parquet"` — the path is used verbatim |
+| nothing written or read | `cache=False` |
+
+```{note}
+`cache=False` turns the store off in **both** directions: nothing is read, nothing is
+written, and every call downloads afresh. It also disables `site="paris"`, because
+resolving a label to coordinates *is* a store lookup — so pass latitude and longitude.
+```
 
 ```{note}
 `fetch_pvgis_tmy` fetches a Typical Meteorological Year instead. Its irradiance is

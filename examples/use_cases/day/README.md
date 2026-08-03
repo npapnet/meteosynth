@@ -12,9 +12,9 @@ climate rather than 200 consecutive days.
 | [`day_envelope_wind.py`](day_envelope_wind.py) | `wind_speed` — wind speed | ~60 s |
 
 ```bash
-uv run --extra examples python examples/use_cases/day/day_envelope_pv.py
-uv run --extra examples python examples/use_cases/day/day_envelope_temp.py
-uv run --extra examples python examples/use_cases/day/day_envelope_wind.py
+uv run python examples/use_cases/day/day_envelope_pv.py
+uv run python examples/use_cases/day/day_envelope_temp.py
+uv run python examples/use_cases/day/day_envelope_wind.py
 ```
 
 ## Three checks, because a generator can pass one and fail another
@@ -25,7 +25,7 @@ uv run --extra examples python examples/use_cases/day/day_envelope_wind.py
 | **spread** | what share of synthetic hours land inside the observed p10–p90? | ~80 % is calibrated; far above means the ensemble is too narrow |
 | **quantity** | does the daily total (or mean) land in the right place? | the number an energy model consumes — and the one that can be wrong while the shape looks right |
 
-## Written to `examples/output/`
+## Written to `output/`, beside these scripts
 
 ```
 day_21May_<attr>_ensemble.csv    200 synthetic days, one row each, hours as columns

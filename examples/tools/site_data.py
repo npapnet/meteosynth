@@ -1,56 +1,64 @@
 """
-Shared data access for the example scripts: sites, cached PVGIS records, output paths.
+Shared data access for the example scripts: sites, their records, and where output goes.
 
 Every example needs the same three things -- a site, an hourly record for it, and
-somewhere to put what it generates -- so they live here once instead of being copied
-into each script. Importing this module has **no side effects**: no network call, no
-file write. :func:`load_site` is the only thing that touches the network, and only when
-the cache is cold.
+somewhere to put what it generates -- so they live here once instead of being copied into
+each script. Importing this module has **no side effects**: no network call, no file
+write. :func:`load_site` is the only thing that touches the network, and only when the
+folder holds no answer yet.
 
-Layout this module assumes and maintains::
+Where the files go is not decided here
+--------------------------------------
+It is decided by the script, and handed in as a
+:class:`~meteosynth.paths.Workspace`::
 
-    examples/data/     cached PVGIS downloads   (git-ignored: the repo-wide `data/` rule)
-    examples/output/   generated synthetic series and figures  (git-ignored: output/.gitignore)
+    from meteosynth import workspace
+    from tools.site_data import HERAKLION, load_site, save_frame
 
-Run ``python examples/tools/fetch_site_data.py`` to prime the cache up front rather
-than paying for the download inside whichever example you run first.
+    WS = workspace(globals().get("__file__"))     # this script's own folder
+    dataset = load_site(WS, HERAKLION)            # -> <script folder>/data/
+    save_frame(WS, summary, "monthly.csv")        # -> <script folder>/output/
+
+This module used to name the folders itself (``examples/data``, ``examples/output``),
+which meant every script wrote to the same two places regardless of which one you ran.
+Each example now owns its data and its output, so it is self-contained: copy the folder
+anywhere and it still runs. The rule is ``FEAT-21``; the mechanism is
+:func:`meteosynth.paths.workspace`.
+
+Records are found, not named
+----------------------------
+:func:`load_site` passes ``data_dir`` and lets :func:`~meteosynth.adapters.fetch_pvgis`
+match on what each record says about itself. It used to name the exact file, because the
+one shared folder held two overlapping Heraklion records and discovery would rightly
+refuse to choose between them. One folder per script means one record per site, so the
+collision is gone and these scripts now show the package's ordinary path.
 """
 
 from __future__ import annotations
 
 import pathlib
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from typing import Optional
 
 import pandas as pd
-from pvlib.iotools import get_pvgis_hourly
 
-from meteosynth import MetDataset, Provenance
-
-EXAMPLES_ROOT = pathlib.Path(__file__).resolve().parents[1]
-DATA_DIR = EXAMPLES_ROOT / "data"
-OUTPUT_DIR = EXAMPLES_ROOT / "output"
+from meteosynth import MetDataset, Workspace
+from meteosynth.adapters import fetch_pvgis
 
 
 @dataclass(frozen=True)
 class Site:
-    """A location the examples fetch data for."""
+    """A location the examples fetch data for.
+
+    Note there is no path on this: a site is *what* to collect, and a
+    :class:`~meteosynth.paths.Workspace` is *where* it goes. Keeping them apart is what
+    lets the same site definition serve six example folders.
+    """
 
     key: str
     name: str
     latitude: float
     longitude: float
-
-    def cache_path(self, start_year: int, end_year: int) -> pathlib.Path:
-        """Where the hourly record for this site and year range is cached.
-
-        Note the site and period are still in the *filename*, which is convenient for a
-        human browsing the folder -- but it is no longer what identifies the file. The
-        dataset's own :class:`~meteosynth.Provenance` is, and it is checked on load, so
-        a renamed or mistyped file cannot quietly answer the wrong question.
-        """
-        return DATA_DIR / f"pvgis_hourly_{self.key}_{start_year}_{end_year}.parquet"
 
 
 #: Heraklion, Crete -- the site the use cases are built around. Hot-summer
@@ -69,61 +77,28 @@ HERAKLION_YEARS = (2010, 2020)
 PARIS_YEARS = (2011, 2012)
 
 
-def add_time_columns(data: pd.DataFrame) -> pd.DataFrame:
-    """Add the ``year``/``month``/``day``/``hour`` index columns from a datetime index.
-
-    These four are :data:`meteosynth.INDEX_COLS` -- what
-    :class:`~meteosynth.MetDataset` validates on ingestion.
-    """
-    data["year"] = data.index.year
-    data["month"] = data.index.month
-    data["day"] = data.index.day
-    data["hour"] = data.index.hour
-    return data
-
-
-def add_poa_global(data: pd.DataFrame) -> pd.DataFrame:
-    """Add ``poa_global`` as the sum of the three plane-of-array components.
-
-    ``get_pvgis_hourly(components=True)`` returns the components but not their sum,
-    and ``components=False`` returns the sum but not the components. The PV use case
-    wants total plane-of-array irradiance -- the quantity a module actually sees -- so
-    it is reconstructed here rather than fetched twice.
-
-    ``poa_global`` is registered in :mod:`meteosynth.variables` under the same
-    :data:`~meteosynth.IRRADIANCE` spec as its parts, so it is modellable with no
-    further declaration. The column name is what records that this is the *global*
-    component and not the direct one -- see the module docstring of
-    ``meteosynth.variables`` on why the names stay distinct.
-    """
-    parts = ["poa_direct", "poa_sky_diffuse", "poa_ground_diffuse"]
-    missing = [col for col in parts if col not in data.columns]
-    if missing:
-        raise KeyError(
-            f"cannot build poa_global: missing {missing}. Fetch with components=True."
-        )
-    data["poa_global"] = data[parts].sum(axis=1)
-    return data
-
-
 def load_site(
+    workspace: Workspace,
     site: Site = HERAKLION,
     start_year: Optional[int] = None,
     end_year: Optional[int] = None,
     refresh: bool = False,
 ) -> MetDataset:
     """
-    Load an hourly PVGIS record for a site, downloading it once and caching it.
+    Load an hourly PVGIS record for a site, downloading it once into this workspace.
 
     Parameters
     ----------
+    workspace : Workspace
+        Whose ``data/`` folder holds the record. Typically
+        ``workspace(globals().get("__file__"))`` -- the running script's own folder.
     site : Site, optional
         Which site. Defaults to :data:`HERAKLION`.
     start_year, end_year : int, optional
         Inclusive year range. Defaults to :data:`HERAKLION_YEARS` for Heraklion and
         :data:`PARIS_YEARS` for Paris.
     refresh : bool, optional
-        Re-download even if the cache is warm.
+        Re-download even when the folder already holds an answer.
 
     Returns
     -------
@@ -133,88 +108,72 @@ def load_site(
 
     Notes
     -----
-    This does not call :func:`meteosynth.adapters.fetch_pvgis`, and the reason is worth
-    stating: PVGIS returns *either* the global total *or* the three components, and the
-    examples need both -- the use cases model ``poa_global``, the concept scripts model
-    ``poa_direct``. So the components are fetched and the total is **reconstructed here,
-    deliberately**, rather than paying for two downloads.
+    Thin over :func:`meteosynth.adapters.fetch_pvgis`, which collects the components and
+    derives ``poa_global`` itself -- so this module reimplements neither. The examples need
+    both forms: the use cases model ``poa_global``, the concept scripts model
+    ``poa_direct``.
 
-    That reconstruction is exact for PVGIS: measured on Heraklion 2010 against a fetched
-    ``poa_global``, the maximum absolute difference over 8760 hours is 0.01 W/m2 --
-    PVGIS's own two-decimal rounding -- and the annual totals agree at 1914.6 kWh/m2.
-
-    It stays *explicit* on purpose. :attr:`~meteosynth.MetDataset.irradiance_column`
-    refuses to reconstruct a total from components, because a component is a part of a
-    total rather than the total, and guessing that would be the factor-of-two error the
-    distinct column names exist to prevent. Summing is a claim about the data, so it is
-    something a caller does, not something a lookup does for them.
+    ``full_range=False`` is deliberate. The default downloads every year PVGIS serves
+    (2005-2023 for these sites); these examples train on a fixed shorter period, and there
+    is no reason for a first run to pay for eight years nobody reads.
     """
     default_years = HERAKLION_YEARS if site is HERAKLION else PARIS_YEARS
     start_year = default_years[0] if start_year is None else start_year
     end_year = default_years[1] if end_year is None else end_year
 
-    cache = site.cache_path(start_year, end_year)
-    if cache.exists() and not refresh:
-        print(f"Loading cached {site.name} {start_year}-{end_year} from {cache.name}...")
-        return MetDataset.load(cache)
+    if not _holds_a_record(workspace.data_dir):
+        print(
+            f"Fetching {site.name} ({site.latitude}, {site.longitude}) "
+            f"{start_year}-{end_year} from PVGIS -- one request, then stored in "
+            f"{workspace.data_dir}..."
+        )
 
-    print(
-        f"Fetching {site.name} ({site.latitude}, {site.longitude}) "
-        f"{start_year}-{end_year} from PVGIS -- one request, then cached..."
-    )
-    # pvlib returned (data, inputs, metadata) before 0.11 and (data, metadata) after,
-    # so index rather than unpack: the examples should not care which is installed.
-    result = get_pvgis_hourly(
+    dataset = fetch_pvgis(
         latitude=site.latitude,
         longitude=site.longitude,
         start=start_year,
         end=end_year,
+        site=site.key,
+        data_dir=workspace.data_dir,
+        force_refetch=refresh,
+        full_range=False,
         usehorizon=True,
         outputformat="json",
-        components=True,
     )
-    data = add_poa_global(add_time_columns(result[0]))
-
-    dataset = MetDataset(
-        data,
-        provenance=Provenance(
-            source="pvgis_hourly",
-            site=site.key,
-            latitude=site.latitude,
-            longitude=site.longitude,
-            start_year=start_year,
-            end_year=end_year,
-            fetched=datetime.now(timezone.utc).date().isoformat(),
-            notes="poa_global reconstructed by summing the three POA components",
-        ),
+    print(
+        f"Loaded {site.name} {start_year}-{end_year} "
+        f"({len(dataset.met_data)} hourly rows) from {workspace.data_dir}"
     )
-    dataset.save(cache)
-    print(f"  cached {len(dataset.met_data)} hourly rows to {cache}")
     return dataset
 
 
-def load_paris_demo() -> MetDataset:
+def _holds_a_record(data_dir: pathlib.Path) -> bool:
+    """Whether anything is stored yet -- for the message only, not for the decision.
+
+    ``fetch_pvgis`` decides whether to download by reading provenance, which is the
+    trustworthy answer. This is just so a cold run says so before spending a minute.
+    """
+    return data_dir.is_dir() and any(data_dir.glob("*.parquet"))
+
+
+def load_paris_demo(workspace: Workspace) -> MetDataset:
     """Load the 2011-2012 Paris record the concept scripts use."""
-    return load_site(PARIS, *PARIS_YEARS)
+    return load_site(workspace, PARIS, *PARIS_YEARS)
 
 
-def output_path(name: str) -> pathlib.Path:
-    """Path inside the git-ignored ``examples/output/`` folder, creating it if needed."""
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    return OUTPUT_DIR / name
-
-
-def save_frame(frame: pd.DataFrame, name: str, index: bool = True) -> pathlib.Path:
-    """Write a frame to ``examples/output/`` and report where it went."""
-    path = output_path(name)
+def save_frame(
+    workspace: Workspace, frame: pd.DataFrame, name: str, index: bool = True
+) -> pathlib.Path:
+    """Write a frame to the workspace's ``output/`` and report where it went."""
+    path = workspace.output(name)
     frame.to_csv(path, index=index)
     print(f"  wrote {frame.shape[0]:6d} rows x {frame.shape[1]} cols -> {path}")
     return path
 
 
-def save_figure(fig, name: str, dpi: int = 150) -> pathlib.Path:
-    """Write a matplotlib figure to ``examples/output/`` and report where it went."""
-    path = output_path(name)
+def save_figure(workspace: Workspace, fig, name: str, dpi: int = 150) -> pathlib.Path:
+    """Write a matplotlib figure to the workspace's ``output/`` and report where it went."""
+    path = workspace.output(name)
     fig.savefig(path, dpi=dpi, bbox_inches="tight", facecolor=fig.get_facecolor())
     print(f"  wrote figure -> {path}")
     return path

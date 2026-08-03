@@ -58,6 +58,30 @@ layer the data has to pass through.
    :undoc-members:
    :show-inheritance:
 
+Where a Run Reads and Writes
+---------------------------
+
+The workspace: ``data/`` for what was collected and ``output/`` for what was generated,
+under a root chosen by how the code was entered -- the script's own folder for a script,
+the working directory for a command.
+
+.. automodule:: meteosynth.paths
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+The Download Cache
+------------------
+
+Finding a collected record without opening it. Where the adapters' cache lives, what a
+cached file is called, and which one answers a given request -- read from parquet
+footers, so a folder is discoverable without loading any data.
+
+.. automodule:: meteosynth.store
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 Variables and the Spec Registry
 -------------------------------
 
