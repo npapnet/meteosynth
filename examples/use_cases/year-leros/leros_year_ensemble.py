@@ -1,6 +1,15 @@
 """
 A synthetic wind-speed ensemble for Leros (37.167 N, 26.800 E). Data only.
 
+**One attribute on purpose.** For all three quantities in one file -- which is what the
+validation work in ``paper/metrics-prompt.md`` reads -- use
+``use_cases/year-metrics/leros_metrics_ensemble.py``, which is this script with
+``ATTRS`` widened and every other constant held identical. The two are kept apart so that
+one can be analysed while the other generates, and because the wind column of the
+three-attribute file should *reproduce* this one rather than merely resemble it: randomness
+is keyed on the attribute's **name**, never on its position in ``ATTRS``. That folder's
+step 4 checks it.
+
 Standalone by design: imports **nothing from `examples/`** -- no `tools.site_data`, no
 shared helpers, no `sys.path` bootstrap -- so it can be copied anywhere and run. Written
 as Jupyter-style `#%%` cells, so it can equally be stepped through in VS Code or
