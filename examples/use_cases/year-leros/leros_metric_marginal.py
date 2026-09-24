@@ -63,7 +63,8 @@ WS = workspace(globals().get("__file__"))
 # --- Configuration -------------------------------------------------------------------
 
 #: The quantity to test. Must be a column of both inputs.
-ATTR = "wind_speed"
+ATTRS = ["poa_global", "temp_air", "wind_speed"]
+ATTR = ATTRS[0]
 
 #: How many random half-splits of the observed years build the control band. The band
 #: settles well before 100; more only smooths its edges.
