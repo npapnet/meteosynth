@@ -266,9 +266,10 @@ meteosynth/
 │       ├── README.md               # Index over the three time scales
 │       ├── day/                    # Does a synthetic day look like a real one?
 │       │   ├── README.md
-│       │   ├── day_envelope_pv.py  # One synthetic 21 May vs eleven real ones
+│       │   ├── day_envelope_pv.py  # One synthetic 21 May vs every real one
 │       │   ├── day_envelope_temp.py
-│       │   └── day_envelope_wind.py
+│       │   ├── day_envelope_wind.py
+│       │   └── day_study.py        # Site, case and sweep — what the three share
 │       ├── month/                  # Does an ensemble vary like the real months?
 │       │   ├── README.md
 │       │   └── monthly_statistics.py  # Ensemble of synthetic Mays, as statistics

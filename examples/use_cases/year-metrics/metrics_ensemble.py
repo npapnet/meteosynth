@@ -23,7 +23,7 @@ work lives rather than inside the script that generates its input.
 Everything lands **beside this file**, whichever directory you launch it from:
 
     <this folder>/data/pvgis_hourly_leros_2005_2023.parquet   the training record, once
-    <this folder>/output/ensemble_leros_2023_n<N>_3attr.parquet   the generated ensemble
+    <this folder>/output/ensemble_leros_2023_n<N>_w<W>_3attr.parquet  the generated ensemble
 
 `data/` for what was collected and `output/` for what was generated, both git-ignored.
 The folder is chosen by ``meteosynth.workspace(__file__)`` -- the script's own location,
@@ -74,14 +74,16 @@ WS = workspace(globals().get("__file__"))
 # --- Configuration -------------------------------------------------------------------
 # Every knob this script has. Nothing below here needs editing for an ordinary run.
 #
-# The values match `year-leros/leros_year_ensemble.py` exactly -- same site, seed, window,
-# realisation count, calendar and sampling path. That is deliberate and is what step 4
-# checks: with randomness keyed on (SEED, realisation, attribute *name*), the wind column
-# produced here should reproduce the wind-only file rather than merely resemble it.
 
-LATITUDE = 37.167
-LONGITUDE = 26.800
-SITE = "leros"
+# LATITUDE = 37.167
+# LONGITUDE = 26.800
+# SITE = "leros"
+
+SITE = "heraklion"  # free label stored in the record's provenance
+SITE_NAME = "Heraklion, Crete"  # what the figure is titled with
+LATITUDE = 35.3387
+LONGITUDE = 25.1442
+
 
 #: All three quantities, in one file on one calendar. Each is fitted and drawn separately
 #: -- they are **not** coupled, and a hot hour in a realisation is not thereby a sunny one.
@@ -114,9 +116,6 @@ SEED = 2026
 #: one sampling path regardless of realisation count, and two runs differ only by size.
 SAMPLING = "grid"
 
-#: An existing single-attribute ensemble to check the wind column against, or ``None`` to
-#: skip. Points at the wind-only run next door; harmless if that folder is absent.
-COMPARE_WITH = WS.root.parent / "year-leros" / "data" / "ensemble_leros_2023_n1000.parquet"
 
 #: Re-download the training record even when one is already stored.
 FORCE_REFETCH = False
@@ -165,7 +164,7 @@ print(
 # ensemble. This is the long step.
 
 ensemble_path = WS.output(
-    f"ensemble_{SITE}_{REFERENCE_YEAR}_n{N_REALISATIONS}_{len(ATTRS)}attr.parquet"
+    f"ensemble_{SITE}_{REFERENCE_YEAR}_n{N_REALISATIONS}_w{WINDOW_DAYS}_{len(ATTRS)}attr.parquet"
 )
 
 print(
@@ -204,59 +203,6 @@ ensemble = read_ensemble(ensemble_path)
 print(f"  reads back: {ensemble.n_realisations} realisations, attrs {ensemble.attrs}")
 print(f"  realisation 0: {len(ensemble.realisation(0)):,} rows "
       f"(= {N_DAYS} days x 24 h)")
-
-#%%
-# --- 4. Does the wind column match the wind-only run? --------------------------------
-# A free cross-check, and the reason the constants above are matched rather than merely
-# similar. `realisation_stream` keys randomness on (seed, realisation index, attribute
-# *name*) -- never on the attribute's position in ATTRS -- so asking for three attributes
-# must not disturb what the wind stream produces. If that holds, every wind result derived
-# from the single-attribute file carries over to this one unchanged.
-#
-# Read one calendar day rather than the file: a row group is N_REALISATIONS x 24 rows, so
-# this costs a few MB however large the ensembles are.
-#
-# A mismatch is informative, not a failure. The likeliest cause is that the two files were
-# written by different package versions whose sampling paths differ in the last digits --
-# the existing wind-only file records `precompute: True`, an older spelling of what is now
-# `sampling: "grid"`. Compare the `meteosynth_version` each file carries before drawing a
-# conclusion.
-
-import json
-
-import numpy as np
-import pyarrow.parquet as pq
-
-if COMPARE_WITH is not None and COMPARE_WITH.is_file():
-    print(f"\nCross-check against {COMPARE_WITH.name}")
-    day = 0                      # first calendar day, i.e. row group 0
-    mine = pq.ParquetFile(ensemble_path).read_row_group(day, columns=["wind_speed"])
-    theirs = pq.ParquetFile(COMPARE_WITH).read_row_group(day, columns=["wind_speed"])
-
-    a = mine["wind_speed"].to_numpy()
-    b = theirs["wind_speed"].to_numpy()
-    if a.shape != b.shape:
-        print(f"  shapes differ ({a.shape} vs {b.shape}) -- different run geometry, "
-              f"so the columns are not comparable.")
-    else:
-        identical = np.array_equal(a, b)
-        max_abs = float(np.max(np.abs(a - b)))
-        print(f"  {a.size:,} values compared on day {day + 1}")
-        print(f"  bit-identical: {identical}   max |difference|: {max_abs:.3e}")
-        if not identical:
-            # Footer only -- `read_ensemble` would pull all 8.76M rows into memory just
-            # to reach a version string.
-            raw = (pq.ParquetFile(COMPARE_WITH).schema_arrow.metadata or {})
-            other = json.loads(raw.get(b"meteosynth_ensemble", b"{}").decode("utf-8"))
-            print("  -> not identical. Check the writer versions before concluding "
-                  "anything about the generator; see this cell's comment.")
-            print(f"     this file:  meteosynth {meta.get('meteosynth_version')}, "
-                  f"sampling={meta.get('sampling')}")
-            print(f"     other file: meteosynth {other.get('meteosynth_version')}, "
-                  f"sampling={other.get('sampling', other.get('precompute'))}")
-else:
-    print("\nCross-check skipped: no COMPARE_WITH file. Set it to a single-attribute "
-          "ensemble written with the same seed, window and realisation count.")
 
 #%%
 print(
