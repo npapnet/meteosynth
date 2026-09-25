@@ -4,3 +4,5 @@
 # here, where someone reading the folder will see it.
 data/
 output/
+# The advanced metric scripts write into `output_adv/`; same reasoning, not committed.
+output_adv/
