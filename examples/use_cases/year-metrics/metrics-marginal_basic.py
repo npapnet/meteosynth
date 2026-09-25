@@ -7,11 +7,16 @@ import pandas as pd
 #%% 
 ROOT_DIR = pathlib.Path("")
 DATA_DIR = ROOT_DIR/"data"
-TRAINING_DATA_PARQUET = DATA_DIR /"pvgis_hourly_leros_2005_2023.parquet"
-SYNTHETIC_DATA_PARQUET = DATA_DIR/"ensemble_leros_2023_n1000_3attr.parquet"
+RESULTS_DIR = ROOT_DIR/"output"
+RESULTS_DIR.mkdir(exist_ok=True,parents=True)
+TRAINING_DATA_PARQUET = DATA_DIR /"pvgis_hourly_heraklion_2005_2023.parquet"
+SYNTHETIC_DATA_PARQUET = DATA_DIR/"ensemble_heraklion_2023_n1000_w15_3attr.parquet"
 
 
 ATTRS = ["poa_global", "temp_air", "wind_speed"]
+ATTRS_UNITS =  ["W/m²", "°C", "m/s"]
+ATTRS_LABELS = ["Horizontal Irradiance", "Air Temperature", "Wind Speed"]
+ATTR_IDX = 2    
 #%%
 
 def load_weather_data(
@@ -32,16 +37,23 @@ def load_weather_data(
 #%%
 def compute_ecdf(
     data: Union[pd.Series, np.ndarray], 
-    drop_na: bool = True
+    drop_na: bool = True,
+    n_points: Optional[int] = 1001,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Calculate the Empirical Cumulative Distribution Function (ECDF)."""
     clean_data = np.asarray(data)
     if drop_na:
         clean_data = clean_data[~np.isnan(clean_data)]
 
+    if n_points is not None and len(clean_data) > n_points:
+        y = np.linspace(0, 1.0, num=n_points)
+        x = np.quantile(clean_data, y)
+        return x, y
+
     x = np.sort(clean_data)
     y = np.arange(1, len(x) + 1, dtype=np.float64) / len(x)
     return x, y
+
 
 
 def plot_ecdf(
@@ -72,17 +84,19 @@ def plot_ecdf(
 # x, y = compute_ecdf(df["wind"])
 # ax = plot_ecdf(x, y, variable_name="Wind Speed (m/s)")
 # %%
-variable =ATTRS[1]
+variable =ATTRS[ATTR_IDX]
+ATTR_LABEL = ATTRS_LABELS[ATTR_IDX]
+ATTR_UNIT = ATTRS_UNITS[ATTR_IDX]
+
 df = pd.read_parquet(path = str(TRAINING_DATA_PARQUET.absolute()),
      columns = [variable]
      )
-# %%
 x, y = compute_ecdf ( df[variable])
 # plot_ecdf (x,y, variable_name = "Wind Speed (m/s)")
 # %%
 df_syn = pd.read_parquet(path = str(SYNTHETIC_DATA_PARQUET.absolute()),
     columns = [variable])
-# %%
+
 x_syn, y_syn = compute_ecdf ( df_syn[variable])
 #%%
 # plot_ecdf(x,y, variable_name = "Wind Speed (m/s)")
@@ -90,14 +104,17 @@ x_syn, y_syn = compute_ecdf ( df_syn[variable])
 
 # %%
 variable_str = variable
-units_str = "m/s"
+
 fig, ax = plt.subplots(1,1, figsize = (7,4.5))
-ax.step(x, y, where="post", label="Original Wind Speed")
-ax.step(x_syn, y_syn, where="post", label="Synthetic Wind Speed")
-ax.set_xlabel(f"{variable_str} ({units_str})")
+ax.plot(x, y,markersize=1, label=f"Original {ATTR_LABEL}")
+ax.plot(x_syn, y_syn, markersize=1, label=f"Synthetic {ATTR_LABEL}")
+ax.set_xlabel(f"{variable_str} ({ATTR_UNIT})")
 ax.set_ylabel("Empirical Probability (CDF)")
 ax.set_ylim(-0.02, 1.02)
 ax.grid(True, linestyle="--", alpha=0.6)
 
 plt.legend()
+#%%
+figname = RESULTS_DIR/ f"{SYNTHETIC_DATA_PARQUET.stem}-{variable_str}_ecdf.png"
+fig.savefig(figname, dpi=300, bbox_inches="tight")
 # %%
