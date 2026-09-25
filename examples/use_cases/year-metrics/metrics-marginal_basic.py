@@ -1,9 +1,11 @@
 #%%
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Union
 import pathlib
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+
+from meteosynth.metrics import empirical_cdf
 #%% 
 ROOT_DIR = pathlib.Path("")
 DATA_DIR = ROOT_DIR/"data"
@@ -35,27 +37,6 @@ def load_weather_data(
     return pd.read_parquet(file_path, columns=columns, filters=filters)
 
 #%%
-def compute_ecdf(
-    data: Union[pd.Series, np.ndarray], 
-    drop_na: bool = True,
-    n_points: Optional[int] = 1001,
-) -> Tuple[np.ndarray, np.ndarray]:
-    """Calculate the Empirical Cumulative Distribution Function (ECDF)."""
-    clean_data = np.asarray(data)
-    if drop_na:
-        clean_data = clean_data[~np.isnan(clean_data)]
-
-    if n_points is not None and len(clean_data) > n_points:
-        y = np.linspace(0, 1.0, num=n_points)
-        x = np.quantile(clean_data, y)
-        return x, y
-
-    x = np.sort(clean_data)
-    y = np.arange(1, len(x) + 1, dtype=np.float64) / len(x)
-    return x, y
-
-
-
 def plot_ecdf(
     x: np.ndarray,
     y: np.ndarray,
@@ -81,7 +62,7 @@ def plot_ecdf(
 #%%
 # --- Example One-Line Invocations ---
 # df = load_weather_data("weather_sim.parquet", realisations=[0, 1], columns=["realisation", "wind", "irradiance"])
-# x, y = compute_ecdf(df["wind"])
+# x, y = empirical_cdf(df["wind"])
 # ax = plot_ecdf(x, y, variable_name="Wind Speed (m/s)")
 # %%
 variable =ATTRS[ATTR_IDX]
@@ -91,13 +72,13 @@ ATTR_UNIT = ATTRS_UNITS[ATTR_IDX]
 df = pd.read_parquet(path = str(TRAINING_DATA_PARQUET.absolute()),
      columns = [variable]
      )
-x, y = compute_ecdf ( df[variable])
+x, y = empirical_cdf(df[variable])
 # plot_ecdf (x,y, variable_name = "Wind Speed (m/s)")
 # %%
 df_syn = pd.read_parquet(path = str(SYNTHETIC_DATA_PARQUET.absolute()),
     columns = [variable])
 
-x_syn, y_syn = compute_ecdf ( df_syn[variable])
+x_syn, y_syn = empirical_cdf(df_syn[variable])
 #%%
 # plot_ecdf(x,y, variable_name = "Wind Speed (m/s)")
 # plot_ecdf (x_syn,y_syn, variable_name = "Synthetic  (m/s)")
@@ -106,7 +87,7 @@ x_syn, y_syn = compute_ecdf ( df_syn[variable])
 variable_str = variable
 
 fig, ax = plt.subplots(1,1, figsize = (7,4.5))
-ax.plot(x, y,markersize=1, label=f"Original {ATTR_LABEL}")
+ax.plot(x, y,markersize=1, label=f"Reference {ATTR_LABEL}")
 ax.plot(x_syn, y_syn, markersize=1, label=f"Synthetic {ATTR_LABEL}")
 ax.set_xlabel(f"{variable_str} ({ATTR_UNIT})")
 ax.set_ylabel("Empirical Probability (CDF)")

@@ -47,6 +47,7 @@ Active / Architecture reference:
 | document | type | description |
 |---|---|---|
 | [architecture.md](architecture.md) | architecture reference | Concise overview of package essence, current state (v0.3.2 + unreleased), mathematical foundation, repository tree structure, module responsibilities, and developer/agent onboarding guide. **Synced against the codebase 2026-08-01**, plus a *Where Files Go* section for `FEAT-21` (re-synced 2026-08-03). |
+| [metrics-package.md](metrics-package.md) | implemented (steps 1–6) | `src/meteosynth/metrics/`: fidelity metrics as computation-only code over a `SeriesSet` (reference vs synthetic), with the example scripts keeping IO and plotting. Replaces Part 1 of `paper/metrics-plan-followup.md`; closes with why `SeriesSet` is separate from `Ensemble`. |
 | [FEAT-2-FEAT-1-column-resolution-and-provenance.md](FEAT-2-FEAT-1-column-resolution-and-provenance.md) | **superseded** · record only | Superseded by `FEAT-13` the same day, never implemented. Reduced to why the approach was backwards — provenance in the adapter's cache makes a dataset traceable only if you used the fetcher — plus the `DataFrame.attrs` propagation measurements, which `FEAT-13` no longer relies on and which are recorded nowhere else. **Not a live specification.** |
 
 
