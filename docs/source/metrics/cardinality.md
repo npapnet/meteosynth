@@ -6,6 +6,10 @@ Every metric compares **some real data** with **some synthetic data**. Before as
 - **M** = the number of real (observed) years or replicates,
 - **N** = the number of synthetic realisations.
 
+In the code (`meteosynth.metrics`) the real side is called the **reference** and the
+generated side the **synthetic**: `evaluate(reference, synthetic)`. The reference is usually
+the training record, but nothing in the metrics assumes so.
+
 Cardinality doesn't decide whether you *can* compute a metric. You almost always can.
 It decides **whether the answer means anything**, and **where the uncertainty is**.
 

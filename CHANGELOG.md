@@ -26,10 +26,41 @@ sampler runs.** Two items, in that order, because the first is what made the sec
 to take. `CHORE-12` closed a demonstrated blind spot: the tests checked rules but never
 the numbers, so `PERF-1`'s entirely new sampling path passed 271 of them unmodified and
 would have passed had it been wrong. `FEAT-17` then replaced the hidden counter that
-decided which path a draw came from with three named modes. **471 tests passing
-(was 447).**
+decided which path a draw came from with three named modes. `FEAT-23` then moved the
+fidelity metrics out of the example scripts and into the package, as computation only.
+**501 tests passing (was 447).**
 
 ### Added
+
+- **`meteosynth.metrics` — fidelity metrics as computation only** (`FEAT-23`). Nothing in
+  it takes a path, reads file metadata, prints or plots. Both sides of a comparison arrive
+  as a **`SeriesSet`**: one `(members, hours)` array — a member is an observed year or a
+  realisation — plus the calendar it shares. `SeriesSet.from_reference_frame` builds the
+  reference from a long observed frame (Feb 29 dropped, incomplete years dropped and listed
+  in `.dropped`); `SeriesSet.from_ensemble` / `from_ensemble_frame` build the synthetic side
+  through `Ensemble.to_wide`.
+
+  Two tests, each a frozen settings object whose `evaluate(reference, synthetic, ...)`
+  returns a result with `.table` and `.summary()`:
+
+  - **`MarginalFidelity`** — a distance per `(month, hour)` cell: full-power, size-matched,
+    and a `YearSplitBand` control from random half-splits of the reference years, under the
+    pre-registered 90 % rule. **Degenerate cells** (the same constant on both sides —
+    night-time irradiance) are flagged and excluded from the pass share.
+  - **`TemporalFidelity`** — raw and anomaly autocorrelation to 240 h against the
+    reference years' spread (`MemberSpreadBand`), and the integral decorrelation time. The
+    `Climatology` is an argument, so compared ensembles are measured against one baseline.
+
+  Distances (`Wasserstein1`, `KolmogorovSmirnovStatistic` — the statistic only) and control
+  bands are pluggable. Instruments are public on their own: `autocorrelation`,
+  `decorrelation_time`, `empirical_cdf`, `quantile_traces`, `constant_cells`.
+
+  **Checked against the pre-port script outputs on Heraklion**, both ensembles, all three
+  variables: marginal tables identical (largest difference 1.1e-13, every pass flag equal);
+  temporal τ within 0.08 h, 2 of 1 446 lag flags different, both on the band edge. 30 tests
+  in `tests/test_metrics_*.py`, including closed-form AR(1) and shifted-sample checks and a
+  day-shuffle fault injection that the ACF catches and the marginal test does not.
+
 
 - **A calibration test: the suite checks what the sampler *produces*, not only that it
   follows the rules** (`CHORE-12`). `tests/test_sampler_calibration.py` trains on the
@@ -67,6 +98,18 @@ decided which path a draw came from with three named modes. **471 tests passing
   silently sampling from something else. `DayWindowGenerator`'s LRU cache is keyed on
   `(slot, sampling)`, so a generator fitted for one path is never handed back for another.
 
+### Changed
+
+- **`examples/use_cases/year-metrics/` compute through `meteosynth.metrics`** (`FEAT-23`).
+  The four metric scripts keep reading, printing and plotting; the arithmetic is the
+  package's. Their output columns follow the package: `obs_*` → `ref_*`, `n_obs` →
+  `n_ref`, `trivial` → `degenerate`, and in the summaries `M`/`N` → `n_reference` /
+  `n_synthetic`, `tau_obs_h` → `tau_reference_h`. **The temporal scripts now drop Feb 29**
+  from the reference, like the marginal ones; measured effect on τ ≤ 0.08 h.
+- **`DEGENERACY_RTOL` moved to `meteosynth.constants`**, so the simulator's
+  `Kind.CONSTANT` and the metrics' degenerate-cell mask share one definition of
+  "constant". The simulator's private `_DEGENERACY_RTOL` remains as an alias.
+
 ### Fixed
 
 - **`precompute=False` did not disable the cached sampler** (`FEAT-17`). It skipped only
@@ -91,6 +134,14 @@ decided which path a draw came from with three named modes. **471 tests passing
 
 ### Decisions
 
+- **Metrics take arrays, not package objects or files** (`FEAT-23`). A `SeriesSet` is
+  separate from `Ensemble` because the two have different jobs — one file faithfully, one
+  side of a comparison cheaply (67 MB per attribute against ≥ 276 MB for a full ensemble
+  read) — and the only shared code is the conversion. See
+  [`FEAT-23`](docs/design/completed/FEAT-23-metrics-package.md#8-seriesset-and-ensemble--duplication-or-two-things).
+- **The comparison side is named `reference`, not `observed` or `training`** (`FEAT-23`),
+  so the same API serves held-out years later. `training` keeps its meaning — what a model
+  was fitted on — everywhere else.
 - **Choosing a sampling path is about determinism, not accuracy.** The grid's extra error
   is 0.03 % on the mean and 0.04–0.31 % on the standard deviation — ~100× below what the
   diagnostics harness can resolve — so the axis is *exact vs fast*, not *precise vs

@@ -29,12 +29,12 @@ The primary application of `meteosynth` is **Monte-Carlo simulation for renewabl
 ## Current Package State (v0.3.2, plus unreleased work)
 
 - **Version**: `0.3.2`, released 2026-08-03 (managed via `uv` and `hatchling`). **This
-  document describes the working tree, which is ahead of that release** — `CHORE-12` and
-  `FEAT-17` have landed and will ship in the next version. The release history is
+  document describes the working tree, which is ahead of that release** — `CHORE-12`,
+  `FEAT-17` and `FEAT-23` have landed and will ship in the next version. The release history is
   [`CHANGELOG.md`](../../CHANGELOG.md), whose *Current sprint* section holds the
   unreleased part; open work is [`TODOs.md`](../../TODOs.md).
 - **Python Compatibility**: `>=3.10`.
-- **Test suite**: 471 tests across 21 modules, headless by construction -- `conftest.py` selects the `Agg` backend at import, so no environment variable is needed.
+- **Test suite**: 501 tests across 24 modules, headless by construction -- `conftest.py` selects the `Agg` backend at import, so no environment variable is needed.
 - **Runtime dependencies**: `numpy`, `pandas`, `scipy`, `pvlib`, `matplotlib`, `seaborn`,
   `tqdm`, `pyarrow` — all required. One optional extra, `excel` (`openpyxl`), for
   `ensemble_to_xlsx` alone.
@@ -291,13 +291,21 @@ meteosynth/
 │       ├── markov_implementations/         # Alternative Markov simulators
 │       │   ├── markov_chain_simulator_continuous.py # Binned 1D KDE simulator
 │       │   └── markov_chain_simulator_discrete.py   # Discrete transition matrix simulator
+│       ├── metrics/         # Fidelity metrics over SeriesSet: computation only, no IO or plots
+│       │   ├── series.py        # SeriesSet (members x hours + calendar) and its from_* helpers
+│       │   ├── marginal.py      # MarginalFidelity: distance per (month, hour) vs year-split band
+│       │   ├── temporal.py      # TemporalFidelity: raw/anomaly ACF vs per-year spread, tau
+│       │   ├── climatology.py   # (366, 24) smoothed day-of-year x hour mean
+│       │   ├── autocorrelation.py, distribution.py   # ACF, decorrelation time; ECDF, quantile traces
+│       │   ├── distances.py, control.py              # pluggable distances; control bands
+│       │   └── degeneracy.py    # night-cell mask, same tolerance as Kind.CONSTANT
 │       ├── provenance.py    # Provenance: source, site, period -- what a name cannot say
 │       ├── py.typed         # PEP 561 static type marker
 │       ├── sup_plot_lib.py  # Visual diagnostics & KDE surface plotting
 │       └── variables.py     # VariableSpec registry: support, units, long names
 ├── tests/                   # Automated test suite (pytest)
 │   ├── conftest.py          # Shared fixtures; selects a headless backend at import
-│   └── test_*.py            # 19 modules, 439 tests
+│   └── test_*.py            # 24 modules, 501 tests
 ├── .gitignore
 ├── .python-version          # Interpreter pin for uv
 ├── CHANGELOG.md             # Version release history
@@ -328,7 +336,8 @@ meteosynth/
 | [`adapters.py`](../../src/meteosynth/adapters.py) | Optional collection helpers, returning a `MetDataset` with provenance filled in. `fetch_pvgis` (hourly, plane-of-array) and `fetch_pvgis_tmy` (TMY, horizontal) call `pvlib.iotools` and **cache by default**, matching an existing cache against the request rather than trusting its path — a mismatch is `CacheMismatchError`, not a silent wrong answer. A default fetch takes the provider's widest range (`probe_year_range`) and keeps every column returned, deriving `poa_global` by summation; `start`/`end` select a view. `normalise` maps provider columns to canonical names per source; `validate_support` remains as an opt-in hard check for callers who would rather be stopped than repaired. |
 | [`store.py`](../../src/meteosynth/store.py) | **The project's data store, and discovery as distinct from validation.** `adapters` answers *"is this named file the one I want?"*; this answers *"which file in this folder is?"* — `scan` and `resolve` read provenance and column names from parquet **footers** (1.3 ms/file against 113 ms to load), so no manifest or sidecar is needed and nothing can drift from the records it describes. Owns `default_data_dir` — `./data` under the working directory, **with no environment variable or global setting**, so two projects keep independent stores — the filename convention, and `period_contains`, the single definition of "wide enough" called by both this module and `adapters`. Refuses with `AmbiguousRecordError` when several records answer, rather than choosing. Deliberately not called a *cache*: the records are not expendable (a provider may revise its archive), not transparent, and not shared. Note `StoredRecord.holds` treats a record carrying all three POA components as able to answer a `poa_global` request — right for the package, and the one case where naming a file is still correct (see [Where Files Go](#where-files-go)). |
 | [`paths.py`](../../src/meteosynth/paths.py) | Answers one question: *which folder is the root of this run?* The script's own folder when given `__file__`, the working directory when given nothing. `Workspace.data_dir` / `.output_dir` hang `data/` and `output/` off it. Exists so the rule is written once rather than copied into every script and again into the CLI; `store.default_data_dir()` is defined as `workspace().data_dir`. Module named `paths` while the function is `workspace`, so neither shadows the other. See [`completed/FEAT-21-workspace-and-file-locations.md`](completed/FEAT-21-workspace-and-file-locations.md). |
-| [`constants.py`](../../src/meteosynth/constants.py) | Package constants including index column names (`year`, `month`, `day`, `hour`) and shipped attribute sets. |
+| [`constants.py`](../../src/meteosynth/constants.py) | Package constants including index column names (`year`, `month`, `day`, `hour`), shipped attribute sets, and `DEGENERACY_RTOL` — the one definition of "constant" shared by `Kind.CONSTANT` and the metrics' night-cell mask. |
+| [`metrics/`](../../src/meteosynth/metrics) | **Fidelity metrics, computation only** (`FEAT-23`). Nothing in it takes a path, reads file metadata, prints or plots. Both sides of a comparison — `reference` (observed years) and `synthetic` (realisations) — arrive as a `SeriesSet`: one `(members, hours)` array plus the calendar it shares, built by the caller or by `SeriesSet.from_reference_frame` / `from_ensemble`. Tests are frozen settings objects with `evaluate(reference, synthetic, ...)` returning result objects (`.table`, `.summary()`): `MarginalFidelity` (distance per `(month, hour)` cell against a `YearSplitBand`, degenerate night cells excluded) and `TemporalFidelity` (raw and anomaly ACF against a `MemberSpreadBand`, with the `Climatology` passed in so compared ensembles share one baseline). Distances (`Wasserstein1`, `KolmogorovSmirnovStatistic`) and control bands are pluggable. See [`completed/FEAT-23-metrics-package.md`](completed/FEAT-23-metrics-package.md). |
 | [`sup_plot_lib.py`](../../src/meteosynth/sup_plot_lib.py) | Visual diagnostic functions for plotting fitted 2D KDE surfaces, conditional CDFs, and synthetic time-series comparisons. |
 | [`markov_implementations/`](../../src/meteosynth/markov_implementations) | Alternative Markov models: `ContinuousMarkovChainSimulator` (binned 1D KDE) and `MarkovChainSimulatorDiscrete` (binned matrix transitions). |
 

@@ -1,6 +1,28 @@
-Status: implemented (build steps 1–6; record-keeping step 7 pending) -  Date: 2026-09-25
+# FEAT-23 — `meteosynth.metrics`: fidelity metrics as a package, computation only
 
-# `meteosynth.metrics` — fidelity metrics as a package, computation only
+Status: **implemented 2026-09-25** - Date: 2026-09-25
+
+> **Archive note — landed 2026-09-25, 501 tests green (was 471).** Implemented as
+> designed; the port was checked against the pre-port outputs on the real Heraklion data
+> (see [Verification](#verification)). Deviations and additions worth recording:
+>
+> 1. **`from_reference_frame` has no `complete_years_only` flag.** A `SeriesSet` cannot
+>    hold NaN, so an incomplete year can only be dropped; the flag had no second value.
+>    Dropped years are listed in `SeriesSet.dropped`.
+> 2. **The constant test uses the standard deviation**, as `Kind.CONSTANT` does, and a
+>    cell is degenerate only when both sides are constant *and equal* — two different
+>    constants are scored as a failure. `DEGENERACY_RTOL` now lives in `constants.py`.
+> 3. **The climatology slots beside the empty Feb 29 slot** (Feb 28, Mar 1) pool one slot
+>    fewer on one side. Measured: 0.046 off a steep synthetic seasonal slope at ±1 day;
+>    on Heraklion at ±15 days it moves the synthetic anomaly ACF by at most 1.3e-4.
+> 4. **The marginal test reproduces the old random sequence exactly** — splits first, then
+>    one synthetic subsample per cell and split, synthetic values in day-major order — so
+>    the ported tables are identical to the pre-port ones, not merely close.
+> 5. **Public additions not in the plan:** `no_leap_calendar()`, `SeriesSet.cell_mask()`,
+>    `degeneracy_tolerance()`, `is_degenerate()`, `MarginalResult.scored`.
+> 6. **The integral decorrelation time runs low** on a known AR(1) (8.07 h against 9 at
+>    φ = 0.8): biased sample ACF lags, truncated at the first noisy zero crossing. The test
+>    allows 15 %; the bias is the estimator's, identical before and after the port.
 
 ## Overview
 
@@ -47,9 +69,9 @@ several scripts, a `metrics/plots.py` can be added later without changing anythi
 
 ### Relation to earlier plans
 
-[`paper/metrics-plan-followup.md`](../../paper/metrics-plan-followup.md) Part 1 proposed
+[`paper/metrics-plan-followup.md`](../../../paper/metrics-plan-followup.md) Part 1 proposed
 the same metrics as `src/meteosynth/utilities/`, never implemented. This document
-**replaces its Part 1 layout and signatures** and keeps its substance:
+**replaces its Part 1 layout and signatures** (marked superseded there) and keeps its substance:
 
 | Kept from the follow-up                                                           | Changed here                                                                                                                                   |
 | :-------------------------------------------------------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -126,7 +148,7 @@ src/meteosynth/metrics/
 └── temporal.py         TemporalFidelity → TemporalResult     (paper Test 2, ACF)
 ```
 
-Future tests from [`paper/metrics-prompt.md`](../../paper/metrics-prompt.md) are new
+Future tests from [`paper/metrics-prompt.md`](../../../paper/metrics-prompt.md) are new
 files in the same pattern — a frozen settings dataclass, `.evaluate(reference, synthetic)`,
 a result dataclass — and change nothing existing:
 
@@ -313,7 +335,7 @@ Each step leaves the examples working.
 4. ✅ `distances.py`, `control.py`, `degeneracy.py`, `marginal.py` + tests.
 5. ✅ Port `metrics-marginal_adv.py`; verified.
 6. ✅ `distribution.py`; port the two `_basic` scripts.
-7. ☐ Record-keeping per the follow-up's Part 4: allocate `FEAT-23` in `TODOs.md`,
+7. ✅ Record-keeping per the follow-up's Part 4: allocate `FEAT-23` in `TODOs.md`,
    `__init__.py` re-exports, `docs/source/api.rst`, `architecture.md` module table,
    `CHANGELOG.md`.
 

@@ -26,7 +26,7 @@ degeneracy        :func:`constant_cells` -- the night-hour mask
 marginal          :class:`MarginalFidelity` -> :class:`MarginalResult`
 temporal          :class:`TemporalFidelity` -> :class:`TemporalResult`
 
-Design record: ``docs/design/metrics-package.md``.
+Design record: ``docs/design/completed/FEAT-23-metrics-package.md``.
 """
 
 from ._base import FidelityResult, FidelityTest

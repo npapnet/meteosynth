@@ -15,7 +15,7 @@ ordered by how much they block real use; within a group, most significant first.
 
 ## ID allocation
 
-> **Next ID: 23.**
+> **Next ID: 24.**
 
 IDs come from **one counter shared by every category**. The prefix says what an item
 *is*; the number says *which* item it is. Only the number is the identity.
@@ -35,7 +35,7 @@ IDs come from **one counter shared by every category**. The prefix says what an 
    full `PREFIX-N` string is the identity; they are **not** renumbered. From `#10` up, the
    number alone is unambiguous.
 
-**Retired numbers:** `FIX-2`, `FIX-3`, `FIX-18`, `FEAT-4`, `FEAT-5`, `FEAT-13`, `FEAT-15`, `FEAT-21`, `CHORE-12`, `FEAT-17` → [`CHANGELOG.md`](CHANGELOG.md) ·
+**Retired numbers:** `FIX-2`, `FIX-3`, `FIX-18`, `FEAT-4`, `FEAT-5`, `FEAT-13`, `FEAT-15`, `FEAT-21`, `CHORE-12`, `FEAT-17`, `FEAT-23` → [`CHANGELOG.md`](CHANGELOG.md) ·
 `FEAT-1` → superseded 2026-07-29 by `FEAT-13` ·
 `INBOX-1` … `INBOX-7` → [triaged 2026-07-27](CHANGELOG.md#changed) ·
 `INBOX-10`, `INBOX-13`, `INBOX-14` → triaged 2026-08-01, see the note below.
