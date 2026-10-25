@@ -64,9 +64,13 @@ from meteosynth.ensemble import (
     read_ensemble,
     write_ensemble,
 )
+# Fidelity metrics, kept as a namespace: `metrics.SeriesSet`, `metrics.MarginalFidelity`, ...
+from meteosynth import metrics
 
 __all__ = [
     "adapters",
+    # Fidelity metrics -- computation only, over `metrics.SeriesSet`.
+    "metrics",
     # The project data store: `store.scan`, `store.resolve`, `store.describe_store`.
     "store",
     "AmbiguousRecordError",

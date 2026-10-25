@@ -31,6 +31,7 @@ import matplotlib.pyplot as plt
 import logging
 from matplotlib.colors import LinearSegmentedColormap
 
+from .constants import DEGENERACY_RTOL
 from .variables import VariableSpec
 
 
@@ -65,25 +66,9 @@ class Kind(Enum):
     CONSTANT = auto()
 
 
-#: Relative tolerance for calling a slice constant.
-#:
-#: Degeneracy used to be an **exact** ``np.std(...) == 0`` test, which worked only
-#: because PVGIS happens to store literal zeros at night. Any source that stores a
-#: physically-zero night as ``1e-16`` -- interpolation, resampling, unit conversion, or a
-#: provider that keeps near-zero noise -- fell through to the 2D branch instead, and a 2D
-#: KDE was then fitted across a ``previous`` spanning ~50 and a ``current`` spanning
-#: ~1e-14. That covariance is catastrophically ill-conditioned, which is the failure this
-#: tolerance exists to prevent.
-#:
-#: The comparison is against the scale of *this simulator's own data*, not against the
-#: slice being tested. A night slice's spread is large relative to itself -- values of
-#: ~1e-14 vary by ~1e-14 -- so a purely relative test would still call it varying. What
-#: makes it degenerate is that it is negligible next to the other axis, and that
-#: disparity is precisely what conditions the covariance badly.
-#:
-#: 1e-9 sits far below any real meteorological signal (irradiance resolved to 1e-6 W/m2
-#: against a 800 W/m2 day) and far above float64 residue from a trigonometric identity.
-_DEGENERACY_RTOL = 1e-9
+#: Relative tolerance for calling a slice constant. Defined in :mod:`meteosynth.constants`
+#: so the fidelity metrics' degenerate-cell mask uses the same definition.
+_DEGENERACY_RTOL = DEGENERACY_RTOL
 
 
 #: Nodes along the ``previous`` axis of the cached conditional-quantile grid.

@@ -25,6 +25,12 @@ walk a complete 8760-hour year. See :doc:`quickstart` for all three.
 
 .. toctree::
    :maxdepth: 2
+   :caption: Validating synthetic data
+
+   metrics/index
+
+.. toctree::
+   :maxdepth: 2
    :caption: API reference
 
    api

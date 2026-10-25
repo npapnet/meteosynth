@@ -129,6 +129,48 @@ The transition models underneath the generators. All three share a
    :undoc-members:
    :show-inheritance:
 
+Fidelity Metrics
+----------------
+
+How closely an ensemble reproduces the reference record. Imported as a namespace,
+``from meteosynth import metrics``, rather than flattened into the top level.
+Computation only: both sides arrive as a :class:`~meteosynth.metrics.series.SeriesSet`
+-- one ``(members, hours)`` array plus its calendar -- and every test returns tables and
+arrays. Reading files and plotting stay with the caller.
+
+.. automodule:: meteosynth.metrics.series
+   :members:
+   :show-inheritance:
+
+.. automodule:: meteosynth.metrics.marginal
+   :members:
+   :show-inheritance:
+
+.. automodule:: meteosynth.metrics.temporal
+   :members:
+   :show-inheritance:
+
+.. automodule:: meteosynth.metrics.climatology
+   :members:
+   :show-inheritance:
+
+.. automodule:: meteosynth.metrics.autocorrelation
+   :members:
+
+.. automodule:: meteosynth.metrics.distribution
+   :members:
+
+.. automodule:: meteosynth.metrics.distances
+   :members:
+   :show-inheritance:
+
+.. automodule:: meteosynth.metrics.control
+   :members:
+   :show-inheritance:
+
+.. automodule:: meteosynth.metrics.degeneracy
+   :members:
+
 Plotting Utilities
 ------------------
 

@@ -37,6 +37,29 @@ def modelled_attrs() -> tuple[str, ...]:
     return registered()
 
 
+#: Relative tolerance for calling a slice constant -- used by the simulator's ``Kind``
+#: classification and by the fidelity metrics' degenerate-cell mask, so both agree on what
+#: a constant (e.g. night-time irradiance) hour is.
+#:
+#: Degeneracy used to be an **exact** ``np.std(...) == 0`` test, which worked only
+#: because PVGIS happens to store literal zeros at night. Any source that stores a
+#: physically-zero night as ``1e-16`` -- interpolation, resampling, unit conversion, or a
+#: provider that keeps near-zero noise -- fell through to the 2D branch instead, and a 2D
+#: KDE was then fitted across a ``previous`` spanning ~50 and a ``current`` spanning
+#: ~1e-14. That covariance is catastrophically ill-conditioned, which is the failure this
+#: tolerance exists to prevent.
+#:
+#: The comparison is against the scale of *this simulator's own data*, not against the
+#: slice being tested. A night slice's spread is large relative to itself -- values of
+#: ~1e-14 vary by ~1e-14 -- so a purely relative test would still call it varying. What
+#: makes it degenerate is that it is negligible next to the other axis, and that
+#: disparity is precisely what conditions the covariance badly.
+#:
+#: 1e-9 sits far below any real meteorological signal (irradiance resolved to 1e-6 W/m2
+#: against a 800 W/m2 day) and far above float64 residue from a trigonometric identity.
+DEGENERACY_RTOL: float = 1e-9
+
+
 #: What ships pre-registered, for documentation and error messages. **This gates
 #: nothing**: :func:`meteosynth.variables.registered` is what generators validate
 #: against, and it grows when a user calls :func:`meteosynth.variables.register`.

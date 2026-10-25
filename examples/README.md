@@ -19,6 +19,7 @@ itself — whichever directory you launch it from:
 ```
 examples/use_cases/day/
     day_envelope_pv.py
+    day_study.py   the case and sweep machinery its three scripts share
     data/     the PVGIS record it trains on, downloaded once
     output/   the ensembles, tables and figures it produces
 ```
@@ -52,8 +53,10 @@ once, then never again — and says so before it starts.
 
 ## Use cases
 
-All of them train on **Heraklion, Crete, 2010–2020** (eleven full years from PVGIS) and
-write their output to their own folder's `output/`. They are grouped by the **time scale of the
+All of them train on **Heraklion, Crete** and write their output to their own folder's
+`output/`. The month and year scripts use 2010–2020 (eleven full years from PVGIS); the
+`day/` scripts default to whatever PVGIS serves for the site and print the period they
+loaded. They are grouped by the **time scale of the
 question**, because the scale changes what can be asked — see
 [`use_cases/README.md`](use_cases/README.md).
 
@@ -73,9 +76,10 @@ uv run python examples/use_cases/month/monthly_statistics.py
 uv run python examples/use_cases/year/synthetic_year.py
 ```
 
-The three `day_envelope_*` scripts share one comparison (`tools/envelope.py`) run on
-three quantities, and are separate files because the three quantities behave
-differently enough to deserve their own commentary: irradiance is degenerate at night
+The three `day_envelope_*` scripts share one comparison (`tools/envelope.py`) and one
+study harness (`use_cases/day/day_study.py`, which holds the case, the sweep and the
+file naming), run on three quantities. They are separate files because the three
+quantities behave differently enough to deserve their own commentary: irradiance is degenerate at night
 and sits on its support bound, temperature is dominated by persistence, wind fans out
 fast and is judged on `v³` rather than on the mean. Read the module docstrings — that
 is where the interpretation lives.
@@ -97,9 +101,10 @@ uv run python examples/concepts/example_leap_year_windows.py      # leap days; n
 Each script writes into its own folder's `output/`, which is git-ignored:
 
 ```
-day_21May_<attr>_ensemble.csv     200 synthetic days, one row each, hours as columns
-day_21May_<attr>_stats.csv        the numbers printed by the comparison
-day_21May_<attr>.png              the envelope figure
+day_21May_<attr>_pool07_win15_n0200_seed42_ensemble.csv   the synthetic days, one row each, hours as columns
+day_21May_<attr>_pool07_win15_n0200_seed42_stats.csv      the numbers printed by the comparison
+day_21May_<attr>_pool07_win15_n0200_seed42.png            the envelope figure
+day_21May_<attr>_sweep_summary.csv                        one row per case of the last sweep
 month_heraklion_05_ensemble.csv   12 synthetic Mays, long format
 month_heraklion_05_statistics.csv
 year_heraklion_2023_r01.csv       8760 hours x 3 attributes
