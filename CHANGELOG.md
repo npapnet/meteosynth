@@ -19,7 +19,7 @@ Two project-specific conventions:
 
 ---
 
-## Current sprint — unreleased
+## v[0.3.3] — 2026-11-02
 
 **The suite can now tell when the sampler changes, and the caller can now say which
 sampler runs.** Two items, in that order, because the first is what made the second safe
