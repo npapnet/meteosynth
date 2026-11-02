@@ -4,7 +4,7 @@ Runnable scripts, split by what they are for.
 
 | Folder | What lives there |
 | :--- | :--- |
-| [`use_cases/`](use_cases/) | Applied workflows that produce data, split by time scale into [`day/`](use_cases/day/), [`month/`](use_cases/month/) and [`year/`](use_cases/year/) — each with its own README. |
+| [`use_cases/`](use_cases/) | Applied workflows that produce data, split by time scale into [`day/`](use_cases/day/), [`month/`](use_cases/month/) and [`year/`](use_cases/year/), plus two year-scale folders that generate 1 000-year ensembles and measure their fidelity — [`year-leros/`](use_cases/year-leros/) and [`year-metrics/`](use_cases/year-metrics/). Each has its own README. |
 | [`concepts/`](concepts/) | Demonstrations of how the package behaves — training windows, leap days, the Markov engine, exploratory plots. |
 | [`tools/`](tools/) | Shared helpers the scripts import: site definitions, data loading, the observed-vs-synthetic comparison. Not part of `meteosynth`. |
 | [`diagnostics-overshoot/`](diagnostics-overshoot/) | A measurement rather than a demonstration: does the generator reproduce the distribution it was fitted to? Four steps behind one `run_all.py`, ~5 min, with the design, the pre-registered decision rule and the dated findings alongside. This is what `FIX-1` cites. |

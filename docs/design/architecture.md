@@ -34,7 +34,7 @@ The primary application of `meteosynth` is **Monte-Carlo simulation for renewabl
   [`CHANGELOG.md`](../../CHANGELOG.md), whose *Current sprint* section holds the
   unreleased part; open work is [`TODOs.md`](../../TODOs.md).
 - **Python Compatibility**: `>=3.10`.
-- **Test suite**: 501 tests across 24 modules, headless by construction -- `conftest.py` selects the `Agg` backend at import, so no environment variable is needed.
+- **Test suite**: 514 tests across 24 modules (499 pass, 15 skipped), headless by construction -- `conftest.py` selects the `Agg` backend at import, so no environment variable is needed.
 - **Runtime dependencies**: `numpy`, `pandas`, `scipy`, `pvlib`, `matplotlib`, `seaborn`,
   `tqdm`, `pyarrow` — all required. One optional extra, `excel` (`openpyxl`), for
   `ensemble_to_xlsx` alone.
@@ -213,6 +213,7 @@ meteosynth/
 ├── .github/                 # CI/CD workflows and automated actions
 ├── docs/                    # Package documentation root
 │   ├── Makefile / make.bat  # Sphinx build entry points
+│   ├── RELEASING.md         # How a release is cut: git-flow, uv version/build, twine upload
 │   ├── build/               # Generated HTML output target (git-ignored)
 │   ├── design/              # Internal design specifications workspace — work in flight
 │   │   ├── README.md        # Workspace conventions & index
@@ -234,6 +235,7 @@ meteosynth/
 │       ├── ensemble_format.md  # The on-disk ensemble file, readable without meteosynth
 │       ├── theory.md        # The modelling approach and its caveats
 │       ├── examples.md      # Walk-through of the runnable scripts
+│       ├── metrics/         # "Validating synthetic data": one page per metric, cardinality first
 │       ├── api.rst          # Autodoc entry points
 │       └── conf.py
 ├── examples/                # Runnable scripts, split by purpose (see examples/README.md)
@@ -262,8 +264,8 @@ meteosynth/
 │   │   ├── step2_simulate.py    # Every configuration -> results/raw/, then self-check
 │   │   ├── step3_analyse.py     # Reads results/raw/ only -> results/summary_*.csv
 │   │   └── step4_figures.py     # ECDF with a tail zoom, ratio-with-interval charts
-│   └── use_cases/           # Applied workflows (Heraklion 2010-2020)
-│       ├── README.md               # Index over the three time scales
+│   └── use_cases/           # Applied workflows (Heraklion; Leros for year-leros)
+│       ├── README.md               # Index over the time scales and the two year studies
 │       ├── day/                    # Does a synthetic day look like a real one?
 │       │   ├── README.md
 │       │   ├── day_envelope_pv.py  # One synthetic 21 May vs every real one
@@ -273,9 +275,20 @@ meteosynth/
 │       ├── month/                  # Does an ensemble vary like the real months?
 │       │   ├── README.md
 │       │   └── monthly_statistics.py  # Ensemble of synthetic Mays, as statistics
-│       └── year/                   # Produce a full series for downstream use
+│       ├── year/                   # Produce a full series for downstream use
+│       │   ├── README.md
+│       │   └── synthetic_year.py   # 8760 hours x 3 attributes, written to CSV
+│       ├── year-leros/             # 1 000 years of wind_speed at Leros, then measured
+│       │   ├── leros_year_ensemble.py    # Generate the wind-only ensemble
+│       │   ├── leros_metric_marginal.py  # W1 per (month, hour) — self-contained original
+│       │   └── leros_metric_temporal.py  # ACF to 10 days — self-contained original
+│       └── year-metrics/           # Three-variable ensemble, measured via meteosynth.metrics
 │           ├── README.md
-│           └── synthetic_year.py   # 8760 hours x 3 attributes, written to CSV
+│           ├── metrics_ensemble.py       # Generate poa_global + temp_air + wind_speed
+│           ├── metrics-marginal_basic.py # ECDF, one variable, readable layout -> output/
+│           ├── metrics-temporal_basic.py # ACF, one variable, readable layout -> output/
+│           ├── metrics-marginal_adv.py   # MarginalFidelity, all variables -> output_adv/
+│           └── metrics-temporal_adv.py   # TemporalFidelity, all variables -> output_adv/
 ├── src/
 │   └── meteosynth/          # Core Python library package
 │       ├── __init__.py      # Package public API exports

@@ -28,7 +28,10 @@ the numbers, so `PERF-1`'s entirely new sampling path passed 271 of them unmodif
 would have passed had it been wrong. `FEAT-17` then replaced the hidden counter that
 decided which path a draw came from with three named modes. `FEAT-23` then moved the
 fidelity metrics out of the example scripts and into the package, as computation only.
-**501 tests passing (was 447).**
+Around them, the documentation gained a *Validating synthetic data* section, the examples
+gained the scripts that generate the validation ensembles and measure them, and the
+`day/` study became a configurable sweep.
+**499 tests passing, 15 skipped — 514 collected (was 447).**
 
 ### Added
 
@@ -98,8 +101,56 @@ fidelity metrics out of the example scripts and into the package, as computation
   silently sampling from something else. `DayWindowGenerator`'s LRU cache is keyed on
   `(slot, sampling)`, so a generator fitted for one path is never handed back for another.
 
+- **Documentation: *Validating synthetic data*** (`docs/source/metrics/`). One page per
+  metric in common use for judging synthetic weather — Wasserstein-1, KS, quantile traces,
+  rank histogram, autocorrelation, power spectrum, spell lengths, midnight seam,
+  cross-correlation, tail dependence, annual dispersion, energy-system utility — each
+  saying in plain words what it measures and how well it fits meteosynth, with a
+  suitability table on the index page. A **cardinality** page comes first, because most
+  mistakes happen there: whether the comparison is 1:1, 1:N, M:N or M:1 decides whether
+  a metric's answer means anything and where its uncertainty sits. The index states the control-band idea and the pre-registered 90 % rule
+  the package's tests use. `api.rst` documents `meteosynth.metrics`.
+
+- **`docs/RELEASING.md` — how a release is cut**: a SmartGit + uv TL;DR, then the full
+  git-flow CLI procedure from version bump to PyPI upload. Records that `uv publish` does
+  not read `.pypirc`, so uploads go through `uvx twine`.
+
+- **`examples/use_cases/year-metrics/` — generate a three-variable ensemble, then measure
+  it.** `metrics_ensemble.py` writes `poa_global`, `temp_air` and `wind_speed` in one file,
+  on one calendar, from one record, under one seed, and checks the file round-trips. Four
+  scripts read it back through `meteosynth.metrics`, in two tiers:
+  - `metrics-marginal_basic.py`, `metrics-temporal_basic.py` — one variable, laid out as
+    constants, functions and invocation cells, a plain pandas read; write to `output/`.
+  - `metrics-marginal_adv.py`, `metrics-temporal_adv.py` — every variable, streamed row
+    group by row group, a summary CSV per ensemble; write to `output_adv/`.
+
+  Every output is named after the ensemble it measured, so runs at different window
+  widths (`_w7_`, `_w15_`) sit side by side. ECDF figures use `empirical_cdf`'s default
+  of 1 001 evenly spaced probabilities rather than every value — 8.76 M synthetic values
+  plot no better and far slower — drawn as lines rather than steps.
+
+- **`examples/use_cases/year-leros/` measures as well as generates.**
+  `leros_metric_marginal.py` (Wasserstein-1 per month × hour against a year-split control
+  band) and `leros_metric_temporal.py` (autocorrelation to 10 days against the observed
+  year-to-year spread) read the 1 000-year `wind_speed` ensemble back against the 19-year
+  record, streaming it rather than loading it. They are the self-contained originals the
+  package's metrics were ported from and checked against.
+
 ### Changed
 
+- **The `day/` use case is a configurable study, not three fixed runs.** What the three
+  `day_envelope_*` scripts share — loading the record, fitting, drawing, naming files, the
+  sweep — moved into `day/day_study.py`; each script keeps its preamble and the two hooks
+  specific to its variable (`describe_fit`, `extra_report`). `POOL_DAYS`, `WINDOW_DAYS`
+  and `N_SYNTHETIC` are **lists**: `run_sweep` walks every combination, fitting once per
+  training window, and writes a `_sweep_summary.csv` with one row per case. Every output
+  filename carries its parameters (`…_pool07_win15_n0200_seed42…`) and figures repeat the
+  tag in a corner, so runs accumulate instead of overwriting. Each script states its own
+  site and period, and `YEARS = None` asks PVGIS for its whole record — the period loaded
+  is printed, since a folder already holding a narrower record keeps answering with it.
+- **`year-metrics/leros_metrics_ensemble.py` is now `metrics_ensemble.py`**, and its
+  output is `ensemble_<site>_<year>_n<N>_w<W>_3attr.parquet` — the training-window
+  half-width is part of the name, because it is the setting the validation compares.
 - **`examples/use_cases/year-metrics/` compute through `meteosynth.metrics`** (`FEAT-23`).
   The four metric scripts keep reading, printing and plotting; the arithmetic is the
   package's. Their output columns follow the package: `obs_*` → `ref_*`, `n_obs` →

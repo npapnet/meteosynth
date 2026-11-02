@@ -11,15 +11,17 @@ folder's git-ignored `output/`, having collected its record into its own `data/`
 | [`month/`](month/) | Does an ensemble of synthetic *months* vary like the real ones? | ~3 min |
 | [`year/`](year/) | Produce a complete 8760-hour *year* to feed something downstream. | **~45–50 min** |
 | [`year-leros/`](year-leros/) | Generate 1 000 synthetic years of `wind_speed` at Leros — then ask whether they are faithful, on two axes. | **hours** to generate; ~2 min per metric |
-| [`year-metrics/`](year-metrics/) | The same generation, widened to all three quantities in one file. Data only. | **~2.3×** `year-leros` |
+| [`year-metrics/`](year-metrics/) | The same generation widened to all three quantities in one file — then measured through `meteosynth.metrics`, in a basic and an advanced tier. | **~2.3×** `year-leros` to generate; minutes per metric |
 
-`year-leros/` is the only folder here that both generates and *measures*: one script writes
-the ensemble, and two read it back against the 19-year record — `leros_metric_marginal.py`
-for distributional fidelity (Wasserstein-1 per month × hour, against a year-split control
-band) and `leros_metric_temporal.py` for persistence (autocorrelation to 10 days, against
-the observed year-to-year spread). Both are specified in
-[`paper/metrics-prompt.md`](../../paper/metrics-prompt.md), and both stream the 90 MB
-ensemble rather than loading it.
+The two year folders both generate and *measure*. `year-leros/` does it self-contained:
+`leros_metric_marginal.py` for distributional fidelity (Wasserstein-1 per month × hour,
+against a year-split control band) and `leros_metric_temporal.py` for persistence
+(autocorrelation to 10 days, against the observed year-to-year spread), both streaming the
+90 MB ensemble rather than loading it. `year-metrics/` runs the same two tests through the
+package's `MarginalFidelity` and `TemporalFidelity`, which were ported from those scripts
+and checked against them. What each metric means, and how well it suits meteosynth, is
+in the documentation's
+[*Validating synthetic data*](../../docs/source/metrics/index.md) section.
 
 Each folder's `README.md` says what its scripts answer, what they write, and how long
 they take. Read those before the scripts.

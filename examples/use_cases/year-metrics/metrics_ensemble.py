@@ -1,15 +1,18 @@
 """
-A synthetic ensemble for Leros (37.167 N, 26.800 E) across **all three** quantities.
+A synthetic ensemble across **all three** quantities, for the site set in the
+configuration cell (currently Heraklion; Leros, 37.167 N 26.800 E, is commented out
+alongside).
 
 The input the validation work needs. `use_cases/year-leros/` produces the same thing for
 ``wind_speed`` alone; this produces ``poa_global``, ``temp_air`` and ``wind_speed`` in one
 file, on the same calendar, from the same record, under the same seed -- which is what
 lets a single analysis pass read all three and what makes the wind column here comparable
-to the wind-only file (see step 4).
+to the wind-only file at the same site and window.
 
-The metrics this feeds are specified in ``paper/metrics-prompt.md``. Read that before
-reading the output: three of its tests need modification for irradiance and temperature,
-and the modifications are not cosmetic.
+The ``metrics-*`` scripts beside this one measure the output through
+``meteosynth.metrics``; what each metric means is in ``docs/source/metrics/``. Three of
+the tests need modification for irradiance and temperature, and the modifications are
+not cosmetic.
 
 Standalone by design: imports **nothing from `examples/`** -- no `tools.site_data`, no
 shared helpers, no `sys.path` bootstrap -- so it can be copied anywhere and run. Written
@@ -22,8 +25,8 @@ work lives rather than inside the script that generates its input.
 
 Everything lands **beside this file**, whichever directory you launch it from:
 
-    <this folder>/data/pvgis_hourly_leros_2005_2023.parquet   the training record, once
-    <this folder>/output/ensemble_leros_2023_n<N>_w<W>_3attr.parquet  the generated ensemble
+    <this folder>/data/pvgis_hourly_<site>_2005_2023.parquet   the training record, once
+    <this folder>/output/ensemble_<site>_2023_n<N>_w<W>_3attr.parquet  the generated ensemble
 
 `data/` for what was collected and `output/` for what was generated, both git-ignored.
 The folder is chosen by ``meteosynth.workspace(__file__)`` -- the script's own location,
@@ -109,7 +112,8 @@ WINDOW_DAYS = 15
 
 #: Root entropy. Realisation *i* of attribute *a* is a fixed function of (SEED, i, a) and
 #: of nothing else -- not of how many realisations were asked for, and not of which other
-#: attributes were. That last property is what step 4 exercises.
+#: attributes were. That last property is what makes the wind column comparable to the
+#: wind-only ``year-leros`` file.
 SEED = 2026
 
 #: Which path answers each draw. Named rather than left on ``"auto"`` so every run sits on
