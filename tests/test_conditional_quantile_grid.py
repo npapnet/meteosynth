@@ -21,6 +21,7 @@ from meteosynth.markov_chain_simulator_kde2d import (
     _GRID_ACTIVATION_CALLS,
     Kind,
     MarkovChainSimulator2dKDE,
+    resolve_sampling,
 )
 
 
@@ -200,3 +201,97 @@ def test_sampling_stays_reproducible_across_the_threshold(correlated_pairs, monk
         runs.append(_draws(simulator, 0.2, 40, seed=5))
 
     np.testing.assert_array_equal(runs[0], runs[1])
+
+
+# ======================================================================================
+# Choosing the path explicitly (FEAT-17)
+# ======================================================================================
+#
+# Before this, which path answered a draw was decided by a hidden counter on the
+# simulator: draw 65 switched, silently, whatever the caller had asked for. The tests
+# above still describe that behaviour because it survives as `sampling="auto"` with no
+# draw count -- a caller who knows nothing gets the counter's advice. What is new is that
+# it is now one of three *named* choices rather than the only one.
+
+
+def test_exact_never_builds_a_grid_however_many_draws(correlated_pairs):
+    """**The shipped defect, pinned.**
+
+    ``precompute=False`` read as "do not use the grid" and did not do that: it skipped
+    only the eager build, and the counter built one anyway on the 65th draw -- so 936 of
+    1000 realisations came from a grid the caller had declined. ``sampling="exact"``
+    genuinely means never.
+    """
+    simulator = MarkovChainSimulator2dKDE(
+        correlated_pairs, bandwidth=0.1, sampling="exact"
+    )
+    rng = np.random.default_rng(0)
+
+    for _ in range(_GRID_ACTIVATION_CALLS * 3):
+        simulator.get_next_state(0.0, rng=rng)
+
+    assert not simulator.has_quantile_grid, (
+        "sampling='exact' built a grid; the counter is deciding behaviour again"
+    )
+
+
+def test_grid_builds_up_front_and_answers_every_draw(correlated_pairs):
+    simulator = MarkovChainSimulator2dKDE(
+        correlated_pairs, bandwidth=0.1, sampling="grid"
+    )
+    rng = np.random.default_rng(0)
+
+    simulator.get_next_state(0.0, rng=rng)
+
+    assert simulator.has_quantile_grid, "sampling='grid' should build on first use"
+
+
+def test_auto_still_switches_when_nothing_is_known(correlated_pairs):
+    """The counter survives as advice for the one caller that cannot say: a bare loop."""
+    simulator = MarkovChainSimulator2dKDE(
+        correlated_pairs, bandwidth=0.1, sampling="auto"
+    )
+    rng = np.random.default_rng(0)
+
+    for _ in range(_GRID_ACTIVATION_CALLS):
+        simulator.get_next_state(0.0, rng=rng)
+    assert not simulator.has_quantile_grid
+
+    simulator.get_next_state(0.0, rng=rng)
+    assert simulator.has_quantile_grid
+
+
+def test_a_mistyped_path_is_refused(correlated_pairs):
+    """A typo must not quietly sample from something other than what was asked for."""
+    with pytest.raises(ValueError, match="sampling must be one of"):
+        MarkovChainSimulator2dKDE(correlated_pairs, bandwidth=0.1, sampling="table")
+
+
+def test_resolve_reads_a_known_draw_count_up_front():
+    """`auto` is a fact where the count is known, and only a fallback where it is not."""
+    assert resolve_sampling("auto", n_expected_draws=1000) == "grid"
+    assert resolve_sampling("auto", n_expected_draws=1) == "exact"
+    assert resolve_sampling("auto", n_expected_draws=_GRID_ACTIVATION_CALLS) == "exact"
+    assert resolve_sampling("auto") == "auto"
+    # A named path is never overridden by a count.
+    assert resolve_sampling("exact", n_expected_draws=10**6) == "exact"
+    assert resolve_sampling("grid", n_expected_draws=1) == "grid"
+
+
+def test_exact_and_grid_agree_distributionally(correlated_pairs):
+    """The two paths differ in determinism, not in what they sample -- so this must hold.
+
+    If it ever fails, `FEAT-17`'s central claim -- that choosing a path is about
+    auditability rather than accuracy -- is wrong and the docs must change with it.
+    """
+    draws = {}
+    for path in ("exact", "grid"):
+        simulator = MarkovChainSimulator2dKDE(
+            correlated_pairs, bandwidth=0.1, sampling=path
+        )
+        rng = np.random.default_rng(7)
+        draws[path] = np.array(
+            [simulator.get_next_state(0.3, rng=rng) for _ in range(2000)]
+        )
+
+    assert stats.ks_2samp(draws["exact"], draws["grid"]).pvalue > 0.01

@@ -6,7 +6,7 @@ Status: accepted · Author: Antigravity Agent · Date: 2026-07-27 · Last revise
 
 This document provides a concise, high-level architectural overview of the `meteosynth` package. It serves as the primary entry point and technical orientation for human developers and AI agents working on, extending, or integrating `meteosynth`.
 
-- **In Scope**: Package essence, domain focus, current architectural state (v0.3.2), component boundaries, data flow pipelines, folder tree structure, module responsibilities, and developer onboarding workflows.
+- **In Scope**: Package essence, domain focus, current architectural state (v0.3.2 + unreleased), component boundaries, data flow pipelines, folder tree structure, module responsibilities, and developer onboarding workflows.
 - **Out of Scope**: Detailed API parameter references (see Sphinx docs in [`docs/source/`](../source/)), end-user quickstart tutorials (see [`README.md`](../../README.md)), and historical design decision records (see [`docs/design/completed/`](completed/)).
 
 ---
@@ -26,13 +26,15 @@ The primary application of `meteosynth` is **Monte-Carlo simulation for renewabl
 
 ---
 
-## Current Package State (v0.3.2)
+## Current Package State (v0.3.2, plus unreleased work)
 
-- **Version**: `0.3.2`, released 2026-08-03 (managed via `uv` and `hatchling`). The
-  release history is [`CHANGELOG.md`](../../CHANGELOG.md); open work is
-  [`TODOs.md`](../../TODOs.md).
+- **Version**: `0.3.2`, released 2026-08-03 (managed via `uv` and `hatchling`). **This
+  document describes the working tree, which is ahead of that release** — `CHORE-12`,
+  `FEAT-17` and `FEAT-23` have landed and will ship in the next version. The release history is
+  [`CHANGELOG.md`](../../CHANGELOG.md), whose *Current sprint* section holds the
+  unreleased part; open work is [`TODOs.md`](../../TODOs.md).
 - **Python Compatibility**: `>=3.10`.
-- **Test suite**: 447 tests across 20 modules, headless by construction -- `conftest.py` selects the `Agg` backend at import, so no environment variable is needed.
+- **Test suite**: 514 tests across 24 modules (499 pass, 15 skipped), headless by construction -- `conftest.py` selects the `Agg` backend at import, so no environment variable is needed.
 - **Runtime dependencies**: `numpy`, `pandas`, `scipy`, `pvlib`, `matplotlib`, `seaborn`,
   `tqdm`, `pyarrow` — all required. One optional extra, `excel` (`openpyxl`), for
   `ensemble_to_xlsx` alone.
@@ -51,7 +53,7 @@ The primary application of `meteosynth` is **Monte-Carlo simulation for renewabl
   - **Decoupled Variable Specs**: Physical constraints (`support`, `units`, `long_name`) are registered centrally in `meteosynth.variables` independently of dataset-specific column names. A column is modellable if and only if it has a spec.
   - **Date-Indexed Pair Alignment**: Daily wide-format restructuring keys transition pairs on calendar dates, eliminating silent mispairing bugs caused by dataset re-sorting.
   - **Lazy LRU-Cached Generators**: `DayWindowGenerator` dynamically instantiates daily models behind an LRU cache, permitting full-year simulations without excessive memory consumption. The cache serves *repeated* requests for the same day (`gen_day`); an ordered calendar walk visits each slot once and gets no hits from it.
-  - **Lazily Cached Conditional Sampling**: a simulator sampled past a threshold caches its conditional inverse CDF over a grid of `previous` values, turning each draw into two interpolations. Lazy by design — a chained year takes one sample per simulator and must not pay to build a cache it will use once.
+  - **Cached Conditional Sampling, chosen not stumbled into**: a simulator can answer from a cached inverse CDF over a grid of `previous` values, turning each draw into two interpolations. `sampling="auto"|"exact"|"grid"` decides, resolved before drawing starts rather than by a counter tripping mid-run — a chained year takes one sample per simulator and must not pay for a cache it will use once.
   - **Ensembles are a first-class operation**, with their own on-disk format
     (`ensemble.py`, long-format parquet, one row group per calendar day).
   - **PVGIS API Integration**: `meteosynth.adapters` interfaces with `pvlib.iotools` to fetch hourly (`fetch_pvgis`, plane-of-array) and TMY (`fetch_pvgis_tmy`, horizontal) data, normalising each to the canonical schema and validating against registered support before it reaches the core. Adapters are an optional convenience, not a required layer.
@@ -65,7 +67,7 @@ The release history behind them is in [`CHANGELOG.md`](../../CHANGELOG.md).
 
 | property | why it has to be known up front |
 | :--- | :--- |
-| **The sampler has two paths, not one** (`PERF-1`) | `MarkovChainSimulator2dKDE` answers a draw either by evaluating the conditional density live, or by reading a cached quantile grid built once the simulator proves hot. Anything reasoning about sampling cost, memory, or exact reproducibility across ensemble sizes has to know this. ~8× on ensembles; nothing on a chained year, by design. Which path is taken is currently decided by a hidden call counter — a known defect, tracked as `FEAT-17`. See [`PERF-1-precomputed-conditional-quantiles.md`](completed/PERF-1-precomputed-conditional-quantiles.md). |
+| **The sampler has two paths, and you choose** (`PERF-1`, `FEAT-17`) | `MarkovChainSimulator2dKDE` answers a draw either by evaluating the conditional density live (`sampling="exact"`) or from a cached quantile grid (`sampling="grid"`) — ~13× apart at scale, and reversed for a chained year, so neither is right for both. `"auto"` resolves **once, before drawing**, from `n_realisations` where that is known. Anything reasoning about sampling cost, memory or bit-reproducibility has to know this. It used to be decided by a hidden counter on draw 65; `FEAT-17` demoted that to advice. See [`PERF-1-precomputed-conditional-quantiles.md`](completed/PERF-1-precomputed-conditional-quantiles.md). |
 | **Two generation entry points with different cost models** (`FEAT-15`) | `generate_series` walks the calendar and fits each day as it arrives; `generate_ensemble` / `write_ensemble` walk it **once** and pass every realisation through each day's single fit — ~77× at N = 1000. Both share `_walk_ensemble`, so calendar behaviour cannot diverge. Two consequences: an ensemble **does** exercise `PERF-1`'s cached sampler (a chained year still does not), and randomness is keyed on `(seed, realisation index, attribute name)` rather than drawn from one stream. See [`completed/FEAT-15-ensemble-generation.md`](completed/FEAT-15-ensemble-generation.md). |
 | **Degeneracy is detected by scale, not by exact zero** (`FIX-2`) | `Kind` classification does not assume a source stores physical zero as exact `0.0`. This is what **allows ingesting providers other than PVGIS**, where resampling and unit conversion leave `1e-16` nights. Relatedly, a singular covariance re-categorises to `KDE_1D` with a warning rather than raising, so one unfittable hour cannot take a whole synthetic year with it. |
 | **Two irradiance specs, deliberately distinct** | `IRRADIANCE_HORIZONTAL` (`ghi`/`dni`/`dhi`) is a *separate spec object* from `IRRADIANCE` (plane-of-array) despite identical support and units, because `long_name` is quoted back to the user by `validate_support` — naming a horizontal quantity "plane-of-array" misinforms exactly when someone is debugging provenance. |
@@ -93,10 +95,14 @@ What it has established, and what the package therefore does and does not promis
   19.3 % at ±7 on 21 September, because the same seasonal slope sits on a smaller
   day-to-day variance. A single global half-width cannot be right for every date
   (`CHORE-1`).
-- **Nothing in the test suite pins what the sampler produces distributionally.** The suite
-  tests properties, so `PERF-1`'s entirely new sampling path passed 271 tests unmodified —
-  and would have passed had it been wrong. Tracked as `CHORE-12`, and it gates the two
-  items that would add a third value-producing path.
+- **The suite now pins what the sampler produces, as well as the rules it follows**
+  (`CHORE-12`, landed 2026-08-03). It used to test properties only, so `PERF-1`'s entirely
+  new sampling path passed 271 tests unmodified — and would have passed had it been wrong.
+  `tests/test_sampler_calibration.py` closes that: it compares generated days against the
+  pool they were fitted to, and was itself validated by fault injection (a ±6–10 % level
+  shift or a halved spread fails 6 of 6 cells; an untouched sampler fails none). It runs on
+  a synthetic fixture, so it asserts *fidelity to the input*, not real-world accuracy —
+  that remains `examples/diagnostics-overshoot/`.
 
 ---
 
@@ -207,6 +213,7 @@ meteosynth/
 ├── .github/                 # CI/CD workflows and automated actions
 ├── docs/                    # Package documentation root
 │   ├── Makefile / make.bat  # Sphinx build entry points
+│   ├── RELEASING.md         # How a release is cut: git-flow, uv version/build, twine upload
 │   ├── build/               # Generated HTML output target (git-ignored)
 │   ├── design/              # Internal design specifications workspace — work in flight
 │   │   ├── README.md        # Workspace conventions & index
@@ -228,6 +235,7 @@ meteosynth/
 │       ├── ensemble_format.md  # The on-disk ensemble file, readable without meteosynth
 │       ├── theory.md        # The modelling approach and its caveats
 │       ├── examples.md      # Walk-through of the runnable scripts
+│       ├── metrics/         # "Validating synthetic data": one page per metric, cardinality first
 │       ├── api.rst          # Autodoc entry points
 │       └── conf.py
 ├── examples/                # Runnable scripts, split by purpose (see examples/README.md)
@@ -256,19 +264,31 @@ meteosynth/
 │   │   ├── step2_simulate.py    # Every configuration -> results/raw/, then self-check
 │   │   ├── step3_analyse.py     # Reads results/raw/ only -> results/summary_*.csv
 │   │   └── step4_figures.py     # ECDF with a tail zoom, ratio-with-interval charts
-│   └── use_cases/           # Applied workflows (Heraklion 2010-2020)
-│       ├── README.md               # Index over the three time scales
+│   └── use_cases/           # Applied workflows (Heraklion; Leros for year-leros)
+│       ├── README.md               # Index over the time scales and the two year studies
 │       ├── day/                    # Does a synthetic day look like a real one?
 │       │   ├── README.md
-│       │   ├── day_envelope_pv.py  # One synthetic 21 May vs eleven real ones
+│       │   ├── day_envelope_pv.py  # One synthetic 21 May vs every real one
 │       │   ├── day_envelope_temp.py
-│       │   └── day_envelope_wind.py
+│       │   ├── day_envelope_wind.py
+│       │   └── day_study.py        # Site, case and sweep — what the three share
 │       ├── month/                  # Does an ensemble vary like the real months?
 │       │   ├── README.md
 │       │   └── monthly_statistics.py  # Ensemble of synthetic Mays, as statistics
-│       └── year/                   # Produce a full series for downstream use
+│       ├── year/                   # Produce a full series for downstream use
+│       │   ├── README.md
+│       │   └── synthetic_year.py   # 8760 hours x 3 attributes, written to CSV
+│       ├── year-leros/             # 1 000 years of wind_speed at Leros, then measured
+│       │   ├── leros_year_ensemble.py    # Generate the wind-only ensemble
+│       │   ├── leros_metric_marginal.py  # W1 per (month, hour) — self-contained original
+│       │   └── leros_metric_temporal.py  # ACF to 10 days — self-contained original
+│       └── year-metrics/           # Three-variable ensemble, measured via meteosynth.metrics
 │           ├── README.md
-│           └── synthetic_year.py   # 8760 hours x 3 attributes, written to CSV
+│           ├── metrics_ensemble.py       # Generate poa_global + temp_air + wind_speed
+│           ├── metrics-marginal_basic.py # ECDF, one variable, readable layout -> output/
+│           ├── metrics-temporal_basic.py # ACF, one variable, readable layout -> output/
+│           ├── metrics-marginal_adv.py   # MarginalFidelity, all variables -> output_adv/
+│           └── metrics-temporal_adv.py   # TemporalFidelity, all variables -> output_adv/
 ├── src/
 │   └── meteosynth/          # Core Python library package
 │       ├── __init__.py      # Package public API exports
@@ -284,13 +304,21 @@ meteosynth/
 │       ├── markov_implementations/         # Alternative Markov simulators
 │       │   ├── markov_chain_simulator_continuous.py # Binned 1D KDE simulator
 │       │   └── markov_chain_simulator_discrete.py   # Discrete transition matrix simulator
+│       ├── metrics/         # Fidelity metrics over SeriesSet: computation only, no IO or plots
+│       │   ├── series.py        # SeriesSet (members x hours + calendar) and its from_* helpers
+│       │   ├── marginal.py      # MarginalFidelity: distance per (month, hour) vs year-split band
+│       │   ├── temporal.py      # TemporalFidelity: raw/anomaly ACF vs per-year spread, tau
+│       │   ├── climatology.py   # (366, 24) smoothed day-of-year x hour mean
+│       │   ├── autocorrelation.py, distribution.py   # ACF, decorrelation time; ECDF, quantile traces
+│       │   ├── distances.py, control.py              # pluggable distances; control bands
+│       │   └── degeneracy.py    # night-cell mask, same tolerance as Kind.CONSTANT
 │       ├── provenance.py    # Provenance: source, site, period -- what a name cannot say
 │       ├── py.typed         # PEP 561 static type marker
 │       ├── sup_plot_lib.py  # Visual diagnostics & KDE surface plotting
 │       └── variables.py     # VariableSpec registry: support, units, long names
 ├── tests/                   # Automated test suite (pytest)
 │   ├── conftest.py          # Shared fixtures; selects a headless backend at import
-│   └── test_*.py            # 19 modules, 439 tests
+│   └── test_*.py            # 24 modules, 501 tests
 ├── .gitignore
 ├── .python-version          # Interpreter pin for uv
 ├── CHANGELOG.md             # Version release history
@@ -321,7 +349,8 @@ meteosynth/
 | [`adapters.py`](../../src/meteosynth/adapters.py) | Optional collection helpers, returning a `MetDataset` with provenance filled in. `fetch_pvgis` (hourly, plane-of-array) and `fetch_pvgis_tmy` (TMY, horizontal) call `pvlib.iotools` and **cache by default**, matching an existing cache against the request rather than trusting its path — a mismatch is `CacheMismatchError`, not a silent wrong answer. A default fetch takes the provider's widest range (`probe_year_range`) and keeps every column returned, deriving `poa_global` by summation; `start`/`end` select a view. `normalise` maps provider columns to canonical names per source; `validate_support` remains as an opt-in hard check for callers who would rather be stopped than repaired. |
 | [`store.py`](../../src/meteosynth/store.py) | **The project's data store, and discovery as distinct from validation.** `adapters` answers *"is this named file the one I want?"*; this answers *"which file in this folder is?"* — `scan` and `resolve` read provenance and column names from parquet **footers** (1.3 ms/file against 113 ms to load), so no manifest or sidecar is needed and nothing can drift from the records it describes. Owns `default_data_dir` — `./data` under the working directory, **with no environment variable or global setting**, so two projects keep independent stores — the filename convention, and `period_contains`, the single definition of "wide enough" called by both this module and `adapters`. Refuses with `AmbiguousRecordError` when several records answer, rather than choosing. Deliberately not called a *cache*: the records are not expendable (a provider may revise its archive), not transparent, and not shared. Note `StoredRecord.holds` treats a record carrying all three POA components as able to answer a `poa_global` request — right for the package, and the one case where naming a file is still correct (see [Where Files Go](#where-files-go)). |
 | [`paths.py`](../../src/meteosynth/paths.py) | Answers one question: *which folder is the root of this run?* The script's own folder when given `__file__`, the working directory when given nothing. `Workspace.data_dir` / `.output_dir` hang `data/` and `output/` off it. Exists so the rule is written once rather than copied into every script and again into the CLI; `store.default_data_dir()` is defined as `workspace().data_dir`. Module named `paths` while the function is `workspace`, so neither shadows the other. See [`completed/FEAT-21-workspace-and-file-locations.md`](completed/FEAT-21-workspace-and-file-locations.md). |
-| [`constants.py`](../../src/meteosynth/constants.py) | Package constants including index column names (`year`, `month`, `day`, `hour`) and shipped attribute sets. |
+| [`constants.py`](../../src/meteosynth/constants.py) | Package constants including index column names (`year`, `month`, `day`, `hour`), shipped attribute sets, and `DEGENERACY_RTOL` — the one definition of "constant" shared by `Kind.CONSTANT` and the metrics' night-cell mask. |
+| [`metrics/`](../../src/meteosynth/metrics) | **Fidelity metrics, computation only** (`FEAT-23`). Nothing in it takes a path, reads file metadata, prints or plots. Both sides of a comparison — `reference` (observed years) and `synthetic` (realisations) — arrive as a `SeriesSet`: one `(members, hours)` array plus the calendar it shares, built by the caller or by `SeriesSet.from_reference_frame` / `from_ensemble`. Tests are frozen settings objects with `evaluate(reference, synthetic, ...)` returning result objects (`.table`, `.summary()`): `MarginalFidelity` (distance per `(month, hour)` cell against a `YearSplitBand`, degenerate night cells excluded) and `TemporalFidelity` (raw and anomaly ACF against a `MemberSpreadBand`, with the `Climatology` passed in so compared ensembles share one baseline). Distances (`Wasserstein1`, `KolmogorovSmirnovStatistic`) and control bands are pluggable. See [`completed/FEAT-23-metrics-package.md`](completed/FEAT-23-metrics-package.md). |
 | [`sup_plot_lib.py`](../../src/meteosynth/sup_plot_lib.py) | Visual diagnostic functions for plotting fitted 2D KDE surfaces, conditional CDFs, and synthetic time-series comparisons. |
 | [`markov_implementations/`](../../src/meteosynth/markov_implementations) | Alternative Markov models: `ContinuousMarkovChainSimulator` (binned 1D KDE) and `MarkovChainSimulatorDiscrete` (binned matrix transitions). |
 

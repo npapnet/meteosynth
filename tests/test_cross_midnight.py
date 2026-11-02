@@ -152,9 +152,9 @@ def test_a_365_day_walk_skips_feb29(synthetic_ds):
 
     original = generator.for_slot
 
-    def spy(slot):
+    def spy(slot, **kwargs):
         visited.append(slot)
-        return original(slot)
+        return original(slot, **kwargs)
 
     generator.for_slot = spy
     generator.generate_series((1, 1), 365, seed=1)
@@ -169,7 +169,7 @@ def test_a_leap_walk_includes_feb29(synthetic_ds):
     generator = DayWindowGenerator(synthetic_ds, attr_str="temp_air", n_days=15)
     visited = []
     original = generator.for_slot
-    generator.for_slot = lambda slot: (visited.append(slot), original(slot))[1]
+    generator.for_slot = lambda slot, **kw: (visited.append(slot), original(slot, **kw))[1]
 
     generator.generate_series((1, 1), 366, seed=1, include_feb29=True)
 
@@ -201,7 +201,10 @@ def test_each_day_uses_its_own_models(synthetic_ds):
                                    cache_size=8)
     generator.generate_series((3, 14), 3, seed=1)
 
-    assert day_slot(3, 14) in generator._cache
-    assert day_slot(3, 15) in generator._cache
-    assert day_slot(3, 16) in generator._cache
+    # Cache keys are (slot, sampling) since `FEAT-17`: a generator fitted for one
+    # sampling path must not be handed back for another.
+    cached_slots = {slot for slot, _ in generator._cache}
+    assert day_slot(3, 14) in cached_slots
+    assert day_slot(3, 15) in cached_slots
+    assert day_slot(3, 16) in cached_slots
     assert generator.for_day(3, 14) is not generator.for_day(3, 15)

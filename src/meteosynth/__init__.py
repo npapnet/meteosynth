@@ -23,7 +23,12 @@ from meteosynth.variables import (
     resolve_irradiance,
     unregister,
 )
-from meteosynth.markov_chain_simulator_kde2d import Kind, MarkovChainSimulator2dKDE
+from meteosynth.markov_chain_simulator_kde2d import (
+    SAMPLING_PATHS,
+    Kind,
+    MarkovChainSimulator2dKDE,
+    resolve_sampling,
+)
 from meteosynth.markov_implementations.markov_chain_simulator_continuous import ContinuousMarkovChainSimulator
 from meteosynth.markov_implementations.markov_chain_simulator_discrete import MarkovChainSimulatorDiscrete
 from meteosynth.provenance import Provenance
@@ -59,9 +64,13 @@ from meteosynth.ensemble import (
     read_ensemble,
     write_ensemble,
 )
+# Fidelity metrics, kept as a namespace: `metrics.SeriesSet`, `metrics.MarginalFidelity`, ...
+from meteosynth import metrics
 
 __all__ = [
     "adapters",
+    # Fidelity metrics -- computation only, over `metrics.SeriesSet`.
+    "metrics",
     # The project data store: `store.scan`, `store.resolve`, `store.describe_store`.
     "store",
     "AmbiguousRecordError",
@@ -86,6 +95,9 @@ __all__ = [
     "registered",
     "Kind",
     "MarkovChainSimulator2dKDE",
+    # Which path answers a draw: "auto", "exact" or "grid" (FEAT-17).
+    "SAMPLING_PATHS",
+    "resolve_sampling",
     "ContinuousMarkovChainSimulator",
     "MarkovChainSimulatorDiscrete",
     "MetDataset",

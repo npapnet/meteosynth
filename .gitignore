@@ -1,3 +1,16 @@
+# specific to repo
+paper/
+
+**/*.parquet
+
+# Where every run reads and writes (FEAT-21): `data/` is collected, `output/` is
+# generated, and both are re-creatable by re-running the script that made them. No
+# leading slash, so this catches them at any depth -- one per example folder.
+data/
+output/
+
+# ========================================================
+
 # Python
 __pycache__/
 *.py[cod]
@@ -54,11 +67,7 @@ Thumbs.db
 *.csv
 *.nc
 
-# Where every run reads and writes (FEAT-21): `data/` is collected, `output/` is
-# generated, and both are re-creatable by re-running the script that made them. No
-# leading slash, so this catches them at any depth -- one per example folder.
-data/
-output/
+
 
 # Specific ignores (remove them when not relevant any more. )
 cloudflare_tried.md

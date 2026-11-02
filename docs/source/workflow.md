@@ -413,13 +413,17 @@ The `KDE_2D` path:
 3. Normalise to a conditional pdf, cumulative-sum to a cdf.
 4. Draw `u ~ U(0,1)` and interpolate: `x = interp(u, cdf, domain)`.
 
-**Hot simulators cache their answer.** After 64 draws a simulator replaces steps 2–3 with
-a precomputed table of conditional *quantile functions* on a 64-node grid of `previous`
-values, so a draw costs two interpolations instead of a 1000-point KDE evaluation. Large
-ensembles run ~8× faster; a short run never reaches the threshold and is unaffected, which
-is why a year-long walk — one sample from each of a day's 24 simulators — never builds a
-grid or spends the memory. Call `precompute_grid()` to build it up front when the ensemble
-size is known in advance. Both paths consume exactly one number from `rng`, so which one
+**A simulator can cache its answer, and you choose whether it does.** `sampling="grid"`
+replaces steps 2–3 with a precomputed table of conditional *quantile functions* on a
+64-node grid of `previous` values, so a draw costs two interpolations instead of a
+1000-point KDE evaluation — ~13× faster for a large ensemble. `sampling="exact"` never
+builds one, which is right for a chained year: it takes a single sample from each of a
+day's 24 simulators, so building tables would cost ~9× more than it saves.
+
+The default, `sampling="auto"`, decides **before drawing starts** from whatever is known —
+`n_realisations` for an ensemble — so every member comes from the same sampler. Only a
+caller that knows nothing, such as a bare `gen_day` loop, falls back to a call counter,
+and it says so in the log. Both paths consume exactly one number from `rng`, so which one
 is taken never perturbs the random stream.
 
 ---

@@ -19,6 +19,191 @@ Two project-specific conventions:
 
 ---
 
+## v[0.3.3] — 2026-11-02
+
+**The suite can now tell when the sampler changes, and the caller can now say which
+sampler runs.** Two items, in that order, because the first is what made the second safe
+to take. `CHORE-12` closed a demonstrated blind spot: the tests checked rules but never
+the numbers, so `PERF-1`'s entirely new sampling path passed 271 of them unmodified and
+would have passed had it been wrong. `FEAT-17` then replaced the hidden counter that
+decided which path a draw came from with three named modes. `FEAT-23` then moved the
+fidelity metrics out of the example scripts and into the package, as computation only.
+Around them, the documentation gained a *Validating synthetic data* section, the examples
+gained the scripts that generate the validation ensembles and measure them, and the
+`day/` study became a configurable sweep.
+**499 tests passing, 15 skipped — 514 collected (was 447).**
+
+### Added
+
+- **`meteosynth.metrics` — fidelity metrics as computation only** (`FEAT-23`). Nothing in
+  it takes a path, reads file metadata, prints or plots. Both sides of a comparison arrive
+  as a **`SeriesSet`**: one `(members, hours)` array — a member is an observed year or a
+  realisation — plus the calendar it shares. `SeriesSet.from_reference_frame` builds the
+  reference from a long observed frame (Feb 29 dropped, incomplete years dropped and listed
+  in `.dropped`); `SeriesSet.from_ensemble` / `from_ensemble_frame` build the synthetic side
+  through `Ensemble.to_wide`.
+
+  Two tests, each a frozen settings object whose `evaluate(reference, synthetic, ...)`
+  returns a result with `.table` and `.summary()`:
+
+  - **`MarginalFidelity`** — a distance per `(month, hour)` cell: full-power, size-matched,
+    and a `YearSplitBand` control from random half-splits of the reference years, under the
+    pre-registered 90 % rule. **Degenerate cells** (the same constant on both sides —
+    night-time irradiance) are flagged and excluded from the pass share.
+  - **`TemporalFidelity`** — raw and anomaly autocorrelation to 240 h against the
+    reference years' spread (`MemberSpreadBand`), and the integral decorrelation time. The
+    `Climatology` is an argument, so compared ensembles are measured against one baseline.
+
+  Distances (`Wasserstein1`, `KolmogorovSmirnovStatistic` — the statistic only) and control
+  bands are pluggable. Instruments are public on their own: `autocorrelation`,
+  `decorrelation_time`, `empirical_cdf`, `quantile_traces`, `constant_cells`.
+
+  **Checked against the pre-port script outputs on Heraklion**, both ensembles, all three
+  variables: marginal tables identical (largest difference 1.1e-13, every pass flag equal);
+  temporal τ within 0.08 h, 2 of 1 446 lag flags different, both on the band edge. 30 tests
+  in `tests/test_metrics_*.py`, including closed-form AR(1) and shifted-sample checks and a
+  day-shuffle fault injection that the ACF catches and the marginal test does not.
+
+
+- **A calibration test: the suite checks what the sampler *produces*, not only that it
+  follows the rules** (`CHORE-12`). `tests/test_sampler_calibration.py` trains on the
+  two-year synthetic fixture, draws 300 realisations at two calendar dates for all three
+  attributes, and asserts the synthetic days match the pool they were fitted to on level
+  (within 5 %), match a recorded reference on spread (within 25 %), and are finite and
+  inside physical support. 18 tests, ~20 s, no network.
+
+  **It was itself validated by fault injection**, since a test that cannot fail is what
+  this item exists to complain about: a ±6–10 % level shift and a halved or 1.6× spread
+  were each caught in **6 of 6 cells**, with **0 of 6** false positives on an untouched
+  control.
+
+  Two measurements shaped it, both recorded in the file. **Spread cannot be compared to
+  the training pool**: a healthy `temp_air` reads 0.61 because the pool carries
+  within-window seasonal drift the model deliberately does not reproduce, while a healthy
+  `poa_direct` reads 0.95 — and narrowing the window fixes one while breaking the other.
+  So spread is checked against its own measured value. And the fixture's **winter is
+  darker than any real site** (0.7 W/m² daily mean in late December against 86 for
+  Heraklion), so the second date is 21 October, where a level ratio is not two near-zero
+  numbers divided by each other.
+
+- **`sampling=` — say which path answers a draw, instead of a hidden counter deciding**
+  (`FEAT-17`). Three named modes on `generate_series`, `generate_ensemble`,
+  `write_ensemble`, `DayWindowGenerator`, `EnvSeriesGenerator`, `for_day`/`for_slot` and
+  the simulator itself:
+
+  | mode | behaviour |
+  | :--- | :--- |
+  | `"auto"` *(default)* | resolve **once, before drawing**, from what is known — an ensemble knows `n_realisations`; a bare `gen_day` loop knows nothing, so the counter advises |
+  | `"exact"` | never build a quantile grid |
+  | `"grid"` | build it up front, always |
+
+  Exported as `SAMPLING_PATHS` and `resolve_sampling`. A mistyped mode raises rather than
+  silently sampling from something else. `DayWindowGenerator`'s LRU cache is keyed on
+  `(slot, sampling)`, so a generator fitted for one path is never handed back for another.
+
+- **Documentation: *Validating synthetic data*** (`docs/source/metrics/`). One page per
+  metric in common use for judging synthetic weather — Wasserstein-1, KS, quantile traces,
+  rank histogram, autocorrelation, power spectrum, spell lengths, midnight seam,
+  cross-correlation, tail dependence, annual dispersion, energy-system utility — each
+  saying in plain words what it measures and how well it fits meteosynth, with a
+  suitability table on the index page. A **cardinality** page comes first, because most
+  mistakes happen there: whether the comparison is 1:1, 1:N, M:N or M:1 decides whether
+  a metric's answer means anything and where its uncertainty sits. The index states the control-band idea and the pre-registered 90 % rule
+  the package's tests use. `api.rst` documents `meteosynth.metrics`.
+
+- **`docs/RELEASING.md` — how a release is cut**: a SmartGit + uv TL;DR, then the full
+  git-flow CLI procedure from version bump to PyPI upload. Records that `uv publish` does
+  not read `.pypirc`, so uploads go through `uvx twine`.
+
+- **`examples/use_cases/year-metrics/` — generate a three-variable ensemble, then measure
+  it.** `metrics_ensemble.py` writes `poa_global`, `temp_air` and `wind_speed` in one file,
+  on one calendar, from one record, under one seed, and checks the file round-trips. Four
+  scripts read it back through `meteosynth.metrics`, in two tiers:
+  - `metrics-marginal_basic.py`, `metrics-temporal_basic.py` — one variable, laid out as
+    constants, functions and invocation cells, a plain pandas read; write to `output/`.
+  - `metrics-marginal_adv.py`, `metrics-temporal_adv.py` — every variable, streamed row
+    group by row group, a summary CSV per ensemble; write to `output_adv/`.
+
+  Every output is named after the ensemble it measured, so runs at different window
+  widths (`_w7_`, `_w15_`) sit side by side. ECDF figures use `empirical_cdf`'s default
+  of 1 001 evenly spaced probabilities rather than every value — 8.76 M synthetic values
+  plot no better and far slower — drawn as lines rather than steps.
+
+- **`examples/use_cases/year-leros/` measures as well as generates.**
+  `leros_metric_marginal.py` (Wasserstein-1 per month × hour against a year-split control
+  band) and `leros_metric_temporal.py` (autocorrelation to 10 days against the observed
+  year-to-year spread) read the 1 000-year `wind_speed` ensemble back against the 19-year
+  record, streaming it rather than loading it. They are the self-contained originals the
+  package's metrics were ported from and checked against.
+
+### Changed
+
+- **The `day/` use case is a configurable study, not three fixed runs.** What the three
+  `day_envelope_*` scripts share — loading the record, fitting, drawing, naming files, the
+  sweep — moved into `day/day_study.py`; each script keeps its preamble and the two hooks
+  specific to its variable (`describe_fit`, `extra_report`). `POOL_DAYS`, `WINDOW_DAYS`
+  and `N_SYNTHETIC` are **lists**: `run_sweep` walks every combination, fitting once per
+  training window, and writes a `_sweep_summary.csv` with one row per case. Every output
+  filename carries its parameters (`…_pool07_win15_n0200_seed42…`) and figures repeat the
+  tag in a corner, so runs accumulate instead of overwriting. Each script states its own
+  site and period, and `YEARS = None` asks PVGIS for its whole record — the period loaded
+  is printed, since a folder already holding a narrower record keeps answering with it.
+- **`year-metrics/leros_metrics_ensemble.py` is now `metrics_ensemble.py`**, and its
+  output is `ensemble_<site>_<year>_n<N>_w<W>_3attr.parquet` — the training-window
+  half-width is part of the name, because it is the setting the validation compares.
+- **`examples/use_cases/year-metrics/` compute through `meteosynth.metrics`** (`FEAT-23`).
+  The four metric scripts keep reading, printing and plotting; the arithmetic is the
+  package's. Their output columns follow the package: `obs_*` → `ref_*`, `n_obs` →
+  `n_ref`, `trivial` → `degenerate`, and in the summaries `M`/`N` → `n_reference` /
+  `n_synthetic`, `tau_obs_h` → `tau_reference_h`. **The temporal scripts now drop Feb 29**
+  from the reference, like the marginal ones; measured effect on τ ≤ 0.08 h.
+- **`DEGENERACY_RTOL` moved to `meteosynth.constants`**, so the simulator's
+  `Kind.CONSTANT` and the metrics' degenerate-cell mask share one definition of
+  "constant". The simulator's private `_DEGENERACY_RTOL` remains as an alias.
+
+### Fixed
+
+- **`precompute=False` did not disable the cached sampler** (`FEAT-17`). It skipped only
+  the *eager* build; a hidden counter on each simulator still built the grid on the 65th
+  draw, so **936 of 1000 realisations came from a grid the caller had declined** — an
+  opt-out landing within 1.8× of the opt-in and 7× from what its name implied. Measured at
+  N = 1000 on a 365-day year: `precompute=True` 20.2 min, `precompute=False` 36.8 min, a
+  genuine exact path 4.5 h. Verified end to end at N = 200: `sampling="exact"` builds
+  **0 of 23** grids where `precompute=False` built 23 of 23.
+
+  Which sampler answers a draw no longer depends on call history at all. The counter
+  survives as **advice only**: it keeps counting and logs once that a grid would have paid
+  for itself, so the optimisation stays discoverable without ever changing a number.
+
+### Removed
+
+- **`precompute=` on `generate_ensemble` and `write_ensemble`** (`FEAT-17`), replaced by
+  `sampling=`. It was the misnamed parameter above, and a boolean could not express the
+  third state that mattered. **Ensemble files record the resolved path under a `sampling`
+  key** in place of `precompute` — never `"auto"`, since a file should record what
+  happened rather than what was asked for.
+
+### Decisions
+
+- **Metrics take arrays, not package objects or files** (`FEAT-23`). A `SeriesSet` is
+  separate from `Ensemble` because the two have different jobs — one file faithfully, one
+  side of a comparison cheaply (67 MB per attribute against ≥ 276 MB for a full ensemble
+  read) — and the only shared code is the conversion. See
+  [`FEAT-23`](docs/design/completed/FEAT-23-metrics-package.md#8-seriesset-and-ensemble--duplication-or-two-things).
+- **The comparison side is named `reference`, not `observed` or `training`** (`FEAT-23`),
+  so the same API serves held-out years later. `training` keeps its meaning — what a model
+  was fitted on — everywhere else.
+- **Choosing a sampling path is about determinism, not accuracy.** The grid's extra error
+  is 0.03 % on the mean and 0.04–0.31 % on the standard deviation — ~100× below what the
+  diagnostics harness can resolve — so the axis is *exact vs fast*, not *precise vs
+  performant*. Pinned by a test asserting the two paths agree distributionally.
+- **A calibration test asserts statistics, never individual draws.** A golden test on a
+  sampler breaks whenever `numpy` or `scipy` changes generator internals without anything
+  being wrong. Every tolerance was set from measured Monte-Carlo noise (±0.1–0.6 % on the
+  level, ±3–9 % on the spread) before the threshold was chosen.
+
+---
+
 ## [0.3.2] — 2026-08-03
 
 **Collect once per site, then work locally — and put the files where the work is.** Two

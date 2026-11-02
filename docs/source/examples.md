@@ -185,9 +185,12 @@ generator = DayWindowGenerator(ds, attr_str="poa_global", n_days=15)
 ### Day — does a synthetic day look like a real one?
 
 `day/day_envelope_pv.py`, `day_envelope_temp.py` and `day_envelope_wind.py` each draw
-200 independent synthetic 21 Mays and hold them against the eleven observed
-21 Mays plus the percentile envelope of the surrounding fortnight. Three checks,
-because a generator can pass one and fail another:
+200 independent synthetic 21 Mays and hold them against every observed 21 May in the
+record plus the percentile envelope of the surrounding fortnight. What the three share —
+loading, fitting, drawing, file naming — lives in `day/day_study.py`, and the envelope
+width, training window and ensemble size are lists, so one run can sweep several
+configurations; every output filename carries the parameters that produced it. Three
+checks, because a generator can pass one and fail another:
 
 | Check | What it asks | Where it can go wrong |
 | :--- | :--- | :--- |
@@ -279,6 +282,27 @@ How much that matters depends entirely on what you are asking. It moves an **ann
 directly — **storage autonomy, worst-case days, a daily P10** (up to 9 % high). Deferred
 rather than fixed for exactly that reason.
 ```
+
+### Year ensembles — generate 1 000 years, then measure them
+
+`year-leros/` and `year-metrics/` go one step further: they write a 1 000-year ensemble
+with `write_ensemble` and then measure its fidelity against the record it was trained
+on. `year-metrics/` holds all three quantities in one file and measures them through
+{mod}`meteosynth.metrics`:
+
+```python
+from meteosynth import read_ensemble
+from meteosynth.metrics import MarginalFidelity, SeriesSet
+
+reference = SeriesSet.from_reference_frame(observed, "wind_speed")   # observed years
+synthetic = SeriesSet.from_ensemble(read_ensemble(path), "wind_speed")
+result = MarginalFidelity().evaluate(reference, synthetic)
+print(result.summary())
+```
+
+Its `_basic` scripts handle one variable in a readable layout; the `_adv` scripts handle
+every variable, stream the file, and write a summary CSV per ensemble. What each metric
+means is in {doc}`metrics/index`.
 
 ## 6. Diagnostics: settling a claim about accuracy
 

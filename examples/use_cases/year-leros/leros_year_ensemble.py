@@ -1,6 +1,15 @@
 """
 A synthetic wind-speed ensemble for Leros (37.167 N, 26.800 E). Data only.
 
+**One attribute on purpose.** For all three quantities in one file -- which is what the
+validation work in ``paper/metrics-prompt.md`` reads -- use
+``use_cases/year-metrics/leros_metrics_ensemble.py``, which is this script with
+``ATTRS`` widened and every other constant held identical. The two are kept apart so that
+one can be analysed while the other generates, and because the wind column of the
+three-attribute file should *reproduce* this one rather than merely resemble it: randomness
+is keyed on the attribute's **name**, never on its position in ``ATTRS``. That folder's
+step 4 checks it.
+
 Standalone by design: imports **nothing from `examples/`** -- no `tools.site_data`, no
 shared helpers, no `sys.path` bootstrap -- so it can be copied anywhere and run. Written
 as Jupyter-style `#%%` cells, so it can equally be stepped through in VS Code or
@@ -125,12 +134,13 @@ WINDOW_DAYS = 15
 #: when you add wind_speed alongside it.
 SEED = 2026
 
-#: Build each simulator's cached quantile grid up front rather than letting the package
-#: decide. Left as ``None`` it switches on above 64 realisations, which means two runs
-#: either side of that boundary differ by *which sampling path ran* and not only by size.
-#: Forcing it True keeps every run on one path, and is the right setting for any ensemble
-#: large enough to want one -- below ~64 realisations it is pure overhead.
-PRECOMPUTE = True
+#: Which path answers each draw: ``"grid"`` builds each simulator's cached quantile grid
+#: up front. Left on ``"auto"`` the package decides from the realisation count, so two runs
+#: either side of 64 would differ by *which sampling path ran* and not only by size. Naming
+#: it keeps every run on one path, and ``"grid"`` is right for any ensemble large enough to
+#: want one -- below ~64 realisations it is pure overhead, and ``"exact"`` is the choice
+#: when a run has to be reproducible to the last digit.
+SAMPLING = "grid"
 
 #: Re-download the training record even when one is already stored.
 FORCE_REFETCH = False
@@ -186,7 +196,7 @@ meta = write_ensemble(
     n_days_window=WINDOW_DAYS,
     include_feb29=False,
     progress=PROGRESS,
-    precompute=PRECOMPUTE,
+    sampling=SAMPLING,
 )
 elapsed = time.perf_counter() - started
 

@@ -89,7 +89,7 @@ The file records how it was generated, under the parquet key-value metadata key
 | `seed` | Root entropy, or `null` if the run was not seeded. |
 | `window_n_days` | Half-width of the rolling training window, in days. |
 | `bandwidth` | KDE bandwidth used for the fits. |
-| `precompute` | Whether quantile grids were built up front. |
+| `sampling` | Which path answered each draw: `"exact"` (live density) or `"grid"` (cached quantile grid). Never `"auto"` — the file records what happened, not what was asked for. |
 | `source_provenance` | Where the *training* data came from: source, site, coordinates, period, fetch date. |
 | `notes` | A statement that attributes were generated independently. Read it. |
 
@@ -284,11 +284,11 @@ dwg = DayWindowGenerator(ds, attr_str="poa_global",
 again = dwg.generate_ensemble(
     start=tuple(meta["start"]), n_days=meta["n_days"],
     n_realisations=meta["n_realisations"], seed=meta["seed"],
-    include_feb29=meta["include_feb29"], precompute=meta["precompute"],
+    include_feb29=meta["include_feb29"], sampling=meta["sampling"],
 )
 ```
 
-Pass `precompute` explicitly, as above, if you are regenerating at a **different**
-realisation count from the original — see
-{meth}`~meteosynth.generators.DayWindowGenerator.generate_ensemble` for why the sampler
-changes at 64.
+Passing `sampling` back, as above, is what makes the regeneration exact even at a
+**different** realisation count from the original: left on `"auto"` the path is chosen
+from the count, and two runs either side of 64 would use different samplers. See
+{meth}`~meteosynth.generators.DayWindowGenerator.generate_ensemble`.

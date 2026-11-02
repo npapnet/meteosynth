@@ -36,8 +36,10 @@ import pandas as pd
 from .day_window import DAYS_IN_YEAR, day_slot, slot_to_month_day
 from .markov_chain_simulator_kde2d import (
     _GRID_ACTIVATION_CALLS,
+    SAMPLING_PATHS,
     MarkovChainSimulator2dKDE,
     _as_rng,
+    resolve_sampling,
 )
 from .dataset import MetDataset, convert_to_daily_wide
 from .variables import get_spec, registered
@@ -227,6 +229,7 @@ def _simulator_from_wide(
     hour: int,
     bandwidth: Optional[float] = 0.1,
     spec=None,
+    sampling: str = "auto",
 ) -> MarkovChainSimulator2dKDE:
     """Fit the ``hour-1 -> hour`` simulator from an already-pivoted wide frame."""
     pairs = build_transition_pairs(wide, hour)
@@ -235,7 +238,9 @@ def _simulator_from_wide(
             f"no complete transition pairs for hour {hour}: the training subset has no "
             f"day with values at both hour {hour - 1} and hour {hour}"
         )
-    return MarkovChainSimulator2dKDE(pairs, bandwidth=bandwidth, spec=spec)
+    return MarkovChainSimulator2dKDE(
+        pairs, bandwidth=bandwidth, spec=spec, sampling=sampling
+    )
 
 
 def _to_wide(met_data: pd.DataFrame, attr_str: str) -> pd.DataFrame:
@@ -334,10 +339,14 @@ class EnvSeriesGenerator:
         attr_str: str,
         bandwidth: Optional[float] = 0.1,
         wide_full: Optional[pd.DataFrame] = None,
+        sampling: str = "auto",
     ) -> None:
         self.attr_str = attr_str
         self.met_data = met_data
         self.spec = get_spec(attr_str) if attr_str in registered() else None
+        #: Which path every simulator here answers a draw from. See
+        #: :data:`~meteosynth.markov_chain_simulator_kde2d.SAMPLING_PATHS`.
+        self.sampling = resolve_sampling(sampling)
         self._dic_simulator: dict[int, MarkovChainSimulator2dKDE] = {}
 
         logging.info("Initializing hourly simulators for attribute '%s'...", attr_str)
@@ -348,7 +357,7 @@ class EnvSeriesGenerator:
         # Hour 0 has no within-day predecessor, so the loop starts at 1.
         for hour in range(1, HOURS_PER_DAY):
             self._dic_simulator[hour] = _simulator_from_wide(
-                wide, hour, bandwidth=bandwidth, spec=self.spec
+                wide, hour, bandwidth=bandwidth, spec=self.spec, sampling=self.sampling
             )
 
         initial = build_initial_values(wide)
@@ -357,7 +366,7 @@ class EnvSeriesGenerator:
                 "no observed 00:00 values in the training subset: cannot fit pi(x0)"
             )
         self._initial = MarkovChainSimulator2dKDE(
-            initial, bandwidth=bandwidth, spec=self.spec
+            initial, bandwidth=bandwidth, spec=self.spec, sampling=self.sampling
         )
 
         self._cross_midnight: Optional[MarkovChainSimulator2dKDE] = None
@@ -365,7 +374,7 @@ class EnvSeriesGenerator:
             pairs = build_cross_midnight_pairs(wide_full, wide.index)
             if not pairs.empty:
                 self._cross_midnight = MarkovChainSimulator2dKDE(
-                    pairs, bandwidth=bandwidth, spec=self.spec
+                    pairs, bandwidth=bandwidth, spec=self.spec, sampling=self.sampling
                 )
 
     @property
@@ -573,7 +582,7 @@ def _walk_ensemble(
     include_feb29: bool = False,
     progress: bool = False,
     progress_leave: bool = True,
-    precompute: Optional[bool] = None,
+    sampling: str = "auto",
 ) -> Iterator[EnsembleDay]:
     """
     Walk the calendar **once**, advancing every realisation through each day.
@@ -621,9 +630,10 @@ def _walk_ensemble(
     progress_leave : bool, optional
         Whether the bar persists. An ensemble is one walk, so its bar is worth keeping;
         a single series inside a loop of hundreds is not.
-    precompute : bool, optional
-        Whether to build each day's quantile grids up front. ``None`` decides by realisation
-        count -- see :data:`~meteosynth.markov_chain_simulator_kde2d._GRID_ACTIVATION_CALLS`.
+    sampling : {"auto", "exact", "grid"}, optional
+        Which path answers each draw. ``"auto"`` resolves from ``n_realisations`` before
+        drawing starts -- see
+        :data:`~meteosynth.markov_chain_simulator_kde2d.SAMPLING_PATHS`.
 
     Yields
     ------
@@ -647,13 +657,11 @@ def _walk_ensemble(
     if n_realisations < 1:
         raise ValueError("at least one realisation stream is required")
 
-    # Above this many realisations, build each simulator's quantile grid up front instead
-    # of letting it appear part-way through the ensemble. Below it PERF-1 would not build
-    # one anyway, so the default is not a second policy -- it is the same crossover, applied
-    # earlier. This is also what keeps a single series bit-for-bit as it was: at
-    # n_realisations=1 nothing is precomputed and the direct path is taken throughout.
-    if precompute is None:
-        precompute = n_realisations > _GRID_ACTIVATION_CALLS
+    # A walk knows exactly how many draws each simulator will see -- one per realisation --
+    # so "auto" is a *fact* here, not a guess, and resolves before any drawing starts. That
+    # is what stops a grid appearing part-way through an ensemble and making realisation 0
+    # and realisation 500 come from different samplers. `FEAT-17`.
+    resolved = resolve_sampling(sampling, n_expected_draws=n_realisations)
 
     previous: dict[str, Optional[np.ndarray]] = {attr: None for attr in generators}
 
@@ -675,8 +683,8 @@ def _walk_ensemble(
         for attr, dwg in generators.items():
             # Through the instance, deliberately: the LRU cache lives there, and the test
             # suite spies on for_slot to assert which days a walk visits.
-            generator = dwg.for_slot(slot)
-            if precompute:
+            generator = dwg.for_slot(slot, sampling=resolved)
+            if resolved == "grid":
                 generator.precompute_grids()
 
             out = np.empty((n_realisations, HOURS_PER_DAY))
@@ -754,6 +762,7 @@ class DayWindowGenerator:
         n_days: int = 15,
         bandwidth: Optional[float] = 0.1,
         cache_size: int = 8,
+        sampling: str = "auto",
     ) -> None:
         _check_attr(attr_str)
         if cache_size < 1:
@@ -764,7 +773,13 @@ class DayWindowGenerator:
         self.n_days = n_days
         self.bandwidth = bandwidth
         self.cache_size = cache_size
-        self._cache: "OrderedDict[int, EnvSeriesGenerator]" = OrderedDict()
+        #: Default sampling path for every generator handed out. Overridable per call on
+        #: :meth:`for_day` / :meth:`for_slot`.
+        self.sampling = resolve_sampling(sampling)
+        # Keyed on (slot, sampling): a generator fitted for one path must never be handed
+        # back for another, or a caller would silently draw from a sampler it did not ask
+        # for -- the whole complaint behind `FEAT-17`.
+        self._cache: "OrderedDict[tuple, EnvSeriesGenerator]" = OrderedDict()
         self._wide_full_cache: Optional[pd.DataFrame] = None
 
     def _wide_full(self) -> pd.DataFrame:
@@ -778,7 +793,9 @@ class DayWindowGenerator:
             self._wide_full_cache = _to_wide(self.dataset.met_data, self.attr_str)
         return self._wide_full_cache
 
-    def for_day(self, month: int, day: int) -> EnvSeriesGenerator:
+    def for_day(
+        self, month: int, day: int, sampling: Optional[str] = None
+    ) -> EnvSeriesGenerator:
         """
         Get the generator trained on the window centred on ``(month, day)``.
 
@@ -796,9 +813,11 @@ class DayWindowGenerator:
         EnvSeriesGenerator
             Fitted generator, built on first request and cached thereafter.
         """
-        return self.for_slot(day_slot(month, day))
+        return self.for_slot(day_slot(month, day), sampling=sampling)
 
-    def for_slot(self, slot: int) -> EnvSeriesGenerator:
+    def for_slot(
+        self, slot: int, sampling: Optional[str] = None
+    ) -> EnvSeriesGenerator:
         """
         Get the generator for an ``all_leap`` calendar slot (1-366).
 
@@ -813,9 +832,11 @@ class DayWindowGenerator:
         EnvSeriesGenerator
             Fitted generator, built on first request and cached thereafter.
         """
-        if slot in self._cache:
-            self._cache.move_to_end(slot)
-            return self._cache[slot]
+        sampling = self.sampling if sampling is None else resolve_sampling(sampling)
+        key = (slot, sampling)
+        if key in self._cache:
+            self._cache.move_to_end(key)
+            return self._cache[key]
 
         month, day = slot_to_month_day(slot)
         logging.info("Fitting window generator for %02d-%02d (slot %d, n_days=%d)...",
@@ -825,9 +846,10 @@ class DayWindowGenerator:
             attr_str=self.attr_str,
             bandwidth=self.bandwidth,
             wide_full=self._wide_full(),
+            sampling=sampling,
         )
 
-        self._cache[slot] = generator
+        self._cache[key] = generator
         if len(self._cache) > self.cache_size:
             self._cache.popitem(last=False)  # evict least-recently used
         return generator
@@ -950,7 +972,7 @@ class DayWindowGenerator:
         seed: Optional[int] = None,
         include_feb29: bool = False,
         progress: bool = False,
-        precompute: Optional[bool] = None,
+        sampling: str = "auto",
     ) -> np.ndarray:
         """
         Generate many independent synthetic series in **one** calendar walk.
@@ -978,17 +1000,18 @@ class DayWindowGenerator:
             Root entropy. Realisation *i* of this attribute draws from a stream keyed on
             ``(seed, i, attr_str)`` and nothing else -- see :func:`realisation_stream` -- so
             it does not depend on how many realisations were requested, nor on which other
-            attributes were. Subject to ``precompute``; see the note below.
+            attributes were. Subject to ``sampling``; see the note below.
         include_feb29 : bool, optional
             Whether the walk visits Feb 29. Defaults to ``False``, giving a 365-day year.
         progress : bool, optional
             Show a ``tqdm`` bar over the day walk. Unlike :meth:`generate_series`'s, this
             one persists: an ensemble is a single walk rather than one of hundreds.
-        precompute : bool, optional
-            Whether to build every simulator's quantile grid before drawing. ``None``, the
-            default, decides by realisation count: above 64 it precomputes, at or below it
-            does not. Pass it explicitly to make two ensembles of *different* sizes directly
-            comparable -- see the note below.
+        sampling : {"auto", "exact", "grid"}, optional
+            Which path answers each draw. ``"auto"`` (default) decides from
+            ``n_realisations`` **before drawing starts**: above 64 it uses the cached grid,
+            at or below it evaluates the density live. ``"exact"`` never builds a grid;
+            ``"grid"`` always does. Naming one of the two explicitly is what makes
+            ensembles of *different* sizes bit-comparable -- see the note below.
 
         Returns
         -------
@@ -1003,18 +1026,19 @@ class DayWindowGenerator:
         The two agree distributionally -- two-sample KS p = 1.0 -- but not to the last digit,
         differing by ~0.02 % on a daily total.
 
-        With ``precompute=None`` the grids are built up front for ensembles **larger than
-        64**, so that every member of one ensemble comes from one sampler and the members
-        stay exchangeable. The consequence: realisation 0 of a 50-realisation ensemble is
-        *not* bit-identical to realisation 0 of a 500-realisation one, because the two
-        straddle that boundary. Within a regime it is exactly identical, and since real
-        ensembles are hundreds or thousands strong, extending 500 to 1000 is safe.
+With ``sampling="auto"`` the choice is made **once, from ``n_realisations``, before any
+        drawing** -- above 64 the grid, at or below it the live density -- so every member of
+        one ensemble comes from one sampler and the members stay exchangeable. The
+        consequence: realisation 0 of a 50-realisation ensemble is *not* bit-identical to
+        realisation 0 of a 500-realisation one, because the two straddle that crossover.
+        Within a regime it is exactly identical.
 
-        **To cross the boundary safely, set ``precompute`` explicitly** -- the same value for
-        both runs -- and realisation *i* is then bit-identical for any two sizes.
+        **To compare across the crossover, name the path** -- ``sampling="grid"`` or
+        ``sampling="exact"`` for both runs -- and realisation *i* is then bit-identical at
+        any two sizes.
 
-        A chained :meth:`generate_series` is the ``n_realisations=1`` case and precomputes
-        nothing, so it remains bit-for-bit what it always was.
+        A chained :meth:`generate_series` is the ``n_realisations=1`` case, which resolves
+        to ``"exact"``, so it remains bit-for-bit what it always was.
 
         Examples
         --------
@@ -1033,11 +1057,10 @@ class DayWindowGenerator:
         }
 
         # Start from cold generators, and leave none behind. The LRU cache carries
-        # *sampler state*, not just fitted models: a cached simulator remembers how many
-        # times it has been sampled, so one that has already crossed PERF-1's threshold
-        # answers from its quantile grid while a fresh one answers directly. Left alone,
-        # that makes this method non-reproducible in the plainest way -- the same call on
-        # the same object returns different numbers depending on what ran before it.
+        # *sampler state*, not just fitted models. Since `FEAT-17` a walk resolves its
+        # path up front, so which sampler answers no longer depends on call history --
+        # but a cached simulator still holds the grid it built, and handing that to a
+        # later `sampling="exact"` run would answer from a grid that run declined.
         #
         # Discarding the cache costs nothing here: a calendar walk visits each slot once,
         # so there is no hit to lose. Clearing on the way out also releases the grids the
@@ -1052,7 +1075,7 @@ class DayWindowGenerator:
                 streams=streams,
                 include_feb29=include_feb29,
                 progress=progress,
-                precompute=precompute,
+                sampling=sampling,
             ):
                 out[:, step.day_index - 1, :] = step.values[self.attr_str]
         finally:

@@ -15,7 +15,7 @@ ordered by how much they block real use; within a group, most significant first.
 
 ## ID allocation
 
-> **Next ID: 23.**
+> **Next ID: 24.**
 
 IDs come from **one counter shared by every category**. The prefix says what an item
 *is*; the number says *which* item it is. Only the number is the identity.
@@ -35,7 +35,7 @@ IDs come from **one counter shared by every category**. The prefix says what an 
    full `PREFIX-N` string is the identity; they are **not** renumbered. From `#10` up, the
    number alone is unambiguous.
 
-**Retired numbers:** `FIX-2`, `FIX-3`, `FIX-18`, `FEAT-4`, `FEAT-5`, `FEAT-13`, `FEAT-15`, `FEAT-21` → [`CHANGELOG.md`](CHANGELOG.md) ·
+**Retired numbers:** `FIX-2`, `FIX-3`, `FIX-18`, `FEAT-4`, `FEAT-5`, `FEAT-13`, `FEAT-15`, `FEAT-21`, `CHORE-12`, `FEAT-17`, `FEAT-23` → [`CHANGELOG.md`](CHANGELOG.md) ·
 `FEAT-1` → superseded 2026-07-29 by `FEAT-13` ·
 `INBOX-1` … `INBOX-7` → [triaged 2026-07-27](CHANGELOG.md#changed) ·
 `INBOX-10`, `INBOX-13`, `INBOX-14` → triaged 2026-08-01, see the note below.
@@ -49,8 +49,6 @@ IDs come from **one counter shared by every category**. The prefix says what an 
 
 | ID | Item | Status |
 | :--- | :--- | :--- |
-| [FEAT-17](#feat-17--choose-the-sampling-path-explicitly-not-by-a-hidden-counter) | Choose the sampling path explicitly | open · **carries a shipped defect** · gated on CHORE-12 |
-| [CHORE-12](#chore-12--nothing-pins-what-the-sampler-produces-against-its-training-pool) | Nothing pins the sampler against its pool | open · **gates FEAT-17 and PERF-16** |
 | [FIX-1](#fix-1--the-overcast-tail-is-under-produced) | The overcast tail is under-produced | open · **deferred, with evidence** |
 | [CHORE-19](#chore-19--monthly_statisticspy-still-predates-feat-15) | `monthly_statistics.py` predates FEAT-15 | open · small and concrete |
 | [FEAT-10](#feat-10--promote-the-envelope-diagnostics-out-of-examples) | Promote the envelope diagnostics | open · first move is a deletion |
@@ -58,7 +56,7 @@ IDs come from **one counter shared by every category**. The prefix says what an 
 | [FEAT-2](#feat-2--is-a-derived-irradiance-column-distinguishable-from-a-fetched-one) | Is a derived column distinguishable? | (3) open · needed before VISION-1 |
 | [CHORE-22](#chore-22--the-benchmarks-noise-floor-measures-the-wrong-scatter) | Benchmark noise floor measures the wrong scatter | open · low priority |
 | [CHORE-1](#chore-1--default-window-half-width-needs-a-real-evaluation) | Default window half-width | open · half measured |
-| [PERF-16](#perf-16--the-grid-build-not-the-draws) | The grid **build**, not the draws | open · **after CHORE-12** |
+| [PERF-16](#perf-16--the-grid-build-not-the-draws) | The grid **build**, not the draws | open · low priority |
 | [PERF-11](#perf-11--grid-node-spacing-may-want-to-depend-on-the-variable) | Grid node spacing per variable | open · low priority |
 | [PERF-2](#perf-2--four-copies-of-the-same-data-in-every-simulator) | Four copies of the same data | open · low priority |
 | [PERF-3](#perf-3--fitted-generators-cannot-be-pickled-at-the-default-bandwidth) | Fitted generators cannot be pickled | open · low priority |
@@ -73,24 +71,21 @@ IDs come from **one counter shared by every category**. The prefix says what an 
 Groups below are ordered by how much they block real use. This list is the order to
 *take them in*, which is not the same thing.
 
-1. **CHORE-12, then FEAT-17.** `CHORE-12` gates two items and is the suite's one
-   demonstrated blind spot; `FEAT-17` is the only open item carrying a defect that ships
-   today. Doing `FEAT-17` first is how a silent modelling change gets released.
-2. **CHORE-19 and FEAT-10's first move together.** Both delete a pre-`FEAT-15` calling
+1. **CHORE-19 and FEAT-10's first move together.** Both delete a pre-`FEAT-15` calling
    pattern from `examples/`, both change drawn values, and both need the same
    before/after comparison. One pass, one re-run of the diagnostics anchor cell.
-3. **FEAT-3** whenever convenient — independent of everything else and small.
-4. **FIX-1 and CHORE-1** are both modelling questions about the same kernel. Take them
+2. **FEAT-3** whenever convenient — independent of everything else and small.
+3. **FIX-1 and CHORE-1** are both modelling questions about the same kernel. Take them
    together if either is taken; `FIX-1` is deliberately deferred and `CHORE-1` is half
    measured.
-5. **PERF-16, PERF-11, PERF-2, PERF-3** are all low priority. `PERF-16` waits on
-   `CHORE-12`; `PERF-11` and `PERF-16`'s first direction are the same question about node
-   count and placement, so answer them together.
-6. **FEAT-14 and CHORE-4 last.** Both are documentation-shaped and both are cheaper once
+4. **PERF-16, PERF-11, PERF-2, PERF-3** are all low priority. `PERF-11` and `PERF-16`'s
+   first direction are the same question about node count and placement, so answer them
+   together.
+5. **FEAT-14 and CHORE-4 last.** Both are documentation-shaped and both are cheaper once
    the items above stop moving the surface they describe.
 
-**FEAT-17, PERF-16 and FEAT-10 all touch the sampler or its callers.** Whichever runs
-first shortens the others: `FEAT-10`'s deletion removes one of `FEAT-17`'s two callers.
+**PERF-16 and FEAT-10 both touch the sampler or its callers**, so whichever runs first
+shortens the other.
 
 ---
 
@@ -166,72 +161,6 @@ fix must move the tail shares without moving the mean ratios off 1.**
 
 # Features — planned work
 
-## FEAT-17 — Choose the sampling path explicitly, not by a hidden counter
-
-**Status:** open · **carries a shipped defect** · **gated on `CHORE-12`** — this changes
-the default sampler for every caller
-
-`MarkovChainSimulator2dKDE` answers a draw two ways: evaluate the conditional density live
-(**the exact path**), or read a precomputed quantile table (**the table path**). Which one
-runs is decided by a hidden mutable counter on the simulator — the 65th draw switches
-paths. Decide it from **arguments** instead, and demote the counter to advisory.
-
-> **"Exact path" means *no table*, not *no approximation*.** It still discretises the
-> value axis and integrates by cumulative sum. The table adds interpolation across nodes
-> of `previous` and a discretised quantile axis on top of those.
-
-### The shipped defect
-
-`generate_ensemble(..., precompute=False)` reads as "do not use the table". **It does not
-do that.** It skips only the *eager* build; the counter still fires on the 65th draw, so
-936 of 1000 realisations come from the table anyway. Measured at N = 1000, `poa_global`,
-±7-day window, 365 days, one attribute:
-
-| what you ask for | what you get | cost |
-| :--- | :--- | ---: |
-| `precompute=True` | table built up front | **20.2 min** |
-| `precompute=False` | *64 exact draws, then the table anyway* | **36.8 min** |
-| the exact path, genuinely | no table ever built | **4.5 h** |
-
-An opt-out that lands within 1.8× of the opt-in and 7× from what its name implies. Today
-the only way to get the exact path is to monkeypatch a private constant.
-
-### What the choice costs, and what it is not
-
-**The exact path costs ~13× for a large ensemble** — 4.5 h against 20 min. Large enough
-that it must be opted into rather than defaulted to silently; small enough to afford for
-one authoritative run. At the other end the ordering reverses: a chained year takes one
-draw per simulator, so building tables would be a ~9× *pessimisation*. Neither path is
-right for both, which is why the caller has to be able to say.
-
-**Accuracy is not at stake.** The table's extra error is 0.03 % on the mean and
-0.04–0.31 % on the standard deviation over 20 000 draws; a 2000-day end-to-end mean moves
-−0.185 % with a KS test at p = 1.0. The diagnostics harness cannot resolve below 1.4–4.8 %.
-What the exact path buys is **determinism and auditability**, a different axis from
-accuracy: *exact vs fast*, not *precise vs performant*.
-
-### The decision to implement
-
-- **Default to the exact path.** Fail toward predictability. The failure mode becomes
-  "slower than it needed to be" — visible and fixable by one argument — instead of
-  "silently different numbers depending on call history", which caused two real defects
-  during `FEAT-15`.
-- **Opt in with a draw count, not a boolean** — something the caller knows, rather than
-  asking them to have done the cost arithmetic. A count also survives a change to the node
-  count for accuracy reasons (`PERF-11`), because the crossover is recomputed.
-- **Retire `precompute=`**, or keep it as a thin alias. It is the misnamed parameter above.
-- **Keep the counter as advice.** Keep counting, never switch paths, and log once when the
-  threshold passes unhinted so the optimisation stays discoverable.
-
-**Callers to update:** two, both in `examples/`, both loops whose bound the callee cannot
-see — `tools/envelope.py` and `diagnostics-overshoot/step2_simulate.py`. The second is the
-calibration harness at n = 1000 and currently gets the table free from the counter; without
-a hint its runtime regresses ~8× and would look like a harness fault. **`FEAT-10` deletes
-the first of those callers**, so doing it first shortens this. No library-internal caller
-is affected.
-
----
-
 ## FEAT-10 — Promote the envelope diagnostics out of `examples/`
 
 **Status:** open · **rescoped by measurement, and it shrank** · *graduated from `INBOX-10`,
@@ -248,14 +177,14 @@ independent synthetic days for one calendar date. **`FEAT-15` already shipped th
 `generate_ensemble(start=(month, day), n_days=1, n_realisations=n)`, and nobody noticed.
 
 The two differ in **which sampler and which streams**, not in meaning: the library version
-keys a stream per realisation instead of sharing one `rng`, and settles the table path by
-realisation count instead of letting the counter flip mid-ensemble. Both differences are
-improvements, and the second is exactly the defect `FEAT-17` describes.
+keys a stream per realisation instead of sharing one `rng`, and settles the sampling path
+up front rather than letting a counter flip it mid-ensemble. Both differences are
+improvements, and `FEAT-17` landed the second one.
 
 So **delete `synthetic_ensemble`** and repoint the three day scripts and the diagnostic at
 `generate_ensemble`. Different streams mean different numbers, so compare drawn values
-before and after and re-run the diagnostics anchor cell — a silent shift there is precisely
-what `CHORE-12` warns about.
+before and after and re-run the diagnostics anchor cell. `tests/test_sampler_calibration.py`
+now guards the level and spread, but it runs on the fixture, not on these scripts.
 
 ### What is left, and it is the harder question
 
@@ -381,7 +310,8 @@ Exit codes matter more than output formatting, since the point is scripted use.
 
 ## PERF-16 — The grid **build**, not the draws
 
-**Status:** open · **gated on `CHORE-12`** · **rescoped by measurement** · originally
+**Status:** open · low priority · **unblocked** — `CHORE-12` landed 2026-08-03 ·
+**rescoped by measurement** · originally
 "batch the draws", deferred with
 [`FEAT-15`](docs/design/completed/FEAT-15-ensemble-generation.md#decided-draw-one-value-at-a-time)
 
@@ -397,7 +327,7 @@ holds 100 realisations or 10 000.
 
 **So batching the draws is capped at ~1.2×** (revised down from ~3× once the build was
 measured), against 77× that `FEAT-15` already delivered. Attack the build instead: it is
-~5× the prize and adds no new sampling path, so it avoids `CHORE-12`'s blind spot.
+~5× the prize and adds no new sampling path at all.
 
 Three directions, none investigated:
 
@@ -529,58 +459,6 @@ provider to prove it.
 ---
 
 # Housekeeping
-
-## CHORE-12 — Nothing pins what the sampler produces against its training pool
-
-**Status:** open · **raised for review, not yet agreed** · **gates `FEAT-17` and
-`PERF-16`**, both of which would change or add a sampling path
-
-### The observation, and what has since narrowed it
-
-`PERF-1` added an entirely new sampling path and **all 271 existing tests passed without
-modification** — the suite could not tell the two samplers apart, and could not have told
-had the new one been wrong. It tests **properties**: that a seed reproduces, that a shared
-generator advances, that samples stay inside support, that degenerate hours are classified
-correctly. All survive a sampler returning materially different numbers.
-
-**`tests/test_conditional_quantile_grid.py` has since closed half of this** — it compares
-the grid path against the direct path distributionally and checks the random stream is not
-perturbed. What remains uncovered is the other half: **whether either path is right against
-the pool it was fitted to.** That is the gap `FEAT-17` and `PERF-16` would widen.
-
-### Arguments against acting
-
-The density computation *is* pinned, to a known fixture. Support truncation is pinned
-end-to-end over a generated year — the defect that actually shipped once (1.29 % negative
-irradiance) and the one most likely to recur. And a statistical property is genuinely
-awkward to pin: an exact-value golden test on a sampler is brittle against a `numpy` or
-`scipy` release that changes generator internals.
-
-### Arguments for
-
-The gap is **demonstrated, not hypothetical**. Every modelling defect this repo has found
-— `FIX-2`, `FIX-3`, the two harness defects in the overshoot diagnostic — was found by
-running things, never by the suite. And the natural check already exists but lives outside
-it: `examples/diagnostics-overshoot/` needs a network fetch and ~5 minutes, so it cannot be
-a unit test — but a miniature of it can.
-
-### What would close it
-
-A **calibration test**, not a golden-value test. Fit on the existing two-year synthetic
-fixture, draw a few hundred days, assert against the training pool:
-
-| assertion | suggested tolerance | what it catches |
-| :--- | :--- | :--- |
-| mean of daily total vs pool | within 5 % | a level shift — the `FIX-1` class |
-| sd of daily total vs pool | within 15 % | a dispersion collapse, e.g. a mis-built grid |
-| every value inside support | exact | already covered; keep it here too |
-| no NaN or inf anywhere | exact | the failure mode `FIX-2` produced |
-
-**Do it per attribute, not just irradiance.** `temp_air` and `wind_speed` have no floor
-and no degenerate hours, and a defect confined to one of them is exactly what a
-single-attribute test would miss. Cost: one test file, a few tens of seconds. **The
-tolerances are the whole design problem** — too tight is a maintenance tax, too loose
-asserts nothing. The numbers above are a starting point, not a measurement.
 
 ## CHORE-19 — `monthly_statistics.py` still predates `FEAT-15`
 
