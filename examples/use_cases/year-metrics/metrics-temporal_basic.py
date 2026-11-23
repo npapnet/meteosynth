@@ -19,12 +19,12 @@ ROOT_DIR = pathlib.Path("")
 DATA_DIR = ROOT_DIR / "data"
 OUTPUT_DIR = ROOT_DIR / "output"
 TRAINING_DATA_PARQUET = DATA_DIR /"pvgis_hourly_heraklion_2005_2023.parquet"
-SYNTHETIC_DATA_PARQUET = DATA_DIR/"ensemble_heraklion_2023_n1000_w15_3attr.parquet"
+SYNTHETIC_DATA_PARQUET = DATA_DIR/"ensemble_heraklion_2023_n1000_w7_3attr.parquet"
 
 ATTRS = ["poa_global", "temp_air", "wind_speed"]
 ATTRS_UNITS =  ["W/m²", "°C", "m/s"]
 ATTRS_LABELS = ["Horizontal Irradiance", "Air Temperature", "Wind Speed"]
-ATTR_IDX = 2
+ATTR_IDX = 2 # change this to prepare the other graphs
 
 variable = ATTRS[ATTR_IDX]
 variable_label = ATTRS_LABELS[ATTR_IDX]
@@ -65,7 +65,7 @@ def print_report(result: TemporalResult) -> None:
     print(f"Temporal fidelity, {result.attr} -- M = {result.n_reference} reference years "
           f"vs N = {result.n_synthetic} realisations")
     print("=" * 78)
-    print(f"  {'lag':>6} {f'reference ({p_lo}-{p_hi}%)':>26} {'synthetic':>12} {'inside':>8}")
+    print(f"  {'lag':>6} {f'reference ({p_lo}–{p_hi}%)':>26} {'synthetic':>12} {'inside':>8}")
     for lag in REPORT_LAGS:
         if lag >= len(table):
             continue
@@ -101,7 +101,7 @@ def plot_acf_panel(
     p_lo, p_hi = TEST.control.percentiles
     ax.fill_between(
         lags, lo[sl], hi[sl], color="0.75", alpha=0.6,
-        label=f"reference, {p_lo:g}-{p_hi:g}% of {ref.shape[0]} years",
+        label=f"reference, {p_lo:g}–{p_hi:g}% of {ref.shape[0]} years",
     )
     ax.plot(lags, ref.mean(axis=0)[sl], color="0.25", lw=1.6, label="reference mean")
     ax.plot(lags, syn.mean(axis=0)[sl], color="tab:red", lw=1.6,

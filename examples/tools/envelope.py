@@ -186,7 +186,7 @@ def plot_day_envelope(
     # --- left: diurnal envelope -------------------------------------------------
     ax.fill_between(
         HOURS, obs_lo, obs_hi, color=OBSERVED_BAND, zorder=1,
-        label=f"observed p10-p90 (+/-{window_days} d pool, n={len(observed_pool)})",
+        label=f"observed p10–p90 (+/–{window_days} d pool, n={len(observed_pool)})",
     )
     for i, (_, row) in enumerate(observed_exact.iterrows()):
         ax.plot(
@@ -201,7 +201,7 @@ def plot_day_envelope(
     # a third colour that means nothing.
     ax.plot(HOURS, syn_lo, color=SYNTHETIC, lw=1.2, ls=":", zorder=5)
     ax.plot(HOURS, syn_hi, color=SYNTHETIC, lw=1.2, ls=":", zorder=5,
-            label="synthetic p10-p90")
+            label="synthetic p10–p90")
     ax.plot(HOURS, syn_med, color=SYNTHETIC, lw=2.5, zorder=6, label="synthetic median",
             path_effects=[patheffects.withStroke(linewidth=4.5, foreground=SURFACE)])
     # Drawn last, and dashed: when the generator is doing well the two medians sit on
@@ -238,7 +238,7 @@ def plot_day_envelope(
 
     bins = np.histogram_bin_edges(np.concatenate([pool_agg, syn_agg]), bins=24)
     ax_agg.hist(pool_agg, bins=bins, color=OBSERVED_BAND, zorder=1, density=True,
-                label=f"observed, +/-{window_days} d pool")
+                label=f"observed, +/–{window_days} d pool")
     # A step outline rather than a second translucent fill: overlapping washes blend
     # into a third colour that means nothing.
     ax_agg.hist(syn_agg, bins=bins, color=SYNTHETIC, histtype="step", lw=2, zorder=3,
@@ -318,7 +318,7 @@ def report_day_stats(
     print(f"    observed in the pool       : {len(observed_pool):4d} days")
     print(f"    synthetic drawn            : {len(synthetic):4d} days")
     print(f"\n    1. shape   median-profile correlation : {shape:6.3f}   (1.0 = same diurnal cycle)")
-    print(f"    2. spread  synthetic hours inside observed p10-p90 : {inside:6.1%}   "
+    print(f"    2. spread  synthetic hours inside observed p10–90 : {inside:6.1%}   "
           f"(~80% = calibrated)")
     print(f"               synthetic hours inside observed min-max : {inside_full:6.1%}")
     print(f"    3. quantity  daily {aggregate} ({aggregate_unit}):")

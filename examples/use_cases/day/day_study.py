@@ -299,14 +299,14 @@ def run_case(
 
     if generator is None:
         print(
-            f"\nFitting the +/-{window_days} day window generator "
+            f"\nFitting the +/–{window_days} day window generator "
             f"for {study.date_label}..."
         )
         generator = DayWindowGenerator(ds, attr_str=attr, n_days=window_days)
     day_generator = generator.for_day(*target)
     training_days = len(day_matrix(ds, attr, *target, n_days=window_days))
-    print(f"  observed pool days   : {len(observed_pool)} (+/-{pool_days} d, all years)")
-    print(f"  training days pooled : {training_days} (+/-{window_days} d, all years)")
+    print(f"  observed pool days   : {len(observed_pool)} (+/–{pool_days} d, all years)")
+    print(f"  training days pooled : {training_days} (+/–{window_days} d, all years)")
     if study.describe_fit is not None:
         for line in study.describe_fit(day_generator, observed_pool):
             print(f"  {line}")
@@ -450,7 +450,7 @@ def run_sweep(
     for window, pool, n in cases:
         if window != fitted_window:
             print(
-                f"\nFitting the +/-{window} day window generator "
+                f"\nFitting the +/–{window} day window generator "
                 f"for {study.date_label}..."
             )
             generator = DayWindowGenerator(ds, attr_str=study.attr, n_days=window)
